@@ -45,7 +45,7 @@
     },
     {
       "id": "fact-mvp-memory",
-      "text": "MVP ships session memory with a new v2 storage format (fresh start — no read/migration of v1 Datalevin sessions).",
+      "text": "MVP ships the MemoryBackend protocol with a noop impl (returns [] on recall, no-op on store). The protocol is the contract; a real persistent store (Datalevin, SQLite, etc.) is a follow-up that satisfies the same protocol — no consumer changes required. Fresh start: no read/migration of v1 sessions.",
       "comment": null,
       "recommendedAutomatedVerification": true,
       "automatedVerification": true
@@ -59,7 +59,7 @@
     },
     {
       "id": "fact-graalvm",
-      "text": "MVP ships a JVM distributable (launcher script or uberjar). GraalVM native-image is a stretch target (Step 9); if Datalevin JNI blocks native-image, MVP completes with documented JVM fallback and a tracked native-image blocker issue.",
+      "text": "MVP ships a JVM distributable (launcher script or uberjar). GraalVM native-image is a stretch target (Step 9); if any native-image blocker surfaces, MVP completes with documented JVM fallback and a tracked blocker issue. No Datalevin JNI in MVP reduces native-image risk to a Clojure reflect-config exercise.",
       "comment": null,
       "recommendedAutomatedVerification": true,
       "automatedVerification": true
@@ -101,7 +101,7 @@
     },
     {
       "id": "fact-out-scope-tools",
-      "text": "Out of MVP scope: web-search, remember, file editing (clj_edit/file_edit), repl-eval, Portal visualize, nREPL integration, and v1 uberjar build.",
+      "text": "Out of MVP scope: web-search, remember, file editing (clj_edit/file_edit), repl-eval, Portal visualize, nREPL integration, v1 uberjar build, and a real persistent memory backend (Datalevin, SQLite, etc. — the MVP MemoryBackend is a noop impl).",
       "comment": null,
       "recommendedAutomatedVerification": false,
       "automatedVerification": false

@@ -31,7 +31,7 @@ Reference docs carried forward from v1 archive:
 
 **Work:**
 - `git init` at `../lateralus-v2/` (adjacent to v1 archive)
-- Clojure 1.12.5, deps: `metosin/malli`, `hato/hato`, `cheshire/cheshire`, `integrant/integrant`, `datalevin/datalevin`, `io.github.cognitect-labs/test-runner`
+- Clojure 1.12.5, deps: `metosin/malli`, `hato/hato`, `cheshire/cheshire`, `integrant/integrant`, `io.github.cognitect-labs/test-runner`. **No Datalevin dependency** in MVP — session storage is a no-op stub against the `MemoryBackend` protocol; a real persistent store (Datalevin, SQLite, etc.) is a follow-up.
 - Namespace prefix: **`kschltz.lateralus` / `kschltz.agent.*`** (locked)
 - Clojars coord: **`net.clojars.kschltz/lateralus-v2`** (locked)
 - Copy from v1 archive into v2:
@@ -40,7 +40,7 @@ Reference docs carried forward from v1 archive:
 - Add `docs/memory-v2.md` schema sketch (deliverable in this step, not Step 6):
   - Entity attrs: `:v2/session-id`, `:v2/msg-id`, `:v2/role`, `:v2/text`, `:v2/timestamp`, `:v2/indexed`
   - Hybrid recall: top-Y semantic + last-N recent (same semantics as v1 MVI, new attr names)
-  - Vector index separate from Datalog; HTTP embedder default for GraalVM profile
+  - Vector index separate from the Datalog store (when a real backend lands); HTTP embedder default for GraalVM profile
 - Add `AGENT_INSTRUCTIONS.md` (MVI, ~50 lines) pointing at architecture doc
 
 **Verification:**
@@ -105,15 +105,15 @@ rg 'pmap' src/  # no matches in tool dispatch
 - Define Integrant config:
   ```clojure
   {:lateralus/llm-client       {:base-url ..., :api-key ..., :model ...}
-   :lateralus/embedder         {:method :http|:onnx, ...}
-   :lateralus/memory-backend   {:store-path ..., :backend :datalevin-v2}
+   :lateralus/embedder         {:method :http}
+   :lateralus/memory-backend   {:impl :noop}    ; MVP: noop; follow-up may add a real store
    :lateralus/plugins          [:memory]  ; MVP: memory plugin only; no user-facing tools
    :lateralus/agent            {:llm-client (ig/ref :lateralus/llm-client)
                                 :memory-backend (ig/ref :lateralus/memory-backend)
                                 :plugins (ig/ref :lateralus/plugins)}}
   ```
 - `init` for `:lateralus/agent` builds agent ref + assembled chain from plugin interceptors
-- `halt!` closes Datalevin connections cleanly
+- `halt!` closes backend resources (no-op for the MVP noop backend)
 - Plugins are Integrant keys that resolve to `{:plugin/name ... :plugin/slots ...}` maps
 
 **Verification:**
@@ -146,28 +146,28 @@ rg 'http/completion' src/  # only in llm/http.clj
 
 ---
 
-### Step 6 — Session memory (v2 format, fresh start)
+### Step 6 — Session memory protocol + MVP noop backend
 
-**Touches:** `src/kschltz/agent/memory/protocol.clj`, `src/kschltz/agent/memory/datalevin_v2.clj`, `src/kschltz/agent/memory/embedding.clj`, `src/kschltz/agent/plugins/memory.clj`, `docs/memory-v2.md`, tests + integration test
+**Touches:** `src/kschltz/agent/memory/protocol.clj`, `src/kschltz/agent/memory/embedding.clj`, `src/kschltz/agent/memory/noop_backend.clj`, `src/kschltz/agent/plugins/memory.clj`, `docs/memory-v2.md`, tests + integration test
 
 **Work:**
-- Implement v2 schema per `docs/memory-v2.md` (written in Step 1)
-- `MemoryBackend` protocol: `store-message`, `recall-hybrid`, `close`
-- Embedding via `Embedder` protocol; HTTP embedder default for GraalVM compat (ONNX optional JVM-only profile)
+- **The `MemoryBackend` protocol is the contract.** MVP ships a noop backend that satisfies it (returns [] on recall, no-op on store). A real persistent store (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up that slots in as another implementation of the same protocol — no consumer changes required.
+- Embedder via `Embedder` protocol; HTTP embedder impl ships in MVP, noop embedder for the default config
 - Memory plugin interceptors:
-  - `:enrich` — recall injection pre-compose
-  - `:persist` — store exchange on leave
+  - `:enrich` — recall injection pre-compose (skipped by noop backend, no-op assoc on ctx)
+  - `:persist` — store exchange on leave (skipped by noop backend)
 - Track `:exchange/session-id` and `:exchange/user-msg-id` in ctx for audit trail
-- **No** v1 session migration code
+- **No** v1 session migration code (and no Datalevin migration either — the v2 format is independent of any specific store)
 
 **Verification:**
 ```bash
 clojure -M:test -m cognitect.test-runner -n kschltz.agent.memory-test
 clojure -M:test -m cognitect.test-runner -n kschltz.agent.memory-integration-test
-# manual: run agent twice with same -s session; second turn recalls first
+# unit test: protocol is well-formed; noop backend satisfies it
+# (no end-to-end recall test against a real store until one ships)
 ```
 
-**Risk:** Datalevin + GraalVM JNI — validate in Step 9 early; fall back to HTTP-only embeddings in native profile.
+**Risk:** None for MVP — noop backend removes the GraalVM/JNI interaction. Real backends are follow-ups with their own risk profiles.
 
 ---
 
@@ -222,7 +222,7 @@ clojure -M:test -m cognitect.test-runner -n kschltz.agent.cli-test
 - Add `:native` alias with GraalVM build-time deps (`clj-easy/graal-build-time`)
 - Native profile Integrant config: HTTP embedder only, no ONNX, minimal plugins
 - Run tracing agent pass against integration test to collect reflect-config
-- Datalevin: include platform JNI libs + native-image metadata (v1 uberjar already bundles these — reuse pattern)
+- **No Datalevin in MVP**, so no Datalevin JNI to wire; if a real memory backend lands later, its native-image story is its own concern
 - `clojure -T:build native` produces `./target/lateralus-v2` binary
 - **If native-image fails after reasonable effort:** document blocker, ship JVM launcher/uberjar as MVP distributable, file tracked issue — goal still completable
 
@@ -234,7 +234,7 @@ clojure -T:build uber && ./target/lateralus-v2 -h  # JVM fallback documented in 
 ./target/lateralus-v2 -s test "hello"  # against local/mock LLM (native or JVM)
 ```
 
-**Risk:** **Highest risk step.** Datalevin JNI + Clojure reflect may need multiple agent iterations. JVM path is the required MVP distributable; native-image is stretch, not a hard gate.
+**Risk:** **Moderate.** The MVP runtime is now small (no Datalevin JNI, no ONNX, no real embeddings); native-image is primarily a Clojure reflect-config exercise. JVM path is the required MVP distributable; native-image is stretch, not a hard gate.
 
 ---
 
@@ -281,8 +281,9 @@ clojure -T:build uber && ./target/lateralus-v2 -h  # JVM fallback documented in 
 
 ## Risks and open questions
 
-1. **GraalVM + Datalevin** — may require significant native-image config or a simpler memory backend for native builds. JVM distributable is the required MVP gate; native-image is stretch with documented fallback.
+1. **GraalVM native-image** — moderate risk now that the MVP runtime is small (no Datalevin JNI, no ONNX, no real embeddings). JVM distributable is the required MVP gate; native-image is stretch with documented fallback.
 2. **loop.clj decoupling** — v1 interceptors delegate to `loop/`; Step 3 must rewrite, not copy. Verify with `rg 'agent\.loop' src/`.
-3. **Embedding in native** — HTTP-only is safest; document required embedding API endpoint for native users.
+3. **Embedding in native** — HTTP-only is safest; document required embedding API endpoint for native users. (No embedding provider ships in MVP; the noop embedder is the default.)
 4. **v1 code port scope** — port tests alongside code; do not port `core.clj` or `loop.clj` wholesale; rewrite as interceptors.
 5. **Integrant config format** — EDN recommended for auditability (locked in Step 4).
+6. **Memory storage backend** — `MemoryBackend` protocol is the contract; the noop backend is the MVP impl. A real persistent store (Datalevin, SQLite, etc.) is a follow-up that satisfies the same protocol. **No Datalevin in MVP.**
