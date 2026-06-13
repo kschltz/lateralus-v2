@@ -39,7 +39,17 @@
 (def Plugin
   "Shape of a plugin map. Either `:plugin/slots` (contributes to
    the chain) or `:plugin/chain` (replaces the chain). At least one
-   of the two must be present."
+   of the two must be present.
+
+   Open-schema contract: this map is `{:closed false}`. Extra keys
+   are silently ignored by Malli validation. Use `m/explain` directly
+   if you need to assert specific key presence. This is a deliberate
+   design choice: a future plugin field should not break every
+   existing plugin that doesn't know about it. The cost is that
+   removing a plugin key from this schema does not by itself
+   reject legacy plugins that still use it — code that consumes
+   `:plugin/register` etc. must check at runtime, not at validation
+   time."
   [:map {:closed false}
    [:plugin/name :keyword]
    [:plugin/slots {:optional true}
@@ -53,7 +63,11 @@
    ex-info if `ix` provides no stage fn (`:enter`/`:leave`/`:error`
    all nil) — silent all-nil interceptors are a footgun, since the
    engine treats them as no-ops and a typo'd or stubbed stage
-   passes validation but does nothing."
+   passes validation but does nothing.
+
+   The `:plugin/original-name` key is only emitted when `ix` provides
+   a `:name`; absent names yield an assembled interceptor without
+   the key (rather than with nil)."
   [plugin-name slot ix]
   (when (and (nil? (:enter ix))
              (nil? (:leave ix))
@@ -63,13 +77,13 @@
                      :plugin/slot    slot
                      :interceptor   ix
                      :hint           "add at least one of :enter, :leave, :error"})))
-  {:name (keyword (str (name plugin-name) "." (name slot)))
-   :enter (:enter ix)
-   :leave (:leave ix)
-   :error (:error ix)
-   :plugin/name plugin-name
-   :plugin/slot slot
-   :plugin/original-name (:name ix)})
+  (cond-> {:name (keyword (str (name plugin-name) "." (name slot)))
+           :enter (:enter ix)
+           :leave (:leave ix)
+           :error (:error ix)
+           :plugin/name plugin-name
+           :plugin/slot slot}
+    (:name ix) (assoc :plugin/original-name (:name ix))))
 
 (defn- explain-plugins
   "Run Malli on a plugin seq. Returns the Malli error map

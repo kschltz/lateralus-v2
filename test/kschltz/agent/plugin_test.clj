@@ -123,7 +123,16 @@
             (is (= :guard (:plugin/slot d)))
             (is (re-find #"no stage fn" (.getMessage e)))))))))
 
-;; ---- :plugin/register is not honored by assemble-chain ----
+;; ---- :plugin/original-name is omitted when input has no :name ----
+
+(deftest assembled-interceptor-omits-original-name-when-absent
+  (testing "input interceptor with no :name produces no :plugin/original-name key"
+    (let [p      {:plugin/name :foo
+                  :plugin/slots {:enrich [{:enter identity}]}}   ; no :name
+          chain  (plugin/assemble-chain [p])
+          ix     (first chain)]
+      (is (not (contains? ix :plugin/original-name))
+          ":plugin/original-name is absent (not nil) when input has no :name"))))
 
 (deftest plugin-register-fn-is-not-invoked
   (testing ":plugin/register is no longer in the schema and is not
