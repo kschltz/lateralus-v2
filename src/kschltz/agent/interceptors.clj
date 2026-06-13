@@ -89,12 +89,23 @@
    the per-exchange ctx.
 
    Placed first (after error-boundary) so the client is bound
-   before any stage that might need it."
+   before any stage that might need it.
+
+   Contract: only assoc `:llm/client` when a client is found (either
+   on ctx or in the agent map). When no client is available, the
+   stage is a no-op and `llm-call` falls back to a fresh stub.
+   This avoids stamping nil into the ctx, which would break code
+   that distinguishes 'absent' from 'present, nil'.
+
+   MVP note: only `:stub` impl is wired in `kschltz.agent.llm.client`;
+   the `:http` impl throws at init time and the chain cannot recover
+   from this until Step 5 lands."
   {:name ::bind-llm-client
    :enter (fn [ctx]
-            (let [client (or (:llm/client ctx)
-                             (:agent/llm-client ctx))]
-              (assoc ctx :llm/client client)))})
+            (if-let [client (or (:llm/client ctx)
+                                (:agent/llm-client ctx))]
+              (assoc ctx :llm/client client)
+              ctx))})
 
 (def error-boundary
   "Handles any error raised by the chain. Clears the engine ::error
