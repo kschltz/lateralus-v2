@@ -25,7 +25,7 @@ Portable v1 seed: `chain.clj`, `plugin.clj`, `interceptors/schema.clj`, `interce
 
 ## MVP Scope
 
-Core loop (empty tool registry, stub-tested dispatch) + session memory (v2 format) + clean-slate CLI + JVM distributable. GraalVM native-image is stretch (Step 9). No v1 tools in MVP.
+Core loop (empty tool registry, stub-tested dispatch) + session memory (`MemoryBackend` protocol with a noop impl; a real persistent store is a follow-up) + clean-slate CLI + JVM distributable. GraalVM native-image is stretch (Step 9). No v1 tools in MVP. **No Datalevin in MVP.**
 
 ## Verify
 

@@ -3,18 +3,14 @@
         integrant/integrant {:mvn/version "0.13.1"}
         metosin/malli {:mvn/version "0.16.4"}
         hato/hato {:mvn/version "1.0.0"}
-        cheshire/cheshire {:mvn/version "6.2.0"}
-        datalevin/datalevin {:mvn/version "0.10.7"}}
+        cheshire/cheshire {:mvn/version "6.2.0"}}
+ ;; No Datalevin in MVP — session memory is a noop impl of the
+ ;; MemoryBackend protocol. A real persistent store is a follow-up.
  :aliases
- {:jvm-base {:jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"
-                        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                        "--enable-native-access=ALL-UNNAMED"]}
-  :run {:main-opts ["-m" "kschltz.lateralus"]
-        :aliases [:jvm-base]}
+ {:run {:main-opts ["-m" "kschltz.lateralus"]}
   :build {:deps {io.github.clojure/tools.build
                  {:mvn/version "0.10.13"}}
           :ns-default build}
   :test {:extra-paths ["test"]
-         :aliases [:jvm-base]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
