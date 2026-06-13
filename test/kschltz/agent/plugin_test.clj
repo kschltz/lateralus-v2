@@ -123,6 +123,23 @@
             (is (= :guard (:plugin/slot d)))
             (is (re-find #"no stage fn" (.getMessage e)))))))))
 
+;; ---- non-map slot interceptor is rejected explicitly ----
+
+(deftest assemble-chain-rejects-non-map-ix
+  (testing "throws ex-info with 'must be a map' for non-map slot entries"
+    (doseq [bad-ix [nil "string" :keyword [1 2 3] 42]]
+      (let [p {:plugin/name :bad-shape
+               :plugin/slots {:guard [bad-ix]}}]
+        (try
+          (plugin/assemble-chain [p])
+          (is false (str "expected throw for ix=" (pr-str bad-ix)))
+          (catch clojure.lang.ExceptionInfo e
+            (let [d (ex-data e)]
+              (is (= :bad-shape (:plugin/name d)))
+              (is (= :guard (:plugin/slot d)))
+              (is (= bad-ix (:interceptor d)))
+              (is (re-find #"must be a map" (.getMessage e))))))))))
+
 ;; ---- :plugin/original-name is omitted when input has no :name ----
 
 (deftest assembled-interceptor-omits-original-name-when-absent

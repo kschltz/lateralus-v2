@@ -63,12 +63,21 @@
    ex-info if `ix` provides no stage fn (`:enter`/`:leave`/`:error`
    all nil) — silent all-nil interceptors are a footgun, since the
    engine treats them as no-ops and a typo'd or stubbed stage
-   passes validation but does nothing.
+   passes validation but does nothing. Also throws if `ix` is not
+   a map — the keyword lookups below would silently return nil for
+   any non-map shape and trigger the all-nil check with confusing
+   ex-data.
 
    The `:plugin/original-name` key is only emitted when `ix` provides
    a `:name`; absent names yield an assembled interceptor without
    the key (rather than with nil)."
   [plugin-name slot ix]
+  (when-not (map? ix)
+    (throw (ex-info "Plugin slot interceptor must be a map"
+                    {:plugin/name  plugin-name
+                     :plugin/slot  slot
+                     :interceptor ix
+                     :hint         "expected a map with :enter/:leave/:error/:name"})))
   (when (and (nil? (:enter ix))
              (nil? (:leave ix))
              (nil? (:error ix)))

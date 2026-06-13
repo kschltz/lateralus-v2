@@ -13,14 +13,12 @@
      - bind-llm-client wires the agent's LlmClient into the chain"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [integrant.core :as ig]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.exchange :as exchange]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.llm.client :as lcm-client]
-            [kschltz.agent.system :as lateralus-system]
             [malli.core :as m]))
 
 ;; ---- Fake LLM that returns tool calls ----
@@ -175,7 +173,7 @@
     (is (= :enter (-> out :error/raised :stage))
         "stage is carried through the annotation")
     (is (identical? bomb (-> out :error/raised :exception)))
-    (is (not (contains? out :kschltz.agent.chain/error))
+    (is (not (contains? out ::chain/error))
         "error-boundary cleared engine ::error so chain doesn't rethrow")))
 
 ;; ---- bind-llm-client: agent's client flows through to llm-call ----
@@ -207,22 +205,24 @@
       (is (identical? ctx-client (:llm/client out))
           "ctx-provided client wins (tests may inject a fake this way)"))))
 
-(deftest full-exchange-with-agent-client
-  (testing "Integrant-configured agent's LlmClient is what the chain uses"
-    ;; Run a real exchange where the LlmClient comes only from
-    ;; the agent map (no per-ctx :llm/client). The marker client
-    ;; was registered as the agent's client via direct map
-    ;; construction — no Integrant defmethod override needed.
+(deftest agent-map-client-flows-into-exchange
+  (testing "agent-map-configured LlmClient is what the chain uses end-to-end"
+    ;; The marker client lives on the agent map (no Integrant call).
+    ;; The per-exchange ctx carries ONLY :agent/llm-client (not
+    ;; :llm/client). The bind-llm-client stage copies the agent's
+    ;; client onto ctx, and llm-call invokes the marker.
+    ;;
+    ;; :embedder and :memory-backend are placeholders only — the
+    ;; chain doesn't read them off the agent map during execute.
     (let [marker    (marker-client)
           agent-map {:agent/llm-client  marker
-                     :embedder          (lcm-client/stub-client)
-                     :memory-backend    (lcm-client/stub-client)  ; any value
+                     :embedder          :placeholder
+                     :memory-backend    :placeholder
                      :assembled         []
                      :exchange-chain    exchange/default-exchange-chain}
           out       (chain/execute
                      {:agent/state        {:base-url "stub" :api-key nil :model "stub/v0"
                                            :agent/system-message "sys"}
-                      ;; No :llm/client on ctx — only :agent/llm-client.
                       :agent/llm-client   marker
                       :exchange/user-text "hello"
                       :exchange/session-id :test-session

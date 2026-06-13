@@ -150,4 +150,26 @@
           (let [d (ex-data e)]
             (is (= :a (:interceptor/name d)))
             (is (= :enter (:chain/stage d)))
-            (is (= "bad state" (:chain/explanation d))))))))))
+            (is (= "bad state" (:chain/explanation d)))))))))
+
+(deftest error-map-preserves-engine-stage-over-ex-data
+  (testing "a user's ex-data :chain/stage does NOT clobber the engine's stage"
+    ;; If a user throws (ex-info \"boom\" {:chain/stage :my-marker}) from
+    ;; a stage's :enter, the engine's :chain/stage :enter is what
+    ;; the rethrow carries — not :my-marker. Otherwise the engine
+    ;; loses its bookkeeping and downstream handlers see the wrong
+    ;; origin.
+    (let [bomb (ex-info "boom" {:chain/stage :my-marker
+                               :where      :user-claim})]
+      (try
+        (chain/execute
+          {}
+          [(recorder :a :enter (fn [_] (throw bomb)))])
+        (is false "expected throw")
+        (catch clojure.lang.ExceptionInfo e
+          (let [d (ex-data e)]
+            (is (= :enter (:chain/stage d))
+                "engine's :chain/stage :enter survives the merge")
+            (is (= :user-claim (:where d))
+                "non-reserved ex-data key :where is preserved")
+            (is (= :a (:interceptor/name d))))))))))

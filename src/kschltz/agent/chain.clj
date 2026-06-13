@@ -53,13 +53,26 @@
 
 (defn- error-map
   "Build the ::error map from a throwable, preserving ex-data and tagging
-   with the stage and interceptor name."
+   with the stage and interceptor name.
+
+   Engine metadata (`:exception`, `:interceptor/name`, `:chain/stage`)
+   takes precedence over any colliding ex-data keys. A user's ex-data
+   may include `:chain/stage` etc. (rare, but possible when a plugin
+   throws `(ex-info \"boom\" {:chain/stage :my-marker})`); if we merged
+   the other direction, the engine's bookkeeping would be clobbered
+   and the rethrow would carry the wrong stage to try-error.
+   select-keys limits the bleed to non-reserved ex-data keys."
   [t interceptor stage]
-  (let [ex-data (when (instance? clojure.lang.IExceptionInfo t) (ex-data t))]
+  (let [ex-data (when (instance? clojure.lang.IExceptionInfo t) (ex-data t))
+        ;; Reserved engine keys — strip from ex-data so the merge
+        ;; below doesn't clobber the engine's own values.
+        reserved #{:exception :interceptor/name :chain/stage}
+        ex-data-clean (when ex-data
+                        (apply dissoc ex-data reserved))]
     (cond-> {:exception        t
              :interceptor/name (:name interceptor)
              :chain/stage      stage}
-      ex-data (merge ex-data))))
+      ex-data-clean (merge ex-data-clean))))
 
 (defn- check-instrumented
   [ctx interceptor stage]
