@@ -8,12 +8,12 @@
      - successful 200 with tool_calls → round-trip extracts calls
      - 4xx with JSON error body → throws ex-info with :kind :http-error
      - request shape validation (Malli decode on the way out)
-     - default timeouts (smoke test against a live server)
+     - default timeouts (pin tests + smoke test against a live server)
 
    No real network is touched. The server is bound to 127.0.0.1
    on an OS-assigned port and shut down at the end of each test."
   (:require [cheshire.core :as json]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.llm.http :as lcm-http]
             [kschltz.agent.llm.schemas :as schemas]
@@ -47,9 +47,7 @@
                                                     :arguments "{}"}}])}}]})}))
 
 (defn- auth-error-handler
-  "A ring handler that returns 401 for any request. Slurps the
-   request body even though it ignores it, so the HttpInput
-   stream is closed (avoids 'stream not closed' warnings)."
+  "A ring handler that returns 401 for any request."
   [req]
   (slurp (:body req))
   {:status 401
@@ -114,7 +112,6 @@
             (let [d (ex-data e)]
               (is (= :http-error (:kind d)))
               (is (= 401 (:status d)))
-              ;; Body is JSON-parsed
               (is (= "invalid api key"
                      (get-in d [:body :error :message]))))))))))
 
@@ -132,17 +129,19 @@
         (is (= :request (:where (ex-data e))))
         (is (vector? (get (ex-data e) :problems)))))))
 
-(deftest connect-timeout-uses-default
-  ;; Smoke test: opts without :connect-timeout-ms still work
-  ;; against a live server. The default 10s is documented; we
-  ;; don't measure it here (would require a black-hole address).
-  (with-fake-server
-    echo-handler
-    (fn [port]
-      (let [client (lcm-http/http-client
-                    {:base-url (str "http://127.0.0.1:" port)
-                     :model    "m"})
-            resp   (lcm-client/-call client
-                                     {:model    "m"
-                                      :messages [{:role "user" :content "ok"}]})]
-        (is (= "ok" (schemas/extract-text resp)))))))
+(deftest connect-timeout-defaults
+  (testing "default connect timeout is 10s (v1 lesson)"
+    (is (= 10000 lcm-http/default-connect-timeout-ms)))
+  (testing "default request timeout is 60s"
+    (is (= 60000 lcm-http/default-request-timeout-ms)))
+  (testing "smoke test: opts without :connect-timeout-ms still work"
+    (with-fake-server
+      echo-handler
+      (fn [port]
+        (let [client (lcm-http/http-client
+                      {:base-url (str "http://127.0.0.1:" port)
+                       :model    "m"})
+              resp   (lcm-client/-call client
+                                       {:model    "m"
+                                        :messages [{:role "user" :content "ok"}]})]
+          (is (= "ok" (schemas/extract-text resp))))))))

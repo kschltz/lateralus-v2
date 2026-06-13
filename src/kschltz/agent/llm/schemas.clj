@@ -8,8 +8,9 @@
 
    These schemas are the network-boundary contract: anything
    leaving or entering the LLM HTTP layer passes through them.
-   When `*instrument?*` is dynamic-var-bound true, the schemas
-   decode both directions and throw on shape mismatch.
+   `decode-request` and `decode-response` always validate (no
+   runtime opt-out for now); they throw `ex-info` with structured
+   `:problems` and `:where` on shape mismatch.
 
    Schema references:
    - OpenAI chat completions: https://platform.openai.com/docs/api-reference/chat
@@ -26,13 +27,13 @@
 (def ChatRequest
   "Request body for POST /v1/chat/completions.
 
-   MVP subset: model, messages, base-url/api-key/url are
-   transport-layer concerns; the call site puts the latter on
-   the http-client options, not in the body."
+   MVP subset: model, messages, temperature, max_tokens. Streaming
+   is not implemented in MVP and is rejected at the schema
+   level (the `:stream` field is absent). Add it back when
+   streaming lands."
   [:map
    [:model    :string]
    [:messages [:vector ChatMessage]]
-   [:stream   {:optional true} :boolean]
    [:temperature {:optional true} [:maybe :double]]
    [:max_tokens   {:optional true} [:maybe :int]]])
 
@@ -112,9 +113,12 @@
   (or (get-in resp [:choices 0 :message :content]) ""))
 
 (defn extract-tool-calls
-  "Pull the tool calls out of a response. Returns [] if absent."
+  "Pull the tool calls out of a response. Returns [] if absent
+   OR if the value is not a vector (defensive against provider
+   quirks that return e.g. a string or map for `:tool_calls`)."
   [resp]
-  (or (get-in resp [:choices 0 :message :tool_calls]) []))
+  (let [v (get-in resp [:choices 0 :message :tool_calls])]
+    (if (vector? v) v [])))
 
 (defn extract-model
   "Echo of the model that produced the response, or 'unknown'."
