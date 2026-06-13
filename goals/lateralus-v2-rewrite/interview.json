@@ -1,0 +1,167 @@
+{
+  "stage": "interview",
+  "title": "Lateralus v2 Complete Rewrite",
+  "goalSlug": "lateralus-v2-rewrite",
+  "questions": [
+    {
+      "id": "rewrite-strategy",
+      "prompt": "How should v2 land in this repo?",
+      "description": "This determines branch layout, PR strategy, and whether v1 stays runnable during the rewrite.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "New long-lived branch (e.g. v2) that replaces src/ in place; v1 tagged/archived on master before merge.",
+      "recommendedOptionIds": ["branch-replace"],
+      "options": [
+        { "id": "branch-replace", "label": "v2 branch replaces src/ in place; tag v1 on master first" },
+        { "id": "side-by-side", "label": "Keep v1 and v2 side-by-side (e.g. src-v1/ + src/) until cutover" },
+        { "id": "new-repo", "label": "New git repo; lateralus becomes v1 archive only" },
+        { "id": "in-place", "label": "Rewrite directly on master with no v1 tag/archive step" }
+      ],
+      "required": true
+    },
+    {
+      "id": "architecture-foundation",
+      "prompt": "What architectural foundation should v2 be built on?",
+      "description": "docs/interceptor-loop-implementation-plan.md already proposes a Pedestal-style interceptor chain as the single extension mechanism.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Interceptor chain engine (docs/interceptor-loop-implementation-plan.md) — ~100-line engine, everything (memory, LLM, tools, persistence) as interceptors/plugins.",
+      "recommendedOptionIds": ["interceptor-chain"],
+      "options": [
+        { "id": "interceptor-chain", "label": "Interceptor chain (proposed plan) — single extension mechanism" },
+        { "id": "layered-refactor", "label": "Traditional layered modules (cli → loop → llm → tools → memory) without interceptor engine" },
+        { "id": "hybrid", "label": "Layered modules internally, interceptor chain only at the agent loop boundary" },
+        { "id": "other", "label": "Something else (describe in custom answer)" }
+      ],
+      "required": true
+    },
+    {
+      "id": "feature-parity",
+      "prompt": "Which v1 capabilities must v2 ship with at launch?",
+      "description": "Select all that apply. Unselected items are out of scope for the initial v2 release unless noted otherwise.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Core agent loop, CLI (interactive + one-shot + daemon), session memory (Datalevin + hybrid recall), remember tool, web-search, file editing (clj_edit + file_edit), Malli at network boundaries, uberjar build.",
+      "recommendedOptionIds": [
+        "core-loop",
+        "cli-modes",
+        "session-memory",
+        "remember",
+        "web-search",
+        "file-editing",
+        "repl-eval",
+        "portal",
+        "nrepl",
+        "uberjar"
+      ],
+      "options": [
+        { "id": "core-loop", "label": "Core agent loop (LLM + tool dispatch + retries)" },
+        { "id": "cli-modes", "label": "CLI: interactive, one-shot, daemon + PID file" },
+        { "id": "session-memory", "label": "Session memory (Datalevin + embeddings + hybrid recall)" },
+        { "id": "remember", "label": "remember tool (explicit facts)" },
+        { "id": "web-search", "label": "web-search tool (HTML scraping providers)" },
+        { "id": "file-editing", "label": "File editing (clj_edit + file_edit + safety/backup)" },
+        { "id": "repl-eval", "label": "repl-eval tool (in-process eval — security tradeoff accepted)" },
+        { "id": "portal", "label": "Portal visualize tool" },
+        { "id": "nrepl", "label": "nREPL server + tool integration" },
+        { "id": "uberjar", "label": "Uberjar + launcher script build" },
+        { "id": "graalvm", "label": "GraalVM native-image target" }
+      ],
+      "required": true
+    },
+    {
+      "id": "session-migration",
+      "prompt": "Should v2 read existing v1 session data?",
+      "description": "v1 stores sessions under LATERALUS_SESSIONS_DIR with Datalevin schema documented in docs/memory-system-mvi.md.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Read v1 sessions in-place (same schema/paths) — no migration tool needed if schema unchanged.",
+      "recommendedOptionIds": ["read-in-place"],
+      "options": [
+        { "id": "read-in-place", "label": "Read v1 sessions in-place (same schema, same paths)" },
+        { "id": "migration-tool", "label": "Provide a one-time migration command for v1 → v2 session format" },
+        { "id": "fresh-start", "label": "Fresh start — v2 uses new session format; v1 sessions abandoned" },
+        { "id": "dual-read", "label": "Dual-read: v2 opens v1 stores read-only, writes to v2 format" }
+      ],
+      "required": true
+    },
+    {
+      "id": "cli-compat",
+      "prompt": "How compatible should the v2 CLI be with v1?",
+      "description": "README documents ~20 flags/env vars. Breaking changes affect scripts and muscle memory.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "Same flags and env vars where behavior is unchanged; breaking changes only with documented migration notes.",
+      "recommendedOptionIds": ["mostly-compatible"],
+      "options": [
+        { "id": "fully-compatible", "label": "Fully compatible — all v1 flags/env vars work identically" },
+        { "id": "mostly-compatible", "label": "Mostly compatible — keep common flags; rename/remove obscure ones with notes" },
+        { "id": "clean-slate", "label": "Clean-slate CLI — redesign flags from scratch, no compat guarantee" }
+      ],
+      "required": true
+    },
+    {
+      "id": "v1-lessons",
+      "prompt": "Which iteration-1 mistakes must v2 explicitly fix?",
+      "description": "From arch audit (docs/arch-remediation-plan.md) and your experience. Select all that apply.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "All listed items — these are the core reasons for a rewrite rather than incremental patches.",
+      "recommendedOptionIds": [
+        "no-god-module",
+        "llm-boundary",
+        "malli-everywhere",
+        "protocol-tools",
+        "sequential-tools",
+        "consistent-abstraction",
+        "plugin-only-ext",
+        "test-coverage"
+      ],
+      "options": [
+        { "id": "no-god-module", "label": "No god module — core/engine stays small (<200 LOC target)" },
+        { "id": "llm-boundary", "label": "All LLM calls through LlmClient protocol; no direct http/completion from loop" },
+        { "id": "malli-everywhere", "label": "Malli validation on every external/network boundary (HTTP, embed, search)" },
+        { "id": "protocol-tools", "label": "External deps behind protocols with instrumented implementations" },
+        { "id": "sequential-tools", "label": "Sequential tool execution by default (no pmap without explicit opt-in)" },
+        { "id": "consistent-abstraction", "label": "Pick one extension style (protocol OR defmulti, not both ad hoc)" },
+        { "id": "plugin-only-ext", "label": "Single plugin/interceptor registration path — no ad-hoc add-*-tool! functions" },
+        { "id": "test-coverage", "label": "Every namespace has tests before merge; no 500+ LOC untested modules" }
+      ],
+      "required": true
+    },
+    {
+      "id": "out-of-scope",
+      "prompt": "What is explicitly OUT of scope for this rewrite goal?",
+      "description": "Helps prevent scope creep. Select all that apply.",
+      "answerMode": "multi-custom",
+      "recommendedAnswer": "Paid search APIs, repl-eval sandbox, multi-agent orchestration, and pi/Cursor SDK integration are follow-ups — not part of the v2 rewrite itself.",
+      "recommendedOptionIds": [
+        "paid-search",
+        "repl-sandbox",
+        "multi-agent",
+        "pi-integration",
+        "ui-tui",
+        "cloud-hosting"
+      ],
+      "options": [
+        { "id": "paid-search", "label": "Replacing HTML scraping with paid search APIs" },
+        { "id": "repl-sandbox", "label": "Sandboxing repl-eval (separate security initiative)" },
+        { "id": "multi-agent", "label": "Multi-agent orchestration / intercom coordination" },
+        { "id": "pi-integration", "label": "pi / Cursor SDK integration as first-class feature" },
+        { "id": "ui-tui", "label": "Custom TUI beyond basic interactive CLI" },
+        { "id": "cloud-hosting", "label": "Hosted/cloud deployment infrastructure" },
+        { "id": "none", "label": "Nothing excluded — v2 should include everything selected above plus extras" }
+      ],
+      "required": true
+    },
+    {
+      "id": "done-condition",
+      "prompt": "When is the v2 rewrite 'done'?",
+      "description": "The acceptance bar for declaring the goal complete.",
+      "answerMode": "single-custom",
+      "recommendedAnswer": "All selected launch features work; full test suite green; v1 arch audit items resolved; README + MVI docs updated; uberjar builds; old v1 src removed or archived.",
+      "recommendedOptionIds": ["full-bar"],
+      "options": [
+        { "id": "full-bar", "label": "Full bar: features + tests + docs + build + arch fixes + v1 archived" },
+        { "id": "mvp-bar", "label": "MVP bar: core loop + memory + CLI work; file tools and extras can follow" },
+        { "id": "parity-bar", "label": "Parity bar: v2 matches all v1 README capabilities with cleaner architecture" },
+        { "id": "custom", "label": "Custom definition (describe)" }
+      ],
+      "required": true
+    }
+  ]
+}

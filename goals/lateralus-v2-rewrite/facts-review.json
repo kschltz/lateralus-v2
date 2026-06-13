@@ -1,0 +1,143 @@
+{
+  "stage": "facts",
+  "title": "Lateralus v2 Complete Rewrite",
+  "goalSlug": "lateralus-v2-rewrite",
+  "facts": [
+    {
+      "id": "fact-new-repo",
+      "text": "v2 is developed in a new git repository; the existing lateralus repo remains the v1 archive and is not modified by the rewrite.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    },
+    {
+      "id": "fact-interceptor-arch",
+      "text": "The agent runtime is built on an interceptor chain engine (Pedestal-style enter/leave/error semantics) as the single extension mechanism, per docs/interceptor-loop-implementation-plan.md.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-immutable-ctx",
+      "text": "All agentic behavior and state change flow through an immutable context map threaded through the interceptor chain; no interceptor mutates shared refs except the outer loop merging :agent/state-delta back into the agent ref.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-auditable",
+      "text": "The context map is Malli-schemed and optionally instrumented after every interceptor stage (dev/test default) so exchanges are auditable and traceable.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-small-engine",
+      "text": "The chain engine namespace stays under ~200 LOC; core/agent assembly contains no business logic for memory, LLM, or individual tools.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-mvp-core-loop",
+      "text": "MVP ships a working agent loop: queue drain → context compose → LLM call → tool dispatch → response, with bounded tool-call depth and error retries.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-mvp-memory",
+      "text": "MVP ships session memory with a new v2 storage format (fresh start — no read/migration of v1 Datalevin sessions).",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-mvp-cli",
+      "text": "MVP ships a clean-slate CLI (redesigned flags, no v1 compat guarantee) supporting at least interactive and one-shot modes.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-graalvm",
+      "text": "MVP includes a GraalVM native-image build target (replacing v1 uberjar as the primary distributable).",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-llm-boundary",
+      "text": "All LLM calls go through an LlmClient protocol; no direct http/completion calls from the agent loop or interceptors.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-malli-boundaries",
+      "text": "Every external/network boundary (LLM HTTP, embeddings, and any future search HTTP) is behind a protocol with Malli-instrumented input/output on implementations.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-sequential-tools",
+      "text": "Tool calls execute sequentially by default; parallel execution requires an explicit opt-in flag.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-plugin-registration",
+      "text": "Tools and capabilities register only via plugin/interceptor bundles; there are no ad-hoc add-*-tool! installer functions.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-test-coverage",
+      "text": "Every src namespace has corresponding tests; no namespace exceeds 500 LOC without test coverage.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-out-scope-tools",
+      "text": "Out of MVP scope: web-search, remember, file editing (clj_edit/file_edit), repl-eval, Portal visualize, nREPL integration, and v1 uberjar build.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    },
+    {
+      "id": "fact-out-scope-initiatives",
+      "text": "Out of scope entirely: paid search APIs, repl-eval sandboxing, multi-agent orchestration, pi/Cursor SDK integration, custom TUI, and cloud hosting infrastructure.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": false,
+      "automatedVerification": false
+    },
+    {
+      "id": "fact-done-bar",
+      "text": "Goal is done when MVP facts pass automated verification, GraalVM native-image builds successfully, and README documents the new CLI and architecture.",
+      "accepted": false,
+      "removed": false,
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    }
+  ]
+}
