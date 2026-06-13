@@ -27,7 +27,7 @@
      --config PATH          Integrant EDN config (default: built-in)
      --model NAME           LLM model name (overrides config)
      --base-url URL         LLM base URL (overrides config)
-     --api-key KEY          LLM API key (overrides config; or env)"
+     --api-key KEY          LLM API key (overrides config; env support is a follow-up)"
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -136,7 +136,7 @@
      --config PATH            Integrant EDN config (default: built-in)
      --model NAME             LLM model name (overrides config)
      --base-url URL           LLM base URL (overrides config)
-     --api-key KEY            LLM API key (overrides config or env)
+     --api-key KEY            LLM API key (overrides config; env support is a follow-up)
 
    Examples:
      echo 'ping' | lateralus                       # one-shot, stdin

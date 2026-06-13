@@ -136,8 +136,9 @@
           ctx      {:agent/state {:agent/system-message "sys"}
                     :exchange/user-text "hi"}
           out      (enter-fn ctx)]
-      - "compose stage records the trim marker; the future
-   history-trimming follow-up will replace or remove it")))
+      (is (true? (:compose/trimmed? out))
+          "compose stage records the trim marker; the future
+   history-trimming follow-up will replace or remove it"))))
 
 (deftest trim-history-stub-arity
   (testing "trim-history-stub is a no-op identity with arity 1 (memory follow-up keeps the arity)"
