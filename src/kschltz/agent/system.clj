@@ -13,10 +13,12 @@
      :lateralus/agent            Agent entry: assembled chain + clients
                                   resolved at init time
 
-   MVP scope: no real persistent memory backend, no LLM HTTP, no real
-   embedding. The MemoryBackend noop impl is the MVP; HTTP/ONNX
-   embedders and a real memory store are follow-ups. The LlmClient
-   stub is the MVP; the HTTP impl is Step 5.
+   MVP scope: no real persistent memory backend, no real embedding.
+   The MemoryBackend noop impl is the MVP; HTTP/ONNX embedders and
+   a real memory store are follow-ups. The LlmClient stub is the
+   MVP default; the HTTP impl (kschltz.agent.llm.http) is wired
+   when the Integrant config passes `:impl :http` for
+   `:lateralus/llm-client`.
 
    Halt policy: only keys with real resources to release define
    `halt-key!` (currently just `:lateralus/memory-backend`).
@@ -39,8 +41,7 @@
 
 (defmethod ig/init-key :lateralus/embedder [_ {:keys [method] :as opts}]
   (case (or method :noop)
-    :noop (embedding/noop-embedder)
-    :http (embedding/http-embedder opts)))
+    :noop (embedding/noop-embedder)))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl] :as opts}]
   ;; MVP: only :noop. A real persistent store (Datalevin, SQLite,
@@ -75,9 +76,11 @@
    `resources/lateralus/config.edn` at startup, falling back to this
    in-memory map when no file is present.
 
-   MVP defaults: stub LLM + noop embedder + noop memory. Step 5 adds
-   the real LlmClient HTTP impl. A real memory store is a follow-up
-   (no MVP gate)."
+   MVP defaults: stub LLM + noop embedder + noop memory. To use
+   the real LlmClient HTTP impl, set
+   `:lateralus/llm-client {:impl :http :base-url ... :api-key ... :model ...}`
+   in the runtime config. A real memory store is a follow-up.
+   A real embedder is also a follow-up (no MVP gate)."
   {:lateralus/llm-client     {:impl :stub}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop}
