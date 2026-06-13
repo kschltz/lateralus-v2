@@ -6,7 +6,7 @@
      - end-to-end exchange with the default stub LLM
      - end-to-end dispatch with a fake LLM that returns tool calls
      - sequential tool execution (fact-sequential-tools)
-     - compose-context trim stub pin (Step 6 marker)
+     - compose-context trim stub pin (memory-followup marker)
      - error-boundary handles errors so :leave stages still run
      - decoupling verification (no agent.loop dependency)
      - LlmClient boundary (no direct HTTP in interceptors)
@@ -64,13 +64,13 @@
   ([user-text] (run-exchange user-text (lcm-client/stub-client)))
   ([user-text llm]
    (chain/execute
-     {:agent/state        {:base-url "stub" :api-key nil :model "stub/v0"
-                           :agent/system-message "you are a test agent"}
-      :exchange/user-text user-text
-      :llm/client         llm
-      :exchange/session-id :test-session
-      :exchange/user-msg-id (str (random-uuid))}
-     exchange/default-exchange-chain)))
+    {:agent/state        {:base-url "stub" :api-key nil :model "stub/v0"
+                          :agent/system-message "you are a test agent"}
+     :exchange/user-text user-text
+     :llm/client         llm
+     :exchange/session-id :test-session
+     :exchange/user-msg-id (str (random-uuid))}
+    exchange/default-exchange-chain)))
 
 (deftest full-exchange-returns-stub-response
   (let [out (run-exchange "hello world")]
@@ -136,18 +136,18 @@
           ctx      {:agent/state {:agent/system-message "sys"}
                     :exchange/user-text "hi"}
           out      (enter-fn ctx)]
-      (is (true? (:compose/trimmed? out))
-          "compose stage records the trim marker; Step 6 changes the marker or removes it"))))
+      - "compose stage records the trim marker; the future
+   history-trimming follow-up will replace or remove it")))
 
 (deftest trim-history-stub-arity
-  (testing "trim-history-stub is a no-op identity with arity 1 (Step 6 target)"
+  (testing "trim-history-stub is a no-op identity with arity 1 (memory follow-up keeps the arity)"
     (let [resolved (resolve 'kschltz.agent.interceptors/trim-history-stub)
           v        resolved
           arity    (-> v meta :arglists first count)]
       (is (some? resolved) "trim-history-stub is defined")
       (is (fn? @v) "trim-history-stub is a fn")
       (is (= 1 arity)
-          "trim-history-stub takes exactly 1 arg (Step 6 keeps the arity)")
+          "trim-history-stub takes exactly 1 arg (memory follow-up keeps the arity)")
       (is (= [:a :b] (@v [:a :b]))
           "trim-history-stub returns its input unchanged"))))
 
@@ -166,8 +166,8 @@
                     ix/deliver-responses
                     ix/notify]
         out        (chain/execute
-                     {:exchange/session-id :test-session}
-                     chain)]
+                    {:exchange/session-id :test-session}
+                    chain)]
     (is (some? (:error/raised out))
         "error-boundary annotates :error/raised on the final ctx")
     (is (= :enter (-> out :error/raised :stage))

@@ -88,6 +88,20 @@
                 {:choices [{:finish_reason "stop"}]})))
   (is (= "unknown" (schemas/extract-finish-reason {}))))
 
+(deftest extract-tool-calls-defends-against-non-vector
+  ;; If a provider returns :tool_calls as a non-vector (e.g. a
+  ;; string or map), extract-tool-calls returns [] rather than
+  ;; propagating the wrong type. (Defensive against provider
+  ;; quirks — leniency means "missing → []", not "wrong type
+  ;; → propagate the wrong type".)
+  (is (= [] (schemas/extract-tool-calls
+            {:choices [{:message {:role "assistant"
+                                  :tool_calls "not-a-vector"}}]})))
+  (is (= [] (schemas/extract-tool-calls
+            {:choices [{:message {:role "assistant"
+                                  :tool_calls {:foo "bar"}}}]})))
+  (is (= [] (schemas/extract-tool-calls {}))))
+
 ;; ---- The http-client wrapper in kschltz.agent.llm.client ----
 
 (deftest http-client-wrapper-is-a-fn
