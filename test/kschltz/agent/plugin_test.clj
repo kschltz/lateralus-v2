@@ -18,10 +18,15 @@
 
 (deftest invalid-plugin-fails-schema
   (testing "non-keyword name fails"
-    (let [bad [{:plugin/name "not-a-keyword" :plugin/slots {}}]]
-      (is (some? (plugin/validate-plugins bad)))))
+    (let [bad [{:plugin/name "not-a-keyword" :plugin/slots {}}]
+          result (plugin/validate-plugins bad)]
+      (is (map? result) "returns a :problems/:message map")
+      (is (vector? (:problems result)))
+      (is (string? (:message result)))))
   (testing "empty map fails"
-    (is (some? (plugin/validate-plugins [{}])))))
+    (let [result (plugin/validate-plugins [{}])]
+      (is (map? result))
+      (is (seq (:problems result))))))
 
 ;; ---- assemble-chain: deterministic ----
 
@@ -45,8 +50,16 @@
   (is (= [] (plugin/assemble-chain []))))
 
 (deftest assemble-chain-fails-fast-on-bad-shape
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid plugin"
-                        (plugin/assemble-chain [{:bad-shape true}]))))
+  (testing "throws ex-info with :problems vector carrying Malli details"
+    (try
+      (plugin/assemble-chain [{:bad-shape true}])
+      (is false "expected throw")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (vector? (:problems d)))
+          (is (seq (:problems d)))
+          (is (= [{:bad-shape true}] (:plugins d)))
+          (is (re-find #"Invalid plugin map" (.getMessage e))))))))
 
 ;; ---- Interceptor shape ----
 

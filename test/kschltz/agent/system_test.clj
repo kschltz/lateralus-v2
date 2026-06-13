@@ -65,6 +65,16 @@
       (ig/halt! s)
       (is true "halt succeeded"))))
 
+(deftest halt-skips-keys-without-halt-key
+  (testing "Integrant silently skips keys with no halt-key! defmethod"
+    ;; :lateralus/llm-client, :lateralus/embedder, :lateralus/plugins,
+    ;; :lateralus/agent have no halt-key!; halt! should not throw
+    ;; and should leave those components alone.
+    (let [s (with-system system/default-config)
+          llm  (:lateralus/llm-client s)]
+      (ig/halt! s)
+      (is (some? llm) "stub client object survived halt (no halt-key! was registered)"))))
+
 (deftest datalevin-backend-not-implemented-yet
   (testing "Datalevin backend throws ex-info at init time"
     (try
