@@ -11,23 +11,24 @@
      the `LlmClient` protocol (Step 5); MVP ships with a stub
      implementation.
    - **No** tool execution. MVP default tool registry is empty;
-     dispatch is a no-op for non-nil `:tool/calls` (which are
-     not produced by the stub LLM).
+     `dispatch` records the (empty) results vector on ctx.
    - Stages are pure functions of ctx. They return a new ctx and
      never mutate shared refs.
 
    Stages defined here (in execution order; see `default-exchange-chain`):
-     error-boundary  — wraps subsequent stages; records :error/raised
-                       on throw, then re-throws
-     compose-context — assembles the LLM request from :agent/state +
-                       :exchange/user-text + recall
-     llm-call        — invokes the configured LlmClient; protocol-only
-     parse-response  — extracts :exchange/response and :tool/calls
-     dispatch        — re-enters compose/llm/parse while :tool/calls
-                       remain (no-op in MVP since stub emits none)
-     store-exchange  — leave stage; records the final exchange
+     error-boundary   — :error handler that handles the error (clears
+                        engine ::error, annotates :error/raised) so
+                        subsequent :leave stages run and the
+                        annotation is observable on the final ctx
+     compose-context  — assembles the LLM request from :agent/state +
+                        :exchange/user-text + recall
+     llm-call         — invokes the configured LlmClient; protocol-only
+     parse-response   — extracts :exchange/response and :tool/calls
+     dispatch         — records :tool/results (sequential mapv); MVP
+                        has no real tools; see `dispatch-test`
+     store-exchange   — leave stage; records the final exchange
      deliver-responses — leave stage; hands responses to listeners
-     notify          — leave stage; fires on-thought / on-response"
+     notify           — leave stage; fires on-thought / on-response"
   (:require [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.llm.client :as llm-client]
@@ -64,24 +65,24 @@
   [response]
   (or (get-in response [:choices 0 :message :tool_calls]) []))
 
-(defn- trim-history
-  "Truncate ctx-internal history to the most recent N turns (Step 6
-   will replace this with proper memory recall)."
-  [ctx]
-  ctx)
-
 (def error-boundary
-  "Wraps the rest of the chain. On error, annotates ctx with
-   `:error/raised` containing the throwable before re-throwing via
-   `chain/execute` default behavior."
+  "Handles any error raised by the chain. Clears the engine ::error
+   key so the engine treats the error as handled and proceeds to
+   the :leave phase; annotates ctx with `:error/raised` carrying
+   the throwable + chain/stage. After this stage, the final ctx
+   carries :error/raised and :leave stages still run."
   {:name ::error-boundary
    :error (fn [ctx ex]
-            (assoc ctx :error/raised {:exception ex
-                                      :stage     (:chain/stage (ex-data ex))}))})
+            (-> ctx
+                (dissoc ::chain/error)
+                (assoc :error/raised
+                       {:exception ex
+                        :stage     (or (:chain/stage (ex-data ex))
+                                       :unknown)})))})
 
 (def compose-context
   "Build `:llm/request` from :agent/state + :exchange/user-text +
-   recall. Trivial recall stub for MVP."
+   recall. Trivial recall stub for MVP (Step 6 wires real memory)."
   {:name ::compose-context
    :enter (fn [ctx]
             (let [state     (:agent/state ctx)
@@ -91,16 +92,19 @@
                   messages  (cond-> [{:role "system" :content sys-msg}]
                               (seq recall) (into (mapv (fn [m]
                                                           {:role    "system"
-                                                           :content (str "[recall] " m)})
+                                                          :content (str "[recall] " m)})
                                                         recall))
-                              (seq user-text) (conj {:role "user" :content user-text}))]
-              (-> ctx
-                  (assoc :llm/request
-                         {:base-url (:base-url state)
-                          :api-key  (:api-key state)
-                          :model    (or (:model state) "stub/v0")
-                          :messages messages})
-                  trim-history)))})
+                              (seq user-text) (conj {:role "user" :content user-text}))
+                  ;; TODO Step 6: replace `identity` with proper
+                  ;; history trimming (token budget, recall window).
+                  _trim     (identity messages)]
+              (assoc ctx
+                     :llm/request
+                     {:base-url (:base-url state)
+                      :api-key  (:api-key state)
+                      :model    (or (:model state) "stub/v0")
+                      :messages messages}
+                     :compose/trimmed? true)))})
 
 (def llm-call
   "Invoke the LlmClient. Wraps `call-llm`. No business logic — only
@@ -118,20 +122,17 @@
                      :tool/calls        (response-tool-calls resp))))})
 
 (def dispatch
-  "Sequential dispatch over :tool/calls. MVP: no-op (stub LLM never
-   produces tool calls). The :leave stage is a no-op; the entire
-   stage is here to exercise the dispatch *path* in tests via a
-   fake LLM that returns tool calls."
+  "Records `:tool/results` for the calls in `:tool/calls`. MVP
+   implementation: every tool returns `:not-implemented` (no real
+   tools ship in MVP). Sequential by default — `mapv`, never `pmap`
+   (fact-sequential-tools). The earlier dead `:agent/parallel-tools?`
+   knob was removed: there is no parallel opt-in in MVP, and
+   shipping a knob that does nothing is worse than shipping none."
   {:name ::dispatch
    :enter (fn [ctx]
-            (let [calls (or (:tool/calls ctx) [])
-                  state (:agent/state ctx)
-                  parallel? (boolean (:agent/parallel-tools? state))
-                  results  (if parallel?
-                             ;; Parallel opt-in only. MVP must not use
-                             ;; pmap by default (fact-sequential-tools).
-                             (mapv (fn [c] {:call c :result :not-implemented}) calls)
-                             (mapv (fn [c] {:call c :result :not-implemented}) calls))]
+            (let [calls   (or (:tool/calls ctx) [])
+                  results (mapv (fn [c] {:call c :result :not-implemented})
+                                calls)]
               (assoc ctx :tool/results results)))})
 
 (def store-exchange

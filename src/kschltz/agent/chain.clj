@@ -78,7 +78,10 @@
 
 (defn- try-error
   "Run interceptor's :error handler. A handler that returns a ctx
-   without ::error has handled it."
+   without ::error has handled it. We pre-dissoc ::error from the
+   ctx passed to the handler so the handler observes the live
+   error and decides whether to re-set it; if the handler returns
+   the ctx unchanged, the dissoc is the de facto \"handled\" mark."
   [ctx interceptor]
   (if-some [f (:error interceptor)]
     (let [{:keys [exception]} (::error ctx)]
