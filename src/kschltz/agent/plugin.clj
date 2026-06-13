@@ -3,12 +3,11 @@
 
    A plugin is a pure data map:
 
-     {:plugin/name     :my-plugin
-      :plugin/slots    {:guard   [<interceptor>]
-                        :enrich  [<interceptor> ...]
-                        :tools   [<interceptor> ...]
-                        :persist [<interceptor>]}
-      :plugin/register (fn [state tool-defs] new-state)  ; optional
+     {:plugin/name  :my-plugin
+      :plugin/slots {:guard   [<interceptor>]
+                     :enrich  [<interceptor> ...]
+                     ...}
+      :plugin/chain [<interceptor> ...]}    ; optional, replaces slots
 
    Named slots (in execution order; see `default-slot-order`):
      :guard    — security / safety checks before compose
@@ -47,12 +46,23 @@
     [:map-of :keyword [:vector :any]]]
    [:plugin/chain {:optional true}
     [:vector :any]]
-   [:plugin/doc {:optional true} :string]
-   [:plugin/register {:optional true} fn?]])
+   [:plugin/doc {:optional true} :string]])
 
 (defn- build-interceptor
-  "Wrap a plugin's slot interceptor with metadata."
+  "Wrap a plugin's slot interceptor with metadata. Throws
+   ex-info if `ix` provides no stage fn (`:enter`/`:leave`/`:error`
+   all nil) — silent all-nil interceptors are a footgun, since the
+   engine treats them as no-ops and a typo'd or stubbed stage
+   passes validation but does nothing."
   [plugin-name slot ix]
+  (when (and (nil? (:enter ix))
+             (nil? (:leave ix))
+             (nil? (:error ix)))
+    (throw (ex-info "Plugin interceptor has no stage fn (silent no-op)"
+                    {:plugin/name    plugin-name
+                     :plugin/slot    slot
+                     :interceptor   ix
+                     :hint           "add at least one of :enter, :leave, :error"})))
   {:name (keyword (str (name plugin-name) "." (name slot)))
    :enter (:enter ix)
    :leave (:leave ix)
@@ -81,8 +91,10 @@
 
 (defn- explain-errors
   "Return the `:errors` vector from a Malli explain result, or nil
-   when the explain result is nil/empty. Always returns a vector
-   for predictable caller access."
+   when the explain result is nil/empty.
+
+   Returns either nil OR a non-empty vector. Callers that need a
+   vector unconditionally should wrap with `(or (explain-errors …) [])`."
   [explain-result]
   (when-let [errs (and explain-result (:errors explain-result))]
     (when (seq errs) (vec errs))))
@@ -99,7 +111,9 @@
    Throws ex-info with {:problems ..., :plugins ...} when any plugin
    violates the `Plugin` schema. The `:problems` vector contains
    Malli's actual failure descriptions; `:plugins` echoes the input
-   for caller diagnostics."
+   for caller diagnostics. Also throws ex-info if any
+   plugin-slot interceptor has all-nil stages (silent no-op
+   footgun — see `build-interceptor`)."
   [plugins]
   (let [plugins-vec (vec plugins)
         explain     (explain-plugins plugins-vec)

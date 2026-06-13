@@ -12,6 +12,13 @@
      onto the stack
    - when the queue is empty (or `terminate` is called), :leave fns run
      in reverse stack order
+   - When an exception is thrown by any `:enter` stage, the enter walk
+     stops immediately. **Stages after the throwing one are not pushed
+     onto the stack and will not be entered, even if an `:error`
+     handler in a prior stage clears the error.** A plugin that wants
+     to do post-error work (persistence, cleanup) must be placed
+     BEFORE the stage that may throw, or must be enqueued by the
+     throwing stage's `:enter` before the throw.
    - an exception in any stage switches to error mode: the stack is
      walked in stack-reverse calling :error. When an :error handler
      returns a ctx without ::error, the error is cleared and the leave

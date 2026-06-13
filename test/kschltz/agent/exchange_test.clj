@@ -9,23 +9,25 @@
      - compose-context trim stub pin (Step 6 marker)
      - error-boundary handles errors so :leave stages still run
      - decoupling verification (no agent.loop dependency)
-     - LlmClient boundary (no direct HTTP in interceptors)"
+     - LlmClient boundary (no direct HTTP in interceptors)
+     - bind-llm-client wires the agent's LlmClient into the chain"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
+            [integrant.core :as ig]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.exchange :as exchange]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.llm.client :as lcm-client]
+            [kschltz.agent.system :as lateralus-system]
             [malli.core :as m]))
 
-;; ---- Fake LLM that returns tool calls (for the dispatch end-to-end test) ----
+;; ---- Fake LLM that returns tool calls ----
 
 (defn- tool-calling-llm
   "Reify of the canonical LlmClient that returns the given tool calls
-   with empty assistant text. Used to exercise the full dispatch
-   path through chain/execute, not just dispatch in isolation."
+   with empty assistant text."
   [tool-calls]
   (reify LlmClient
     (-call [_client _req]
@@ -40,6 +42,7 @@
 (deftest chain-loads-in-correct-order
   (testing "default chain has the locked stage order"
     (is (= [::ix/error-boundary
+            ::ix/bind-llm-client
             ::ix/compose-context
             ::ix/llm-call
             ::ix/parse-response
@@ -127,18 +130,28 @@
       (is (= ["1" "2" "3"] (mapv #(get-in % [:call :id]) (:tool/results out)))
           "result order matches input order (sequential)"))))
 
-;; ---- compose-context stub pin: trim is a no-op until Step 6 ----
+;; ---- compose-context stub pin ----
 
 (deftest compose-context-trim-is-noop
   (testing "compose-context sets :compose/trimmed? to mark the no-op trim path"
-    ;; The trim is an inline identity until Step 6; the marker
-    ;; :compose/trimmed? is what Step 6 will replace.
     (let [enter-fn (:enter ix/compose-context)
           ctx      {:agent/state {:agent/system-message "sys"}
                     :exchange/user-text "hi"}
           out      (enter-fn ctx)]
       (is (true? (:compose/trimmed? out))
           "compose stage records the trim marker; Step 6 changes the marker or removes it"))))
+
+(deftest trim-history-stub-arity
+  (testing "trim-history-stub is a no-op identity with arity 1 (Step 6 target)"
+    (let [resolved (resolve 'kschltz.agent.interceptors/trim-history-stub)
+          v        resolved
+          arity    (-> v meta :arglists first count)]
+      (is (some? resolved) "trim-history-stub is defined")
+      (is (fn? @v) "trim-history-stub is a fn")
+      (is (= 1 arity)
+          "trim-history-stub takes exactly 1 arg (Step 6 keeps the arity)")
+      (is (= [:a :b] (@v [:a :b]))
+          "trim-history-stub returns its input unchanged"))))
 
 ;; ---- error-boundary handles errors so :error/raised is observable ----
 
@@ -148,7 +161,7 @@
         ;; Note: stages AFTER bomb-stage never enter (the engine
         ;; stops the enter walk on first error). They are not in
         ;; the stack and therefore cannot run :leave. This matches
-        ;; the v1 engine contract.
+        ;; the v1 engine contract (see chain.clj ns docstring).
         chain      [ix/error-boundary
                     bomb-stage
                     ix/store-exchange
@@ -164,6 +177,59 @@
     (is (identical? bomb (-> out :error/raised :exception)))
     (is (not (contains? out :kschltz.agent.chain/error))
         "error-boundary cleared engine ::error so chain doesn't rethrow")))
+
+;; ---- bind-llm-client: agent's client flows through to llm-call ----
+
+(defn- marker-client []
+  (reify LlmClient
+    (-call [_client _req]
+      {:choices [{:message {:role "assistant" :content "MARKER"}}]
+       :model "marker/v0"
+       :stub? true})))
+
+(deftest bind-llm-client-copies-agent-client
+  (testing "bind-llm-client copies :agent/llm-client onto ctx as :llm/client"
+    (let [agent-client (marker-client)
+          enter-fn     (:enter ix/bind-llm-client)
+          ctx          {:agent/llm-client agent-client}
+          out          (enter-fn ctx)]
+      (is (identical? agent-client (:llm/client out))
+          "agent's LlmClient is now visible to llm-call via ctx"))))
+
+(deftest bind-llm-client-prefers-ctx-client
+  (testing "an explicit :llm/client on ctx takes precedence over the agent's"
+    (let [agent-client (marker-client)
+          ctx-client   (marker-client)
+          enter-fn     (:enter ix/bind-llm-client)
+          ctx          {:agent/llm-client agent-client
+                        :llm/client      ctx-client}
+          out          (enter-fn ctx)]
+      (is (identical? ctx-client (:llm/client out))
+          "ctx-provided client wins (tests may inject a fake this way)"))))
+
+(deftest full-exchange-with-agent-client
+  (testing "Integrant-configured agent's LlmClient is what the chain uses"
+    ;; Run a real exchange where the LlmClient comes only from
+    ;; the agent map (no per-ctx :llm/client). The marker client
+    ;; was registered as the agent's client via direct map
+    ;; construction — no Integrant defmethod override needed.
+    (let [marker    (marker-client)
+          agent-map {:agent/llm-client  marker
+                     :embedder          (lcm-client/stub-client)
+                     :memory-backend    (lcm-client/stub-client)  ; any value
+                     :assembled         []
+                     :exchange-chain    exchange/default-exchange-chain}
+          out       (chain/execute
+                     {:agent/state        {:base-url "stub" :api-key nil :model "stub/v0"
+                                           :agent/system-message "sys"}
+                      ;; No :llm/client on ctx — only :agent/llm-client.
+                      :agent/llm-client   marker
+                      :exchange/user-text "hello"
+                      :exchange/session-id :test-session
+                      :exchange/user-msg-id (str (random-uuid))}
+                     (:exchange-chain agent-map))]
+      (is (= "MARKER" (:exchange/response out))
+          "the response came from the agent's LlmClient, not a fresh stub"))))
 
 ;; ---- Decoupling verification (plan Step 3 risk) ----
 

@@ -20,6 +20,10 @@
                         engine ::error, annotates :error/raised) so
                         subsequent :leave stages run and the
                         annotation is observable on the final ctx
+     bind-llm-client  — copies the agent's Integrant-configured
+                        LlmClient from :agent/llm-client onto
+                        :llm/client on the per-exchange ctx so
+                        llm-call actually sees the wired client
      compose-context  — assembles the LLM request from :agent/state +
                         :exchange/user-text + recall
      llm-call         — invokes the configured LlmClient; protocol-only
@@ -45,8 +49,10 @@
   (llm-client/stub-client))
 
 (defn call-llm
-  "Invoke the LlmClient on ctx. Reads `:llm/client` (falls back to the
-   stub). Reads `:llm/request`. Writes `:llm/response`."
+  "Invoke the LlmClient on ctx. Reads `:llm/client` (set by
+   `bind-llm-client` from the agent map; falls back to the stub
+   when no agent client is configured). Reads `:llm/request`.
+   Writes `:llm/response`."
   [ctx]
   (let [client (or (:llm/client ctx) (default-llm-client))
         req    (:llm/request ctx)]
@@ -64,6 +70,31 @@
   "Extract tool calls from a response. MVP stub returns no calls."
   [response]
   (or (get-in response [:choices 0 :message :tool_calls]) []))
+
+;; TODO Step 6: delete this stub. It is a no-op marker so Step 6
+;; has a clear `find-fn + replace` target when real history
+;; trimming lands (token budget, recall window, etc.).
+(defn- trim-history-stub
+  "Stub for history trimming. Step 6 replaces this with a real
+   implementation; see the :compose/trimmed? marker on ctx."
+  [messages]
+  messages)
+
+(def bind-llm-client
+  "Copy the agent's LlmClient from `:agent/llm-client` (set by the
+   runtime per exchange) onto ctx as `:llm/client`. This makes the
+   Integrant-configured LlmClient actually visible to the chain —
+   without this stage, `llm-call` would always fall back to a fresh
+   stub because the agent's client lives on the agent map, not on
+   the per-exchange ctx.
+
+   Placed first (after error-boundary) so the client is bound
+   before any stage that might need it."
+  {:name ::bind-llm-client
+   :enter (fn [ctx]
+            (let [client (or (:llm/client ctx)
+                             (:agent/llm-client ctx))]
+              (assoc ctx :llm/client client)))})
 
 (def error-boundary
   "Handles any error raised by the chain. Clears the engine ::error
@@ -95,20 +126,21 @@
                                                           :content (str "[recall] " m)})
                                                         recall))
                               (seq user-text) (conj {:role "user" :content user-text}))
-                  ;; TODO Step 6: replace `identity` with proper
-                  ;; history trimming (token budget, recall window).
-                  _trim     (identity messages)]
+                  ;; TODO Step 6: replace the trim-history-stub call
+                  ;; with the real implementation.
+                  trimmed   (trim-history-stub messages)]
               (assoc ctx
                      :llm/request
                      {:base-url (:base-url state)
                       :api-key  (:api-key state)
                       :model    (or (:model state) "stub/v0")
-                      :messages messages}
+                      :messages trimmed}
                      :compose/trimmed? true)))})
 
 (def llm-call
   "Invoke the LlmClient. Wraps `call-llm`. No business logic — only
-   reads `:llm/client` and `:llm/request`, writes `:llm/response`."
+   reads `:llm/client` (set by `bind-llm-client`) and `:llm/request`,
+   writes `:llm/response`."
   {:name ::llm-call
    :enter call-llm})
 
@@ -162,7 +194,7 @@
 (def notify
   "Leave stage. Final hook for listeners (UI, telemetry, etc.)."
   {:name ::notify
-   :leave (fn [ctx]
+  :leave (fn [ctx]
             (update ctx :exchange/notified
                     (fnil conj [])
                     {:session-id (:exchange/session-id ctx)
@@ -173,8 +205,8 @@
 (def all-stages
   "All defined stages. Order is not significant here; assembly
    happens in `kschltz.agent.exchange/default-exchange-chain`."
-  [error-boundary compose-context llm-call parse-response
-   dispatch store-exchange deliver-responses notify])
+  [error-boundary bind-llm-client compose-context llm-call
+   parse-response dispatch store-exchange deliver-responses notify])
 
 ;; ---- Schema self-check ----
 
