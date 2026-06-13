@@ -71,12 +71,13 @@
   [response]
   (or (get-in response [:choices 0 :message :tool_calls]) []))
 
-;; TODO Step 6: delete this stub. It is a no-op marker so Step 6
-;; has a clear `find-fn + replace` target when real history
-;; trimming lands (token budget, recall window, etc.).
+;; TODO memory-followup: delete this stub. It is a no-op marker
+;; so a future history-trimming PR has a clear `find-fn + replace`
+;; target (token budget, recall window, etc.).
 (defn- trim-history-stub
-  "Stub for history trimming. Step 6 replaces this with a real
-   implementation; see the :compose/trimmed? marker on ctx."
+  "Stub for history trimming. A future memory/history follow-up
+   replaces this with a real implementation; see the
+   :compose/trimmed? marker on ctx."
   [messages]
   messages)
 
@@ -129,7 +130,9 @@
 
 (def compose-context
   "Build `:llm/request` from :agent/state + :exchange/user-text +
-   recall. Trivial recall stub for MVP (Step 6 wires real memory)."
+   recall. Trivial recall stub for MVP — a real memory backend
+   (Datalevin, SQLite, etc.) is a follow-up that will supply real
+   recall messages; until then, the recall list is empty."
   {:name ::compose-context
    :enter (fn [ctx]
             (let [state     (:agent/state ctx)
@@ -142,8 +145,8 @@
                                                           :content (str "[recall] " m)})
                                                         recall))
                               (seq user-text) (conj {:role "user" :content user-text}))
-                  ;; TODO Step 6: replace the trim-history-stub call
-                  ;; with the real implementation.
+                  ;; TODO memory-followup: replace the trim-history-stub
+                  ;; call with the real implementation.
                   trimmed   (trim-history-stub messages)]
               (assoc ctx
                      :llm/request
@@ -184,9 +187,10 @@
               (assoc ctx :tool/results results)))})
 
 (def store-exchange
-  "Leave stage. In Step 6 this is replaced with the memory plugin's
-   persist interceptor. For MVP, records the final exchange on ctx
-   as `:memory/last-exchange` for assertion in tests."
+  "Leave stage. A future memory plugin's persist interceptor (or a
+   real backend) will replace this with proper persistence. For
+   MVP, records the final exchange on ctx as `:memory/last-exchange`
+   for assertion in tests."
   {:name ::store-exchange
    :leave (fn [ctx]
             (assoc ctx :memory/last-exchange
