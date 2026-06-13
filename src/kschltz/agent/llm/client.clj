@@ -1,7 +1,16 @@
 (ns kschltz.agent.llm.client
   "LlmClient protocol — the boundary between the interceptor engine and
-   any actual LLM provider. Step 5 adds the HTTP-backed implementation
-   and Malli-instrumented call paths.")
+   any actual LLM provider.
+
+   Two implementations:
+     - `stub-client` — MVP default. Echoes the last user message.
+     - `http-client` — real OpenAI-shaped HTTP backend. See
+       `kschltz.agent.llm.http` and `kschltz.agent.llm.schemas`.
+
+   The protocol boundary is the only contract consumers depend
+   on; both impls satisfy it. Switching the Integrant config
+   from :impl :stub to :impl :http swaps the wired LlmClient
+   with no other code change.")
 
 (defprotocol LlmClient
   "Boundary between the interceptor engine and any LLM provider."
@@ -10,7 +19,7 @@
      response map. Throws on protocol/network errors."))
 
 (defn stub-client
-  "MVP stub LlmClient. Returns a deterministic text response that
+  "MVP default LlmClient. Returns a deterministic text response that
    echoes the last user message. Used by tests and the default
    Integrant config."
   []
@@ -24,6 +33,9 @@
        :stub? true})))
 
 (defn http-client
-  "Step 5 placeholder. Throws until HTTP impl ships."
-  [_opts]
-  (throw (ex-info "http-client not yet implemented (Step 5)" {})))
+  "Construct a real OpenAI-shaped LlmClient. Delegates to
+   `kschltz.agent.llm.http/http-client`; this thin wrapper exists
+   so consumers can `require` `kschltz.agent.llm.client` and stay
+   out of the HTTP-specific namespace."
+  [opts]
+  ((requiring-resolve 'kschltz.agent.llm.http/http-client) opts))

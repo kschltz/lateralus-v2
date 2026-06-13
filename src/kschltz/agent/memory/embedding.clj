@@ -1,10 +1,10 @@
 (ns kschltz.agent.memory.embedding
   "Embedder protocol.
 
-   Step 6 wires the real HTTP embedder; the noop embedder returns
-   fixed-dimension zero vectors for tests and the default
-   Integrant config (so that v2 ships even when no embedder is
-   configured).")
+   The MVP ships a noop embedder (returns [0.0]). A real HTTP
+   embedder is a follow-up that satisfies this same protocol —
+   when it lands, add the impl as a case in
+   `kschltz.agent.system/init-key :lateralus/embedder`.")
 
 (defprotocol Embedder
   (-embed [embedder text]
@@ -20,8 +20,3 @@
   (reify Embedder
     (-embed [_ _] [0.0])
     (-dimensions [_] 1)))
-
-(defn http-embedder
-  "Step 6 placeholder. Throws until HTTP impl ships."
-  [_opts]
-  (throw (ex-info "http-embedder not yet implemented (Step 6)" {})))

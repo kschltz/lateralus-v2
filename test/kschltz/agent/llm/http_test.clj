@@ -1,0 +1,148 @@
+(ns kschltz.agent.llm.http-test
+  "End-to-end tests for the real HTTP-backed LlmClient.
+
+   Spins up a tiny ring/jetty server on a random port that
+   pretends to be an OpenAI-compatible chat completions endpoint.
+   Then exercises the http-client against it:
+     - successful 200 with text → round-trip extracts text
+     - successful 200 with tool_calls → round-trip extracts calls
+     - 4xx with JSON error body → throws ex-info with :kind :http-error
+     - request shape validation (Malli decode on the way out)
+     - default timeouts (smoke test against a live server)
+
+   No real network is touched. The server is bound to 127.0.0.1
+   on an OS-assigned port and shut down at the end of each test."
+  (:require [cheshire.core :as json]
+            [clojure.test :refer [deftest is]]
+            [kschltz.agent.llm.client :as lcm-client]
+            [kschltz.agent.llm.http :as lcm-http]
+            [kschltz.agent.llm.schemas :as schemas]
+            [ring.adapter.jetty :as jetty]))
+
+;; ---- Fake OpenAI-compatible server ----
+
+(defn- echo-handler
+  "A ring handler that echoes the last user message back. If the
+   request body's `:model` is 'tool-model', includes a tool_call.
+
+   The body is slurped first because newer ring/jetty serves
+   the body as an HttpInput stream, not a String."
+  [req]
+  (let [body-str  (slurp (:body req))
+        body      (json/parse-string body-str true)
+        messages  (:messages body)
+        last-msg  (when (seq messages) (last messages))
+        last-text (or (:content last-msg) "")
+        model     (:model body)]
+    {:status 200
+     :headers {"Content-Type" "application/json"}
+     :body (json/generate-string
+            {:model model
+             :choices [{:message
+                        {:role "assistant"
+                         :content last-text
+                         :tool_calls (when (= model "tool-model")
+                                       [{:id "t1" :type "function"
+                                         :function {:name "echo"
+                                                    :arguments "{}"}}])}}]})}))
+
+(defn- auth-error-handler
+  "A ring handler that returns 401 for any request. Slurps the
+   request body even though it ignores it, so the HttpInput
+   stream is closed (avoids 'stream not closed' warnings)."
+  [req]
+  (slurp (:body req))
+  {:status 401
+   :headers {"Content-Type" "application/json"}
+   :body (json/generate-string
+          {:error {:message "invalid api key" :type "auth_error"}})})
+
+(defn with-fake-server
+  "Run `f` with a jetty server running on 127.0.0.1:<random>
+   serving `handler`. Returns whatever `f` returns."
+  [handler f]
+  (let [server (jetty/run-jetty handler
+                            {:port 0 :host "127.0.0.1" :join? false})]
+    (try
+      (let [port (-> server .getURI .getPort)]
+        (f port))
+      (finally (.stop server)))))
+
+;; ---- Tests ----
+
+(deftest roundtrip-text-echo
+  (with-fake-server
+    echo-handler
+    (fn [port]
+      (let [client (lcm-http/http-client
+                    {:base-url (str "http://127.0.0.1:" port)
+                     :model    "echo-model"})
+            resp   (lcm-client/-call client
+                                     {:model    "echo-model"
+                                      :messages [{:role "user" :content "hi"}]})]
+        (is (= "echo-model" (schemas/extract-model resp)))
+        (is (= "hi" (schemas/extract-text resp)))
+        (is (empty? (schemas/extract-tool-calls resp)))))))
+
+(deftest roundtrip-tool-calls
+  (with-fake-server
+    echo-handler
+    (fn [port]
+      (let [client (lcm-http/http-client
+                    {:base-url (str "http://127.0.0.1:" port)
+                     :model    "tool-model"})
+            resp   (lcm-client/-call client
+                                     {:model    "tool-model"
+                                      :messages [{:role "user" :content "call"}]})]
+        (is (= 1 (count (schemas/extract-tool-calls resp))))
+        (is (= "echo"
+               (get-in resp [:choices 0 :message :tool_calls 0 :function :name])))))))
+
+(deftest http-error-throws-structured-ex-info
+  (with-fake-server
+    auth-error-handler
+    (fn [port]
+      (let [client (lcm-http/http-client
+                    {:base-url (str "http://127.0.0.1:" port)
+                     :model    "err-model"})]
+        (try
+          (lcm-client/-call client
+                            {:model    "err-model"
+                             :messages [{:role "user" :content "x"}]})
+          (is false "expected throw")
+          (catch clojure.lang.ExceptionInfo e
+            (let [d (ex-data e)]
+              (is (= :http-error (:kind d)))
+              (is (= 401 (:status d)))
+              ;; Body is JSON-parsed
+              (is (= "invalid api key"
+                     (get-in d [:body :error :message]))))))))))
+
+(deftest malli-rejects-malformed-request
+  ;; The client is constructed with a base-url but no :model, so
+  ;; the per-call request (also no :model) fails Malli validation
+  ;; on the way out — before any HTTP work happens.
+  (let [client (lcm-http/http-client
+                {:base-url "http://127.0.0.1:1"})]  ; never used
+    (try
+      (lcm-client/-call client
+                        {:messages [{:role "user" :content "x"}]}) ; no :model
+      (is false "expected throw")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :request (:where (ex-data e))))
+        (is (vector? (get (ex-data e) :problems)))))))
+
+(deftest connect-timeout-uses-default
+  ;; Smoke test: opts without :connect-timeout-ms still work
+  ;; against a live server. The default 10s is documented; we
+  ;; don't measure it here (would require a black-hole address).
+  (with-fake-server
+    echo-handler
+    (fn [port]
+      (let [client (lcm-http/http-client
+                    {:base-url (str "http://127.0.0.1:" port)
+                     :model    "m"})
+            resp   (lcm-client/-call client
+                                     {:model    "m"
+                                      :messages [{:role "user" :content "ok"}]})]
+        (is (= "ok" (schemas/extract-text resp)))))))

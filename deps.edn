@@ -13,4 +13,9 @@
           :ns-default build}
   :test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
-                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}
+                      ;; Test-only HTTP server for LLM end-to-end tests.
+                      ;; Not on the production classpath; the runtime
+                      ;; build doesn't need it.
+                      ring/ring-core {:mvn/version "1.13.0"}
+                      ring/ring-jetty-adapter {:mvn/version "1.13.0"}}}}}
