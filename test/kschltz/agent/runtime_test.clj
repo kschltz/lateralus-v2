@@ -207,6 +207,23 @@
       (is (= {:n 1} (runtime/stop runtime))
           "stop after one send returns the merged state"))))
 
+(deftest send-message-forwards-agent-llm-client
+  (testing "send-message forwards the agent-map's :agent/llm-client
+   onto the per-exchange ctx, so bind-llm-client can find it
+   and llm-call can invoke it."
+    (let [marker    (reify Object) ; any object
+          seen-ctx  (atom nil)
+          spy-chain [{:name ::spy
+                      :enter (fn [ctx]
+                               (reset! seen-ctx ctx)
+                               (assoc ctx :agent/state-delta {:spied? true}))}]
+          runtime   (runtime/start
+                     {:exchange-chain    spy-chain
+                      :agent/llm-client  marker})]
+      (runtime/send-message runtime "hi")
+      (is (identical? marker (:agent/llm-client @seen-ctx))
+          "the agent-map's :agent/llm-client is on the per-exchange ctx"))))
+
 (deftest runtime-is-small
   (testing "the runtime ns is small (plan verification: < 150 LOC)"
     (let [lines (-> "src/kschltz/agent/runtime.clj"

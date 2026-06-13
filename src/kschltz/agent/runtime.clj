@@ -72,7 +72,15 @@
                             :exchange/user-msg-id      user-msg-id
                             :exchange/assistant-msg-id assistant-msg-id
                             :exchange/user-text        user-text
-                            :agent/state               base-state}
+                            :agent/state               base-state
+                            ;; Forward the agent-map's LlmClient +
+                            ;; any other refs the bind-llm-client
+                            ;; stage will look up. We only forward
+                            ;; the namespaced keys that the chain
+                            ;; expects; the agent-map is otherwise
+                            ;; a lifecycle concern (Integrant owns
+                            ;; the resources).
+                            :agent/llm-client         (:agent/llm-client agent-map)}
           chain-to-run     (get-in agent-map [:exchange-chain]
                                    exchange/default-exchange-chain)
           result           (chain/execute ctx chain-to-run)
@@ -98,11 +106,18 @@
 
    The agent-map must include `:exchange-chain` (the list of
    interceptors to run per exchange). If it doesn't, the default
-   exchange chain is used."
+   exchange chain is used.
+
+   The agent-map may include `:initial-state` (a map) which seeds
+   the runtime's state atom at start. The state is the place
+   chain stages read persistent context from (e.g. LLM
+   config under :base-url / :api-key / :model, system message
+   under :agent/system-message, accumulated history, etc.). If
+   `:initial-state` is absent, the state starts empty."
   ([agent-map]
    (start agent-map (str (random-uuid))))
   ([agent-map session-id]
    (map->RuntimeRecord
-    {:state      (atom {})
+    {:state      (atom (:initial-state agent-map {}))
      :agent-map  agent-map
      :session-id session-id})))

@@ -39,6 +39,13 @@
     :stub (llm-client/stub-client)
     :http (llm-client/http-client opts)))
 
+;; Separate key for the LLM config (the :base-url / :api-key /
+;; :model opts) so the agent component can read the raw config
+;; and seed the runtime's state. The :lateralus/llm-client key
+;; holds the resolved client (a reify); this key holds the opts.
+(defmethod ig/init-key :lateralus/llm-config [_ opts]
+  opts)
+
 (defmethod ig/init-key :lateralus/embedder [_ {:keys [method] :as opts}]
   (case (or method :noop)
     :noop (embedding/noop-embedder)))
@@ -54,12 +61,21 @@
   (vec plugins))
 
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins llm-client embedder memory-backend]}]
-  {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
-   :embedder          embedder
-   :memory-backend    memory-backend
-   :assembled         (plugin/assemble-chain (or plugins []))
-   :exchange-chain    exchange/default-exchange-chain})
+  [_ {:keys [plugins llm-client embedder memory-backend llm-config]}]
+  ;; The agent-map is what the runtime consumes. `:initial-state`
+  ;; seeds the runtime's state atom so compose-context sees the
+  ;; LLM config (:base-url / :api-key / :model) and any other
+  ;; persistent context. The state atom is the only place chain
+  ;; stages should read persistent context from.
+  (let [llm-config (or llm-config {})]
+    {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
+     :embedder          embedder
+     :memory-backend    memory-backend
+     :assembled         (plugin/assemble-chain (or plugins []))
+     :exchange-chain    exchange/default-exchange-chain
+     :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
+                               (select-keys llm-config
+                                            [:base-url :api-key :model]))}))
 
 ;; ---- Halt ----
 
@@ -82,10 +98,12 @@
    in the runtime config. A real memory store is a follow-up.
    A real embedder is also a follow-up (no MVP gate)."
   {:lateralus/llm-client     {:impl :stub}
+   :lateralus/llm-config     {:impl :stub}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop}
    :lateralus/plugins        {:plugins []}
    :lateralus/agent          {:plugins        (ig/ref :lateralus/plugins)
                               :llm-client     (ig/ref :lateralus/llm-client)
+                              :llm-config     (ig/ref :lateralus/llm-config)
                               :embedder       (ig/ref :lateralus/embedder)
                               :memory-backend (ig/ref :lateralus/memory-backend)}})
