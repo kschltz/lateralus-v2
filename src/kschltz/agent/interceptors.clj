@@ -97,6 +97,11 @@
    This avoids stamping nil into the ctx, which would break code
    that distinguishes 'absent' from 'present, nil'.
 
+   Ctx-precedence: if `:llm/client` is already on ctx (a plugin or
+   test set it explicitly), the ctx value wins — `bind-llm-client`
+   is a *fallback* binding, not an override. See
+   `bind-llm-client-prefers-ctx-client` in the test file.
+
    MVP note: only `:stub` impl is wired in `kschltz.agent.llm.client`;
    the `:http` impl throws at init time and the chain cannot recover
    from this until Step 5 lands."
@@ -204,8 +209,8 @@
 
 (def notify
   "Leave stage. Final hook for listeners (UI, telemetry, etc.)."
-  {:name ::notify
-  :leave (fn [ctx]
+  {:name  ::notify
+   :leave (fn [ctx]
             (update ctx :exchange/notified
                     (fnil conj [])
                     {:session-id (:exchange/session-id ctx)
