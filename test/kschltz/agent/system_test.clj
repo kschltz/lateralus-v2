@@ -5,11 +5,10 @@
      - default config init/halt round-trip
      - :lateralus/agent returns the expected map shape
      - empty plugin list produces empty assembled chain
-     - Datalevin backend throws (not yet implemented)"
+     - halt policy: only keys with halt-key! are halted"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
-            [kschltz.agent.system :as system]
-            [kschltz.agent.memory.protocol :as memory-protocol]))
+            [kschltz.agent.system :as system]))
 
 ;; ---- Fixtures ----
 
@@ -83,23 +82,3 @@
           (is (some? (probe-key s))))
         (finally
           (remove-method ig/init-key probe-key))))))
-
-(deftest datalevin-backend-not-implemented-yet
-  (testing "Datalevin backend throws ex-info at init time"
-    (try
-      (ig/init (assoc system/default-config
-                      :lateralus/memory-backend {:impl :datalevin}))
-      (is false "expected throw")
-      (catch clojure.lang.ExceptionInfo e
-        ;; Integrant wraps the underlying ex; check the cause chain
-        (let [data   (ex-data e)
-              reason (:reason data)]
-          (is (= :integrant.core/build-threw-exception reason))
-          ;; The original ex-info from the defmethod should be on the
-          ;; ex-cause chain.
-          (let [causes (take-while some? (iterate #(some-> % ex-cause) e))
-                matched (filter #(= "Datalevin backend not yet implemented (Step 6)"
-                                      (.getMessage %))
-                                 causes)]
-            (is (seq matched)
-                "Datalevin not-yet-implemented ex-info is on the cause chain")))))))

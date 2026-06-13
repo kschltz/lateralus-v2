@@ -15,7 +15,7 @@ Port only the v1 artifacts that already match the interceptor architecture (`cha
 
 Use **Integrant** as the sole lifecycle/DI mechanism: every extensible component (LLM client, memory store, embedding provider, plugin bundles, agent ref) is an Integrant key whose `init`/`halt!` produces interceptors or protocol implementations fed into the agent at startup. The agent runtime is **engine + ctx + default chain** (~200 LOC assembly max).
 
-MVP delivers: interceptor-based agent loop (empty tool registry + stub-tested dispatch), session memory (new format), clean-slate CLI, JVM distributable. GraalVM native-image is Step 9 stretch — not a hard blocker if Datalevin JNI fails.
+MVP delivers: interceptor-based agent loop (empty tool registry + stub-tested dispatch), session memory (`MemoryBackend` protocol + noop impl), clean-slate CLI, JVM distributable. GraalVM native-image is Step 9 stretch — not a hard blocker; the MVP runtime no longer carries Datalevin JNI or ONNX, so native-image risk is primarily a Clojure reflect-config exercise.
 
 Reference docs carried forward from v1 archive:
 - `docs/interceptor-loop-implementation-plan.md` (architecture thesis)

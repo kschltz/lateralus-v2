@@ -6,7 +6,7 @@
 - The context map is Malli-schemed and optionally instrumented after every interceptor stage (dev/test default) so exchanges are auditable and traceable. Session IDs and user message IDs are tracked for interaction traceability.
 - The chain engine namespace stays under ~200 LOC; core/agent assembly contains no business logic for memory, LLM, or individual tools.
 - MVP ships a working agent loop: queue drain → context compose → LLM call → tool dispatch → response, with bounded tool-call depth and error retries. No user-facing tools ship in MVP; the default tool registry is empty and dispatch is integration-tested via a dev-only stub tool.
-- MVP ships session memory with a new v2 storage format (fresh start — no read/migration of v1 Datalevin sessions).
+- MVP ships the `MemoryBackend` protocol with a noop impl (returns [] on recall, no-op on store). The protocol is the contract; a real persistent store (Datalevin, SQLite, etc.) is a follow-up that satisfies the same protocol — no consumer changes required. Fresh start: no read/migration of v1 sessions.
 - MVP ships a clean-slate CLI (redesigned flags, no v1 compat guarantee) supporting at least interactive and one-shot modes.
 - MVP ships a JVM distributable (launcher script or uberjar). GraalVM native-image is a stretch target (Step 9); if any native-image blocker surfaces, MVP completes with documented JVM fallback and a tracked blocker issue.
 - All LLM calls go through an LlmClient protocol; no direct http/completion calls from the agent loop or interceptors.

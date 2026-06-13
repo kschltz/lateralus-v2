@@ -1,7 +1,9 @@
 (ns kschltz.agent.memory.noop-backend
-  "No-op MemoryBackend. Used as the default Integrant component when
-   no session storage is configured. Step 6 replaces this with a
-   Datalevin v2 implementation that satisfies the same protocol."
+  "No-op MemoryBackend. The MVP default for `:lateralus/memory-backend`.
+   The `MemoryBackend` protocol is the contract; a real persistent
+   store (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up
+   that satisfies the same protocol — no consumer changes required
+   when it lands."
   (:require [kschltz.agent.memory.protocol :as protocol]))
 
 (defn backend
