@@ -30,3 +30,8 @@ test-sessions-*/
 *.iml
 node_modules/
 *.log
+
+# pi-internal audit coordination — handoff artifacts between
+# auditor and architect sessions. Not part of the project's
+# review history (commit messages are the durable record).
+.audit/
