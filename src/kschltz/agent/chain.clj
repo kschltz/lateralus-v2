@@ -61,7 +61,9 @@
    throws `(ex-info \"boom\" {:chain/stage :my-marker})`); if we merged
    the other direction, the engine's bookkeeping would be clobbered
    and the rethrow would carry the wrong stage to try-error.
-   select-keys limits the bleed to non-reserved ex-data keys."
+   dissoc of the reserved set limits the bleed — any other ex-data
+   key flows through unchanged (forwards-compat: adding a new
+   ex-data key does not require a schema update here)."
   [t interceptor stage]
   (let [ex-data (when (instance? clojure.lang.IExceptionInfo t) (ex-data t))
         ;; Reserved engine keys — strip from ex-data so the merge
