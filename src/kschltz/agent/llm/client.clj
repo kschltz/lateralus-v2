@@ -27,7 +27,7 @@
     (-call [_client req]
       {:choices [{:message {:role    "assistant"
                             :content (str "lateralus-v2 stub LLM echoed: "
-                                          (or (get-in req [:messages last :content])
+                                          (or (-> req :messages last :content)
                                               "<no user text>"))}}]
        :model (or (:model req) "stub/v0")
        :stub? true})))
