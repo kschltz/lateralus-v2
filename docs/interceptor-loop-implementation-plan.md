@@ -1,8 +1,19 @@
 # Interceptor Architecture — Everything Is an Interceptor
 
-Status: proposed (v2 — supersedes the Pedestal-dependency draft)
+Status: **superseded by the v2 implementation** (commits ed22b45+).
 Scope: new `kschltz.agent.chain` (engine), new `kschltz.agent.interceptors.*`,
 rewrite of `kschltz.agent.loop`, surface changes in `kschltz.agent.core`
+
+**Drift note:** this plan was written before the v2 rewrite and references
+some v1 stages that were deliberately dropped from the v2 implementation:
+`api-error-retry`, `tool-error-retry`, `wrap-up`. These were tightly coupled
+to v1's `loop/` namespace and not ported. In v2, retry/tool-error handling
+lives in plugin slots (`:guard`, `:enrich`, etc.) rather than dedicated
+chain stages, and the engine treats any unhandled error as a hard rethrow
+(see `kschltz.agent.chain/execute`). Treat the rest of this doc as design
+context, not a current implementation spec — the source of truth is
+`src/kschltz/agent/{chain,interceptors,plugin,exchange}.clj` and the
+audit history under `goals/lateralus-v2-rewrite/`.
 
 ## Thesis
 
