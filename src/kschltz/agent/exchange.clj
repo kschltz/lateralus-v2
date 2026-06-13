@@ -8,12 +8,14 @@
 
    Order rationale (enter in queue order, leave in stack-reverse):
      1. error-boundary FIRST so it catches anything later
-     2. compose-context builds the LLM request
-     3. llm-call invokes the LlmClient (no direct HTTP here)
-     4. parse-response extracts :exchange/response and :tool/calls
-     5. dispatch re-enqueues compose/llm/parse while tool calls
+     2. bind-llm-client copies the agent's LlmClient onto ctx so
+        llm-call actually sees the Integrant-configured client
+     3. compose-context builds the LLM request
+     4. llm-call invokes the LlmClient (no direct HTTP here)
+     5. parse-response extracts :exchange/response and :tool/calls
+     6. dispatch re-enqueues compose/llm/parse while tool calls
         remain (sequential mapv, not pmap)
-     6. store-exchange / deliver-responses / notify run in :leave
+     7. store-exchange / deliver-responses / notify run in :leave
         order (stack-reverse)
 
    No business logic here. Only ordering of stage references."
@@ -23,6 +25,7 @@
   "The default chain of interceptor stages for one exchange.
    Order matters — see ns docstring."
   [ix/error-boundary
+   ix/bind-llm-client
    ix/compose-context
    ix/llm-call
    ix/parse-response

@@ -45,7 +45,7 @@
   (testing ":lateralus/agent returns the canonical map"
     (let [s (with-system system/default-config)
           agent (:lateralus/agent s)]
-      (is (contains? agent :llm/client))
+      (is (contains? agent :agent/llm-client))
       (is (contains? agent :embedder))
       (is (contains? agent :memory-backend))
       (is (contains? agent :assembled))
@@ -65,15 +65,24 @@
       (ig/halt! s)
       (is true "halt succeeded"))))
 
-(deftest halt-skips-keys-without-halt-key
-  (testing "Integrant silently skips keys with no halt-key! defmethod"
-    ;; :lateralus/llm-client, :lateralus/embedder, :lateralus/plugins,
-    ;; :lateralus/agent have no halt-key!; halt! should not throw
-    ;; and should leave those components alone.
-    (let [s (with-system system/default-config)
-          llm  (:lateralus/llm-client s)]
-      (ig/halt! s)
-      (is (some? llm) "stub client object survived halt (no halt-key! was registered)"))))
+(deftest halt-skips-keys-without-halt-key-real
+  (testing "Integrant silently skips a key that has init-key but no halt-key!"
+    (let [probe (atom :unharmed)
+          probe-key :lateralus/probe-test-3
+          config (assoc system/default-config probe-key {})]
+      (defmethod ig/init-key probe-key [_ _]
+        (do (reset! probe :init-ran) :value))
+      ;; Deliberately NO halt-key! for this key.
+      (try
+        (let [s (ig/init config)]
+          (is (= :init-ran @probe) "init ran")
+          (ig/halt! s)
+          (is (= :init-ran @probe)
+              "halt did not call anything for this key (no halt-key! defined)")
+          ;; The key remains in the system map untouched.
+          (is (some? (probe-key s))))
+        (finally
+          (remove-method ig/init-key probe-key))))))
 
 (deftest datalevin-backend-not-implemented-yet
   (testing "Datalevin backend throws ex-info at init time"

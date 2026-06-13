@@ -49,11 +49,11 @@
 
 (defmethod ig/init-key :lateralus/agent
   [_ {:keys [plugins llm-client embedder memory-backend]}]
-  {:llm/client     llm-client
-   :embedder       embedder
-   :memory-backend memory-backend
-   :assembled      (plugin/assemble-chain (or plugins []))
-   :exchange-chain exchange/default-exchange-chain})
+  {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
+   :embedder          embedder
+   :memory-backend    memory-backend
+   :assembled         (plugin/assemble-chain (or plugins []))
+   :exchange-chain    exchange/default-exchange-chain})
 
 ;; ---- Halt ----
 

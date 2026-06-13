@@ -107,3 +107,47 @@
         out (chain/execute {} chain)]
     (is (= [:enter :enter2] @calls))
     (is (map? out) "chain returns a clean ctx")))
+
+;; ---- all-nil stage interceptor is rejected at assemble time ----
+
+(deftest assemble-chain-rejects-all-nil-stages
+  (testing "throws ex-info with :plugin/name, :plugin/slot, :interceptor"
+    (let [p {:plugin/name :bad-stub
+             :plugin/slots {:guard [{:name :typo-stage}]}}]
+      (try
+        (plugin/assemble-chain [p])
+        (is false "expected throw")
+        (catch clojure.lang.ExceptionInfo e
+          (let [d (ex-data e)]
+            (is (= :bad-stub (:plugin/name d)))
+            (is (= :guard (:plugin/slot d)))
+            (is (re-find #"no stage fn" (.getMessage e)))))))))
+
+;; ---- :plugin/register is not honored by assemble-chain ----
+
+(deftest plugin-register-fn-is-not-invoked
+  (testing ":plugin/register is no longer in the schema and is not
+   invoked at assemble time. The fn value is simply ignored."
+    (let [register-called? (atom false)
+          p                {:plugin/name :probe
+                            :plugin/slots {:enrich [{:name :rec :enter identity}]}
+                            :plugin/register (fn [_state _tools]
+                                                (reset! register-called? true)
+                                                {})}
+          _                (plugin/assemble-chain [p])]
+      (is (false? @register-called?)
+          ":plugin/register is never invoked; the schema is open so the
+           key is silently ignored, but a future plugin author relying
+           on it would never see it fire. Bring it back when a real
+           plugin lifecycle is added."))))
+
+;; ---- explain-errors returns nil or a non-empty vector (docstring honesty) ----
+
+(deftest explain-errors-shape
+  (testing "nil explain-result → nil"
+    (is (nil? (#'plugin/explain-errors nil))))
+  (testing "empty :errors → nil"
+    (is (nil? (#'plugin/explain-errors {:errors []}))))
+  (testing "non-empty :errors → non-empty vector"
+    (let [problems [{:type :missing-key}]]
+      (is (= problems (#'plugin/explain-errors {:errors problems}))))))
