@@ -4,15 +4,19 @@
    Components:
      :lateralus/llm-client       LlmClient implementation (stub for MVP)
      :lateralus/embedder         Embedder impl (no-op for MVP)
-     :lateralus/memory-backend   MemoryBackend impl (no-op stub for MVP;
-                                   Step 6 replaces with Datalevin v2)
+     :lateralus/memory-backend   MemoryBackend impl (noop stub for MVP;
+                                   a real persistent store — Datalevin,
+                                   SQLite, LMDB, flat files, etc. — is
+                                   a follow-up that satisfies the same
+                                   MemoryBackend protocol)
      :lateralus/plugins          Seq of plugin maps to assemble
      :lateralus/agent            Agent entry: assembled chain + clients
                                   resolved at init time
 
-   MVP scope: no Datalevin, no LLM HTTP, no real embedding. Each
-   component is a stub that satisfies its protocol. Step 5/6 replace
-   them with real implementations.
+   MVP scope: no real persistent memory backend, no LLM HTTP, no real
+   embedding. The MemoryBackend noop impl is the MVP; HTTP/ONNX
+   embedders and a real memory store are follow-ups. The LlmClient
+   stub is the MVP; the HTTP impl is Step 5.
 
    Halt policy: only keys with real resources to release define
    `halt-key!` (currently just `:lateralus/memory-backend`).
@@ -39,10 +43,11 @@
     :http (embedding/http-embedder opts)))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl] :as opts}]
+  ;; MVP: only :noop. A real persistent store (Datalevin, SQLite,
+  ;; LMDB, etc.) is a follow-up — add the case + impl together as
+  ;; part of that PR.
   (case (or impl :noop)
-    :noop (noop-memory/backend)
-    :datalevin (throw (ex-info "Datalevin backend not yet implemented (Step 6)"
-                               {:opts opts}))))
+    :noop (noop-memory/backend)))
 
 (defmethod ig/init-key :lateralus/plugins [_ {:keys [plugins]}]
   (vec plugins))
@@ -60,7 +65,7 @@
 (defmethod ig/halt-key! :lateralus/memory-backend [_ backend]
   ;; No `satisfies?` guard: defmethod dispatch already routes the
   ;; right backend to this method. The noop backend's -close is a
-  ;; no-op; Step 6's Datalevin backend will close its store here.
+  ;; no-op; a future real backend will close its store here.
   (memory-protocol/-close backend))
 
 ;; ---- System helper ----
@@ -70,9 +75,9 @@
    `resources/lateralus/config.edn` at startup, falling back to this
    in-memory map when no file is present.
 
-   MVP defaults: stub LLM + noop embedder + noop memory. Step 5/6
-   replace these with real implementations (no config change
-   required beyond :impl/:method)."
+   MVP defaults: stub LLM + noop embedder + noop memory. Step 5 adds
+   the real LlmClient HTTP impl. A real memory store is a follow-up
+   (no MVP gate)."
   {:lateralus/llm-client     {:impl :stub}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop}

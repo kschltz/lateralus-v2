@@ -1,8 +1,10 @@
 (ns kschltz.agent.memory.protocol
   "Memory backend protocol.
 
-   Step 6 replaces the no-op implementation with a Datalevin v2 store
-   that satisfies the same protocol.
+   MVP ships the no-op impl (`kschltz.agent.memory.noop-backend`).
+   A real persistent store — Datalevin, SQLite, LMDB, flat files —
+   is a follow-up that satisfies this same protocol; no consumer
+   changes required when it lands.
 
    The protocol is intentionally narrow: storage and recall are the
    only two operations MVP needs (no search-time mutation)."
