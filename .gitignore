@@ -36,3 +36,4 @@ node_modules/
 # auditor and architect sessions. Not part of the project's
 # review history (commit messages are the durable record).
 .audit/
+.kanban/

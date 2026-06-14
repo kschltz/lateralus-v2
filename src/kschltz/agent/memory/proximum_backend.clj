@@ -121,14 +121,19 @@
     (reify mem/MemoryBackend
       (-store-message [_ session-id msg]
         (let [embedding (float-array (embedding/-embed embedder (:content msg "")))
-              metadata (msg->metadata session-id msg)]
+              metadata  (msg->metadata session-id msg)
+              ;; Perform the blocking async sync BEFORE acquiring the lock so
+              ;; no `a/<!!` runs inside the monitor. When sync-on-write? is
+              ;; false this is a no-op.
+              sync-idx  (fn [idx] (if sync-on-write?
+                                    (a/<!! (prox/sync! idx))
+                                    idx))]
           (locking idx-atom
             (let [idx  @idx-atom
-                  idx2 (prox/insert idx embedding (:msg-id msg) metadata)
-                  idx3 (if sync-on-write?
-                         (a/<!! (prox/sync! idx2))
-                         idx2)]
-              (reset! idx-atom idx3))))
+                  idx2 (prox/insert idx embedding (:msg-id msg) metadata)]
+              ;; Hold the lock across the synchronous insert and the atom swap
+              ;; to preserve ordering of mutations.
+              (reset! idx-atom (sync-idx idx2)))))
         nil)
 
       (-recall-hybrid [_ session-id {:keys [top-y last-n query-embedding query-text]}]
@@ -142,8 +147,12 @@
             (merge-recalls recent semantic))))
 
       (-close [_]
-        (locking idx-atom
-          (when-let [idx @idx-atom]
+        (let [idx (locking idx-atom
+                    (let [idx @idx-atom]
+                      (reset! idx-atom nil)
+                      idx))]
+          ;; Sync and close are async I/O; perform them outside the lock.
+          (when idx
             (a/<!! (prox/sync! idx))
-            (a/<!! (prox/close! idx))
-            (reset! idx-atom nil)))))))
+            (a/<!! (prox/close! idx)))
+          nil)))))
