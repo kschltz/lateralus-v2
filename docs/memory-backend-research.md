@@ -21,7 +21,7 @@ noop backend; a real backend is a follow-up. The criteria are:
 |--------|---------|---------------|------|------|---------|
 | **Datalevin** | LMDB + Datalog | Built-in (usearch SIMD HNSW) | Fast, EDN-native, Datalog queries, vector + full-text in one, has `datalevin-embedded` trim | JNI/LMDB native lib, larger dep, historically removed from MVP for complexity | Powerful but heavy; best if we want one DB for everything |
 | **SQLite + sqlite-vec** | Single SQLite file | `sqlite-vec` C extension (KNN virtual table) | Ubiquitous, single file, excellent tooling, SQL/Datalog optional | sqlite-vec is a native C extension; distribution story on JVM is packaging the `.so`/`.dylib`/`.dll`; no pure-JVM | Strongest "boring" choice if we accept bundling a native extension |
-| **Proximum** | Pluggable (memory/file) | Pure-JVM HNSW | Pure JVM, no native deps, immutable/git-like, Clojure-native API | Java 22+ required, incubating Vector API + native-access flags, very new (beta) | Best pure-JVM vector index; pair with SQLite for structured data |
+| **Proximum** | Pluggable (memory/file) via Konserve | Pure-JVM HNSW | Pure JVM (Panama Vector API + MemorySegment), no native deps, immutable/git-like, Clojure-native API, competitive benchmarks | Java 22+ required, `--add-modules=jdk.incubator.vector` + `--enable-native-access=ALL-UNNAMED`, very new (beta), pulls Konserve/hasch/malli, only a vector index | Best pure-JVM vector index; pair with SQLite/Datalevin for structured data |
 | **clj-rocksdb** | RocksDB directory | None (use a separate vector index) | Mature, fast, simple KV API, EDN via nippy | No vector search; needs a second component for semantic recall | Good if we build/borrow a small vector index |
 | **Asami** | In-memory or local graph | None | Datomic-like API, durable local storage, pure Clojure | No vector search; durable storage less mature | Graph model is nice but we'd still need vectors |
 | **Flat files (EDN/JSON lines)** | One file per session | In-memory brute force or separate index | Zero deps, trivial to inspect/debug | Doesn't scale, no ACID, reinventing a DB | Good for tests/prototyping only |
@@ -89,23 +89,51 @@ It is *not* a pure-JVM solution.
 ### 3. Proximum
 
 `org.replikativ/proximum` is a new (2026) pure-JVM vector database
-from the Replikativ team:
+from the Replikativ team. Latest release on Clojars is **0.1.25**
+(May 2026); GitHub latest is 0.1.24 (Mar 2026). It is explicitly
+marked **early beta**.
 
-- HNSW index written in Java, uses Java Vector API and Foreign Memory.
-- Immutable, persistent data structures; git-like branching.
-- No native dependencies — the strongest point for GraalVM.
-- Clojure collection protocols (`assoc`, `get`, `into`, `seq`).
+What it is:
+- HNSW index written in Java using the **Panama Vector API** and
+  **Foreign Function & Memory API** (`MemorySegment`, mmap).
+- Immutable/persistent data-structure semantics: every `assoc`
+  returns a new index version; old versions remain queryable.
+- Git-like versioning: `sync!` creates commits, `branch!` forks,
+  `load-commit` time-travels.
+- No native dependencies (pure JVM) — the strongest point for
+  GraalVM native-image, especially now that FFM API is supported in
+  Native Image by default starting with GraalVM 25.
+- Clojure-native API: implements `IPersistentMap`, `ILookup`,
+  `Seqable`, `ITransientMap`. Insert with `assoc`, search with
+  `prox/search`, get by ID with `get`.
+- Pluggable storage via **Konserve** (`:memory`, `:file`, S3, etc.).
+  Persistence uses chunked vectors + PersistentEdgeIndex + two
+  PersistentSortedSets for metadata and external-id → node-id.
+- Performance (published SIFT-1M): ~13.4k inserts/s, ~3.8k search
+  QPS, 98.6% recall@10 — competitive with jvector and datalevin/usearch.
 
 Caveats:
-- Requires **Java 22+** and `--add-modules=jdk.incubator.vector`
-  `--enable-native-access=ALL-UNNAMED`.
-- Very new; API may change (beta).
-- It is *only* a vector index; structured message data would live
-  elsewhere (e.g. SQLite or EDN files).
+- Requires **Java 22+**. Running needs two JVM flags:
+  ```bash
+  --add-modules=jdk.incubator.vector
+  --enable-native-access=ALL-UNNAMED
+  ```
+- Very new; API may change before 1.0.
+- Not a one-stop shop: it is *only* a vector index. Structured message
+  data, recent-N queries, and metadata filtering need a companion store
+  (SQLite, Datalevin, or even flat EDN).
+- Dependency footprint is non-trivial: pulls `org.replikativ/konserve`,
+  `hasch`, `malli`, `persistent-sorted-set`, `yggdrasil`, `core.cache`,
+  `taoensso/trove`, `slf4j-api`.
+- Native-image support for FFM API is promising but still requires
+  reachability metadata and `--enable-native-access` flags. It is less
+  battle-tested than Datalevin's well-known JNI/LMDB path.
 
-Recommended pairing: **Proximum for semantic vectors + SQLite for
-structured message metadata**. This gives pure-JVM vectors + a
-battle-tested relational store in a single SQLite file.
+Recommended pairings:
+- **Proximum + SQLite** — pure-JVM vectors + a battle-tested relational
+  store in a single SQLite file. Best for GraalVM and minimal native code.
+- **Proximum + Datalevin** — both are Clojure-native and share the
+  Replikativ ecosystem, but this doubles the dependency weight.
 
 ### 4. clj-rocksdb
 
@@ -192,5 +220,6 @@ Spike a **SQLite + sqlite-vec** prototype behind a new
 `:lateralus/memory-backend {:impl :sqlite-vec :path "..."}` Integrant
 config. It directly exercises the `MemoryBackend` protocol and the
 `:enrich`/`:persist` plugin slots. If the native-extension packaging
-proves too hard in one session, fall back to **Proximum + SQLite** or
-**Datalevin**.
+proves too hard in one session, evaluate **Proximum + SQLite** for a
+pure-JVM/GraalVM-friendly path, or **Datalevin** for a single-dependency
+Clojure-native stack.
