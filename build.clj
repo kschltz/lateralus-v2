@@ -15,8 +15,9 @@
   (let [basis (b/create-basis {:aliases [:test]})
         cmds  (b/java-command {:basis     basis
                                :main      'clojure.main
-                               :main-args ["-m" "cognitect.test-runner"]
-                               ;; Proximum needs Vector API + FFM at runtime.
+                              ;; Exclude the slow ^:e2e tests from the build gate.
+                               :main-args ["-m" "cognitect.test-runner" "-e" ":e2e"]
+                              ;; Proximum needs Vector API + FFM at runtime.
                                :jvm-opts  ["--add-modules=jdk.incubator.vector"
                                            "--enable-native-access=ALL-UNNAMED"]})]
     (b/process cmds)

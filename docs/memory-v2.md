@@ -150,4 +150,5 @@ The LangChain4j model weights are bundled in the jar, so no runtime network call
 - `kschltz.agent.memory.langchain4j-embedding-test` verifies the in-process ONNX embedder.
 - `kschltz.agent.memory.proximum-backend-test` covers store/recall/session isolation/close.
 - `kschltz.agent.memory-integration-test` verifies the memory plugin wiring through the Integrant system and runtime.
+- `kschltz.agent.e2e-memory-test` (run separately with `clojure -M:e2e`) exercises a real HTTP LLM + LangChain4j + Proximum end-to-end, defaulting to local Ollama `glm5.1:cloud`.
 - See `goals/lateralus-v2-rewrite/plan.md` Step 6 for the original protocol/plugin acceptance criteria.

@@ -23,6 +23,7 @@
    the request schema (so providers don't reject), but the MVP
    only handles non-streaming responses."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [hato.client :as http]
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.llm.schemas :as schemas]))
@@ -49,24 +50,32 @@
   "Build an error ex-info with structured data about an HTTP failure."
   [kind {:keys [status body]}]
   (let [parsed (try (json/parse-string body true)
-                   (catch Throwable _ body))]
+                    (catch Throwable _ body))]
     (ex-info (str "LLM HTTP " kind " failed: " status)
              {:kind   kind
               :status status
               :body   parsed})))
 
+(defn- chat-completions-url
+  "Build the chat completions URL from the base URL. Accepts both
+   conventions: base-url with or without a trailing /v1 segment."
+  [base-url]
+  (str base-url (if (str/ends-with? base-url "/v1")
+                  "/chat/completions"
+                  "/v1/chat/completions")))
+
 (defn- post-chat
   "POST a chat-completions request to the given base URL. Returns
    the parsed JSON body. Throws ex-info on transport / HTTP errors."
   [{:keys [base-url api-key model messages temperature max-tokens
-          connect-timeout-ms request-timeout-ms]
+           connect-timeout-ms request-timeout-ms]
     :or   {connect-timeout-ms default-connect-timeout-ms
            request-timeout-ms  default-request-timeout-ms}}]
-  (let [url      (str base-url "/v1/chat/completions")
+  (let [url      (chat-completions-url base-url)
         body     (cond-> {:model    model
                           :messages (vec messages)}
-                 temperature (assoc :temperature temperature)
-                 max-tokens  (assoc :max-tokens max-tokens))
+                   temperature (assoc :temperature temperature)
+                   max-tokens  (assoc :max-tokens max-tokens))
         request  {:method              :post
                   :url                url
                   :headers            (->headers api-key)

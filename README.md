@@ -10,8 +10,13 @@ Greenfield rewrite of [Lateralus](../lateralus) (v1 archive). A Clojure LLM agen
 ```bash
 cd lateralus-v2
 
-# Run the test suite (Proximum + LangChain4j tests need Java 22+ flags)
-clojure -M:test -m cognitect.test-runner
+# Run the default test suite (excludes slow ^:e2e tests)
+clojure -M:test
+
+# Run the end-to-end memory tests (requires a local Ollama instance or
+# LATERALUS_E2E_FAKE=true for the deterministic fake-server mode)
+clojure -M:e2e
+LATERALUS_E2E_FAKE=true clojure -M:e2e
 
 # One-shot from stdin (uses Proximum in-memory memory + LangChain4j ONNX embedder by default)
 echo "What is the capital of France?" | clojure -M:run
@@ -104,6 +109,7 @@ Requirements:
 ## Build
 
 ```bash
+clojure -T:build test   # default suite, no e2e
 clojure -T:build uber
 ./target/lateralus-v2 -h
 echo "ping" | ./target/lateralus-v2
@@ -112,6 +118,36 @@ echo "ping" | ./target/lateralus-v2
 This produces:
 - `target/net.clojars.kschltz/lateralus-v2-0.1.0-SNAPSHOT.jar`
 - `target/lateralus-v2` — executable launcher script
+
+### End-to-end memory tests
+
+A separate `^:e2e` namespace exercises a real HTTP LlmClient, the
+LangChain4j embedder, and the Proximum backend against a local Ollama
+instance. Defaults:
+
+- base URL: `http://localhost:11434/v1`
+- model: `glm5.1:cloud`
+
+Run it with:
+
+```bash
+clojure -M:e2e
+```
+
+Override with env vars:
+
+```bash
+LATERALUS_E2E_MODEL=llama3.1:latest LATERALUS_E2E_BASE_URL=http://localhost:11434/v1 clojure -M:e2e
+```
+
+For deterministic assertions without a real LLM, use the bundled fake server:
+
+```bash
+LATERALUS_E2E_FAKE=true clojure -M:e2e
+```
+
+The default `clojure -M:test` and `clojure -T:build test` exclude these
+slow integration tests.
 
 ### GraalVM native-image (stretch, Step 9)
 

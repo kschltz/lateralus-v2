@@ -195,7 +195,7 @@
 (deftest build-system-loads-bundled-config
   (testing "build-system reads the bundled resources/lateralus/config.edn
    with Integrant tag support and merges it over default-config"
-    (let [config (#'cli/build-system {})]
+    (let [config (cli/build-system {})]
       (is (contains? config :lateralus/agent))
       (is (= #{:plugins :llm-client :llm-config :embedder :memory-backend}
              (set (keys (:lateralus/agent config)))))
@@ -208,8 +208,8 @@
 
 (deftest build-system-merges-custom-config
   (testing "--config file overrides the bundled/default config with ig/read-string"
-    (let [config (#'cli/build-system {:config "resources/lateralus/config.edn"
-                                      :model "overridden"})]
+    (let [config (cli/build-system {:config "resources/lateralus/config.edn"
+                                    :model "overridden"})]
       (is (= "overridden" (get-in config [:lateralus/llm-client :model])))
       (is (ig/reflike? (get-in config [:lateralus/agent :llm-client]))))))
 

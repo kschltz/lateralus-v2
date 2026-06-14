@@ -27,6 +27,19 @@
                       ;; build doesn't need it.
                       ring/ring-core {:mvn/version "1.13.0"}
                       ring/ring-jetty-adapter {:mvn/version "1.13.0"}}
-         ;; Proximum tests need the Vector API and Foreign Memory API.
+         ;; Proximum + LangChain4j tests need the Vector API, FFM, and
+         ;; ONNX tokenizer native extraction.
          :jvm-opts ["--add-modules=jdk.incubator.vector"
-                    "--enable-native-access=ALL-UNNAMED"]}}}
+                    "--enable-native-access=ALL-UNNAMED"]
+         ;; Exclude ^:e2e tests from the default fast suite.
+         :main-opts ["-m" "cognitect.test-runner" "-e" ":e2e"]}
+  ;; Run only the ^:e2e tests. This requires a local Ollama instance
+  ;; (default model glm5.1:cloud) or LATERALUS_E2E_FAKE=true.
+  :e2e {:extra-paths ["test"]
+        :extra-deps {io.github.cognitect-labs/test-runner
+                     {:git/tag "v0.5.1" :git/sha "dfb30dd"}
+                     ring/ring-core {:mvn/version "1.13.0"}
+                     ring/ring-jetty-adapter {:mvn/version "1.13.0"}}
+        :jvm-opts ["--add-modules=jdk.incubator.vector"
+                   "--enable-native-access=ALL-UNNAMED"]
+        :main-opts ["-m" "cognitect.test-runner" "-i" ":e2e"]}}}
