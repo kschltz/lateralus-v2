@@ -29,7 +29,9 @@ All notable changes to `lateralus-v2`.
 - `kschltz.agent.llm.http/post-chat` builds the completions URL robustly for both `http://host/v1` and `http://host` base URL conventions.
 
 ### Deferred
-- Step 9: GraalVM native-image build. `clojure -T:build native` currently documents the blocker and defers to the JVM path. Proximum makes native-image feasible (pure JVM, no JNI), but the default LangChain4j ONNX embedder uses native libraries, so native-image requires switching to an HTTP embedder first.
+- Step 9: GraalVM native-image build. `clojure -T:build native` currently documents the blocker and defers to the JVM path. We attempted a build with GraalVM 25 on macOS arm64 and confirmed two blockers:
+  1. The default LangChain4j ONNX embedder uses JNI/native libraries, which are incompatible with native-image; switching to an HTTP embedder is required.
+  2. Transitive Timbre (via `org.replikativ/konserve`) puts mutable logger state into the image heap, rejected under `--strict-image-heap`. Resolving this requires replacing Timbre in the dependency tree, custom class-initialization metadata, or using a non-Proximum backend for native-image mode.
 - HTTP embedder for native-image / cloud embedding deployments.
 - Async worker thread for the runtime.
 - `--interactive` REPL mode.

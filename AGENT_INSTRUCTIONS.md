@@ -50,5 +50,5 @@ Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without
 
 - Steps 1–6, 7–8, and 10 are implemented.
 - Step 6 ships the memory plugin interceptors, a noop `MemoryBackend`, and a **Proximum** HNSW backend with **LangChain4j in-process ONNX embedding** as the runtime default.
-- Step 9 (GraalVM native-image) is a deferred follow-up.
+- Step 9 (GraalVM native-image) is a deferred follow-up: attempted with GraalVM 25 on macOS arm64; blocked by (1) LangChain4j ONNX JNI/native libs and (2) transitive Timbre mutable logger heap state via `org.replikativ/konserve`. An HTTP embedder and either a non-Proximum backend or Timbre replacement are prerequisites.
 - Step 10 (docs + quality gate) is complete.
