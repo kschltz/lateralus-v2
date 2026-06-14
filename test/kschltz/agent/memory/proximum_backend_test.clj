@@ -2,10 +2,10 @@
   "Tests for the Proximum MemoryBackend implementation.
 
    These tests exercise store, recall (recent, semantic, hybrid),
-   session isolation, and close. They use an in-memory Proximum
-   index and a deterministic fake embedder so semantic search is
-   reproducible without network calls."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+   session isolation, close, and concurrent store safety. They use
+   an in-memory Proximum index and a deterministic fake embedder so
+   semantic search is reproducible without network calls."
+  (:require [clojure.test :refer [deftest is testing]]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.protocol :as mem]
             [kschltz.agent.memory.proximum-backend :as proximum]))
@@ -102,3 +102,21 @@
                                     :msg-id (str "m" i) :timestamp i}))
       (is (= 2 (count (mem/-recall-hybrid b "s1" {:top-y 0 :last-n 2}))))
       (is (= ["m3" "m4"] (map :msg-id (mem/-recall-hybrid b "s1" {:top-y 0 :last-n 2})))))))
+
+(deftest proximum-backend-concurrent-store-completes
+  (testing "many concurrent store-message calls complete without error"
+    (let [b     (make-backend)
+          n     32
+          msgs  (mapv (fn [i]
+                        {:role "user"
+                         :content (str "concurrent msg " i)
+                         :msg-id (str "c" i)
+                         :timestamp i})
+                      (range n))]
+      (let [futures (doall (mapv #(future (mem/-store-message b "s1" %)) msgs))]
+        (is (every? nil? (map deref futures))
+            "all store-message calls return nil without throwing"))
+      (let [recalled (mem/-recall-hybrid b "s1" {:top-y 0 :last-n n})]
+        (is (= n (count recalled)))
+        (is (= (set (map :msg-id recalled))
+               (set (map :msg-id msgs))))))))
