@@ -104,6 +104,27 @@
       (is (= :error (:action r)))
       (is (re-find #"(?i)model" (:error-msg r))))))
 
+(deftest parse-args-flag-value-forms
+  (testing "value flags accept both --flag=value and --flag value forms"
+    (doseq [args [["--session=abc"] ["-s" "abc"] ["--session" "abc"]]]
+      (is (= "abc" (:session-id (cli/parse-args args)))
+          (str "session parsed from " (pr-str args))))
+    (doseq [args [["--model=gpt-4"] ["--model" "gpt-4"]]]
+      (is (= "gpt-4" (:model (cli/parse-args args)))
+          (str "model parsed from " (pr-str args))))
+    (doseq [args [["--config=a.edn"] ["--config" "a.edn"]]]
+      (is (= "a.edn" (:config (cli/parse-args args)))
+          (str "config parsed from " (pr-str args))))))
+
+(deftest parse-args-unknown-flags
+  (testing "unknown long and short flags yield :error with the flag name in the message"
+    (let [long (cli/parse-args ["--not-a-flag"])
+          short (cli/parse-args ["-x"])]
+      (is (= :error (:action long)))
+      (is (re-find #"not-a-flag" (:error-msg long)))
+      (is (= :error (:action short)))
+      (is (re-find #"\-x" (:error-msg short))))))
+
 (deftest parse-args-help-text-includes-all-flags
   (testing "the help text mentions every flag"
     (let [h   (cli/help-text)

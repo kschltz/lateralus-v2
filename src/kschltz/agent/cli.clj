@@ -30,6 +30,7 @@
      --api-key KEY          LLM API key (overrides config; env support is a follow-up)"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.tools.cli :as cli]
             [integrant.core :as ig]
             [kschltz.agent.llm.http]
             [kschltz.agent.memory.http-embedding]
@@ -38,29 +39,31 @@
 
 (def ^:const version "lateralus-v2 MVP (Step 8 CLI)")
 
-;; ---- Flags that take a value (a set for O(1) lookup) ----
+;; ---- tools.cli option spec ----
 
-(def ^:private flags-with-value
-  ;; The keyword used in the parsed options map. --session stores
-  ;; under :session-id (the runtime treats it as the user-visible
-  ;; session identifier). All other long flags map 1:1.
-  {:session-id #{:s :session}
-   :config     #{:config}
-   :model      #{:model}
-   :base-url   #{:base-url}
-   :api-key    #{:api-key}})
-
-(defn- flag->opt-key
-  "Return the options-map key for a long flag name, or nil if
-   the flag doesn't take a value."
-  [flag]
-  (some (fn [[k vs]] (when (contains? vs flag) k))
-        flags-with-value))
-
-(def ^:private short->long
-  {"-s" "--session"})
-
-;; ---- parse-args ----
+(def ^:private cli-options
+  [["-h" "--help" "show this help and exit"
+    :id :help
+    :assoc-fn (fn [m _ _] (assoc m :action :help))]
+   [nil "--version" "show version and exit"
+    :id :version
+    :assoc-fn (fn [m _ _] (assoc m :action :version))]
+   ["-i" "--interactive" "read prompts from stdin, line-by-line"
+    :id :interactive
+    :assoc-fn (fn [m _ _] (assoc m :action :interactive))]
+   [nil "--no-interactive" "force one-shot mode (default)"
+    :id :no-interactive
+    :assoc-fn (fn [m _ _] (assoc m :action :one-shot))]
+   ["-s" "--session ID" "session id (default: random-uuid)"
+    :id :session-id]
+   [nil "--config PATH" "Integrant EDN config (default: built-in)"
+    :id :config]
+   [nil "--model NAME" "LLM model name (overrides config)"
+    :id :model]
+   [nil "--base-url URL" "LLM base URL (overrides config)"
+    :id :base-url]
+   [nil "--api-key KEY" "LLM API key (overrides config)"
+    :id :api-key]])
 
 (defn parse-args
   "Parse a seq of CLI strings into a CLI options map.
@@ -72,47 +75,11 @@
      :interactive — read lines from stdin and respond to each
      :error       — print error-msg to stderr and exit 1"
   [args]
-  (let [;; Normalize short flags to their long form so the rest of
-        ;; the parser only has to deal with --flag style. This is a
-        ;; small step but it makes the cond below much simpler.
-        normalize (fn [a]
-                    (or (short->long a) a))]
-    (loop [args  (seq args)
-           opts  {:action :one-shot}]
-      (if-let [a (first args)]
-        (let [a (normalize a)]
-          (cond
-            ;; Boolean flags (no value)
-            (#{"-h" "--help"} a)             (recur (rest args) (assoc opts :action :help))
-            (#{"--version"} a)                (recur (rest args) (assoc opts :action :version))
-            (#{"-i" "--interactive"} a)       (recur (rest args) (assoc opts :action :interactive))
-            (#{"--no-interactive"} a)         (recur (rest args) (assoc opts :action :one-shot))
-
-            ;; --flag=value form
-            (and (str/starts-with? a "--") (str/includes? a "="))
-            (let [[k v] (str/split a #"=" 2)]
-              (recur (rest args) (assoc opts (keyword (subs k 2)) v)))
-
-            ;; --flag value form (for flags that take a value)
-            (and (str/starts-with? a "--")
-                 (let [flag-kw (keyword (subs a 2))]
-                   (some? (flag->opt-key flag-kw))))
-            (let [flag-kw (keyword (subs a 2))
-                  opt-key (flag->opt-key flag-kw)]
-              (if-let [v (second args)]
-                (recur (drop 2 args) (assoc opts opt-key v))
-                (assoc opts :action :error
-                       :error-msg (str "flag " a " requires a value"))))
-
-            ;; --flag (long, no value, not recognized)
-            (str/starts-with? a "-")
-            (assoc opts :action :error
-                   :error-msg (str "unknown flag: " a))
-
-            ;; Positional: the prompt (one-shot)
-            :else
-            (recur (rest args) (assoc opts :prompt a))))
-        opts))))
+  (let [{:keys [options arguments errors]} (cli/parse-opts args cli-options)]
+    (if (seq errors)
+      {:action :error :error-msg (str/join "\n" errors)}
+      (cond-> (merge {:action :one-shot} options)
+        (seq arguments) (assoc :prompt (last arguments))))))
 
 ;; ---- help ----
 
