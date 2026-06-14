@@ -34,8 +34,9 @@
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
+            [kschltz.agent.memory.http-embedding :as http-embedding]
             [kschltz.agent.memory.noop-backend :as noop-memory]
-            [kschltz.agent.memory.proximum-backend :as proximum-memory]
+            [kschltz.agent.memory.kg-bm25-backend :as kg-bm25-memory]
             [kschltz.agent.memory.protocol :as memory-protocol]))
 
 ;; ---- Component definitions ----
@@ -55,19 +56,26 @@
 (defmethod ig/init-key :lateralus/embedder [_ {:keys [method] :as opts}]
   (case (or method :noop)
     :noop         (embedding/noop-embedder)
-    :langchain4j  ((requiring-resolve
-                    'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder))))
+    :http         (http-embedding/http-embedder opts)
+    :langchain4j  (let [embedder (requiring-resolve
+                                  'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder)]
+                    (embedder))))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl embedder] :as opts}]
   ;; In-memory default: :noop. :proximum is the runtime default and
   ;; provides durable HNSW-backed memory when configured with a real
-  ;; embedder. The backend receives the resolved :embedder so it can
-  ;; embed message content at store time.
+  ;; embedder. :kg-bm25 is a pure-Clojure, embedding-free backend
+  ;; that uses BM25 sparse retrieval plus a small knowledge graph.
+  ;; The backend receives the resolved :embedder so it can embed
+  ;; message content at store time when needed.
   (case (or impl :noop)
-    :noop     (noop-memory/backend)
-    :proximum (proximum-memory/backend (cond-> opts
-                                          (not (contains? opts :embedder))
-                                          (assoc :embedder (embedding/noop-embedder))))))
+    :noop      (noop-memory/backend)
+    :kg-bm25   (kg-bm25-memory/backend (dissoc opts :embedder))
+    :proximum  (let [backend (requiring-resolve
+                              'kschltz.agent.memory.proximum-backend/backend)]
+                 (backend (cond-> opts
+                            (not (contains? opts :embedder))
+                            (assoc :embedder (embedding/noop-embedder)))))))
 
 (defmethod ig/init-key :lateralus/plugins [_ {:keys [plugins]}]
   ;; The base plugin is always prepended so that user plugins are

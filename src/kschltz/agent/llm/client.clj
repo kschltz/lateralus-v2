@@ -1,10 +1,10 @@
 (ns kschltz.agent.llm.client
-  "LlmClient protocol — the boundary between the interceptor engine and
+  "LlmClient protocol -- the boundary between the interceptor engine and
    any actual LLM provider.
 
    Two implementations:
-     - `stub-client` — MVP default. Echoes the last user message.
-     - `http-client` — real OpenAI-shaped HTTP backend. See
+     - `stub-client` -- MVP default. Echoes the last user message.
+     - `http-client` -- real OpenAI-shaped HTTP backend. See
        `kschltz.agent.llm.http` and `kschltz.agent.llm.schemas`.
 
    The protocol boundary is the only contract consumers depend

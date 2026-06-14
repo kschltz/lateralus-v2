@@ -31,6 +31,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [integrant.core :as ig]
+            [kschltz.agent.llm.http]
+            [kschltz.agent.memory.http-embedding]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.system :as system]))
 
@@ -195,8 +197,8 @@
   (let [text (or (:exchange/response result)
                  (str "lateralus: no response (chain returned: "
                       (pr-str result) ")"))]
-    (.println out text)
-    (.flush out)))
+    (binding [*out* out]
+      (println text))))
 
 (defn- default-system-fn
   "Production :system-fn. Builds and starts an Integrant system
