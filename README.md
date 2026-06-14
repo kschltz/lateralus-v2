@@ -151,7 +151,34 @@ slow integration tests.
 
 ### GraalVM native-image (stretch, Step 9)
 
-Not yet implemented. The current `build.clj` exposes a `native` target that documents the blocker and defers to the JVM path. If you have GraalVM installed, the next step is to add `clj-easy/graal-build-time`, collect `reflect-config.json`, and invoke `native-image` against the uber jar. If it blocks, the JVM uber/launcher remains the supported MVP distributable.
+Not yet implemented. We attempted a native-image build with GraalVM 25 on
+macOS arm64 and hit two classes of blockers:
+
+1. **ONNX / native tokenizer libraries** from the default LangChain4j in-process
+   embedder (`dev.langchain4j/langchain4j-embeddings-all-minilm-l6-v2`) use JNI
+   and extract native `.dylib` files at runtime. These cannot be compiled into
+   a native-image. The fix is to implement and configure an **HTTP embedder**
+   (`:method :http`) that calls an OpenAI-compatible `/v1/embeddings` endpoint.
+
+2. **Proximum transitive Timbre logging** (via `org.replikativ/konserve`) places
+   mutable logger state (`taoensso.timbre.*config*`, appender closures) into the
+   image heap, which `native-image` rejects under `--strict-image-heap`.
+   Resolving this requires either:
+   - replacing Timbre in the konserve/proximum dependency tree,
+   - providing custom class-initialization metadata for all offending classes,
+   - or using a non-Proximum memory backend in native-image mode.
+
+The `build.clj` exposes a `native` target that documents the blocker and
+defers to the JVM path. The JVM uberjar/launcher remains the supported MVP
+distributable.
+
+Next steps to unblock Step 9:
+1. Implement an HTTP `Embedder` (`:method :http`) and make it the native-image
+   default.
+2. Switch the native-image config to `:lateralus/memory-backend {:impl :noop}`
+   or replace Proximum with a native-image-friendly store.
+3. Add `clj-easy/graal-build-time`, `reachability-metadata.json`, and the
+   required incubator-module/FFM flags to `native-image`.
 
 ## Project structure
 
