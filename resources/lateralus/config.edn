@@ -1,2 +1,18 @@
-;; Integrant system config — populated in Step 4 of goals/lateralus-v2-rewrite/plan.md
-{}
+;; Integrant system config — mirrors kschltz.agent.system/default-config.
+;; Override any key here to change runtime behavior without editing code.
+;;
+;; Examples:
+;;   :lateralus/llm-client     {:impl :http :base-url "..." :api-key "..." :model "gpt-4"}
+;;   :lateralus/memory-backend   {:impl :noop}
+;;   :lateralus/plugins          {:plugins [...]}
+
+{:lateralus/llm-client     {:impl :stub}
+ :lateralus/llm-config     {:impl :stub}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :noop}
+ :lateralus/plugins        {:plugins []}
+ :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
+                          :llm-client     #ig/ref :lateralus/llm-client
+                          :llm-config     #ig/ref :lateralus/llm-config
+                          :embedder       #ig/ref :lateralus/embedder
+                          :memory-backend #ig/ref :lateralus/memory-backend}}
