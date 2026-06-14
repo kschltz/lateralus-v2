@@ -39,6 +39,15 @@
             [kschltz.agent.memory.kg-bm25-backend :as kg-bm25-memory]
             [kschltz.agent.memory.protocol :as memory-protocol]))
 
+;; Load optional JVM-only implementations when present on the classpath.
+;; The native-image build excludes these source files, so the require is
+;; guarded; this keeps the dependency graph explicit while allowing the
+;; namespace to load without them.
+(try
+  (require 'kschltz.agent.memory.langchain4j-embedding)
+  (require 'kschltz.agent.memory.proximum-backend)
+  (catch Throwable _))
+
 ;; ---- Component definitions ----
 
 (defmethod ig/init-key :lateralus/llm-client [_ {:keys [impl] :as opts}]
@@ -57,11 +66,10 @@
   (case (or method :noop)
     :noop         (embedding/noop-embedder)
     :http         (http-embedding/http-embedder opts)
-    :langchain4j  (let [embedder (requiring-resolve
-                                  'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder)]
+    :langchain4j  (let [embedder (resolve 'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder)]
                     (embedder))))
 
-(defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl embedder] :as opts}]
+(defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl _embedder] :as opts}]
   ;; In-memory default: :noop. :proximum is the runtime default and
   ;; provides durable HNSW-backed memory when configured with a real
   ;; embedder. :kg-bm25 is a pure-Clojure, embedding-free backend
@@ -71,8 +79,7 @@
   (case (or impl :noop)
     :noop      (noop-memory/backend)
     :kg-bm25   (kg-bm25-memory/backend (dissoc opts :embedder))
-    :proximum  (let [backend (requiring-resolve
-                              'kschltz.agent.memory.proximum-backend/backend)]
+    :proximum  (let [backend (resolve 'kschltz.agent.memory.proximum-backend/backend)]
                  (backend (cond-> opts
                             (not (contains? opts :embedder))
                             (assoc :embedder (embedding/noop-embedder)))))))

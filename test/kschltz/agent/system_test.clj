@@ -6,9 +6,14 @@
      - :lateralus/agent returns the expected map shape
      - empty plugin list produces empty assembled chain
      - halt policy: only keys with halt-key! are halted"
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as sh]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
-            [kschltz.agent.system :as system]))
+            [kschltz.agent.system :as system]
+            [kschltz.agent.memory.embedding :as embedding]
+            [kschltz.agent.memory.protocol :as mem]))
 
 ;; ---- Fixtures ----
 
@@ -100,3 +105,29 @@
           (is (some? (probe-key s))))
         (finally
           (remove-method ig/init-key probe-key))))))
+
+(deftest system-does-not-use-requiring-resolve
+  (testing "system.clj resolves optional JVM-only namespaces via normal require, not requiring-resolve"
+    (let [source (slurp (io/resource "kschltz/agent/system.clj"))]
+      (is (not (str/includes? source "requiring-resolve"))
+          "system.clj should not use requiring-resolve for optional namespaces"))))
+
+(deftest full-profile-integrant-initializes-optional-components
+  (testing "default/full classpath can initialize :langchain4j embedder and :proximum backend"
+    (let [config (-> system/default-config
+                     (assoc-in [:lateralus/embedder :method] :langchain4j)
+                     (assoc-in [:lateralus/memory-backend :impl] :proximum))
+          s (ig/init config)]
+      (try
+        (is (satisfies? embedding/Embedder (:lateralus/embedder s)))
+        (is (satisfies? mem/MemoryBackend (:lateralus/memory-backend s)))
+        (finally
+          (ig/halt! s))))))
+
+(deftest native-profile-can-load-system
+  (testing "native profile classpath can load kschltz.agent.system without optional JVM deps"
+    (let [result (sh/sh "clojure" "-M:native" "-e"
+                        "(require 'kschltz.agent.system) (prn :system-loaded)"
+                        :dir (System/getProperty "user.dir"))]
+      (is (= 0 (:exit result)) (str "native load failed: " (:err result)))
+      (is (str/includes? (:out result) ":system-loaded")))))
