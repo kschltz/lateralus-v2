@@ -119,3 +119,19 @@ No `http/completion` calls exist outside `llm/http.clj`. No `kschltz.agent.loop`
 | `src/kschltz/agent/memory/langchain4j_embedding.clj` | LangChain4j in-process ONNX `Embedder` impl |
 | `src/kschltz/agent/memory/proximum_backend.clj` | Proximum HNSW `MemoryBackend` impl |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` impl |
+
+## End-to-end memory tests
+
+A separate `^:e2e` test namespace (`test/kschltz/agent/e2e_memory_test.clj`) wires the
+real HTTP `LlmClient`, the LangChain4j in-process embedder, and the Proximum backend
+end-to-end. It defaults to a local Ollama instance (`http://localhost:11434/v1`, model
+`glm5.1:cloud`) and skips gracefully when Ollama or the model is unavailable. Use
+`LATERALUS_E2E_FAKE=true` for a deterministic fake-server mode that needs no external
+LLM.
+
+Run it separately from the fast suite:
+
+```bash
+clojure -M:e2e
+LATERALUS_E2E_FAKE=true clojure -M:e2e
+```

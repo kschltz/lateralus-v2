@@ -151,8 +151,8 @@
 
 ;; ---- run-cli ----
 
-(defn- build-system
-  "Build an Integrant system from the cli options.
+(defn build-system
+  "Build an Integrant system config from the cli options.
 
    The default base is the classpath resource `resources/lateralus/config.edn`
    (read with `ig/read-string` so `#ig/ref` tags work), merged over

@@ -16,6 +16,7 @@ All notable changes to `lateralus-v2`.
 - Clean-slate CLI (`kschltz.agent.cli`) with flags for help/version/interactive/session/config/model/base-url/api-key, plus test seams for `:system-fn` and `:runner-fn`.
 - **LangChain4j in-process ONNX embedder** (`kschltz.agent.memory.langchain4j-embedding`): bundled all-MiniLM-L6-v2 model, 384 dimensions, no runtime network calls.
 - Runtime default config (`resources/lateralus/config.edn`) now uses **Proximum + LangChain4j** for real session memory out of the box.
+- **End-to-end memory tests** (`kschltz.agent.e2e-memory-test`): separate `^:e2e` suite that exercises real HTTP LLM + LangChain4j + Proximum memory, defaulting to local Ollama `glm5.1:cloud`. Run with `clojure -M:e2e`; default suite excludes it.
 - JVM uberjar + launcher script build (`clojure -T:build uber`, `./target/lateralus-v2`).
 - Quality-gate tests (`kschltz.agent.quality-test`) verifying namespace parity, LOC limits, and forbidden patterns.
 - JVM flags for Proximum (`--add-modules=jdk.incubator.vector`, `--enable-native-access=ALL-UNNAMED`) wired into `deps.edn` `:test`, `build.clj`, and the launcher script.
@@ -24,9 +25,15 @@ All notable changes to `lateralus-v2`.
 - `src/kschltz/lateralus.clj` now delegates to `kschltz.agent.cli/-main` instead of printing a stub message.
 - `:lateralus/memory-backend` now receives the resolved `:embedder` so real backends can embed message content at store time.
 - `resources/lateralus/config.edn` now defaults to Proximum in-memory memory + LangChain4j ONNX embedding (was noop backend + noop embedder).
+- `kschltz.agent.cli/build-system` is now public so integration tests can reuse it.
+- `kschltz.agent.llm.http/post-chat` builds the completions URL robustly for both `http://host/v1` and `http://host` base URL conventions.
 
 ### Deferred
 - Step 9: GraalVM native-image build. `clojure -T:build native` currently documents the blocker and defers to the JVM path. Proximum makes native-image feasible (pure JVM, no JNI), but the default LangChain4j ONNX embedder uses native libraries, so native-image requires switching to an HTTP embedder first.
+- HTTP embedder for native-image / cloud embedding deployments.
+- Async worker thread for the runtime.
+- `--interactive` REPL mode.
+- Environment-variable support for `LATERALUS_V2_*`.
 
 ### Known limitations
 - The runtime is single-threaded/synchronous. A queue + worker thread is a follow-up for when a real consumer needs non-blocking sends.

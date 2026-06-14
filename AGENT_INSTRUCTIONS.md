@@ -30,16 +30,19 @@ Core loop (empty tool registry, stub-tested dispatch) + session memory (`MemoryB
 ## Verify
 
 ```bash
-clojure -M:test -m cognitect.test-runner          # all tests green
-clojure -T:build test                             # same suite via tools.build
-clojure -T:build uber                             # JVM distributable
-./target/lateralus-v2 -h                          # smoke-test launcher
-rg 'add-.*-tool!' src/                            # no matches
-rg 'http/completion' src/                         # only in llm/http.clj
-rg 'agent\.loop' src/                              # no loop.clj dependency in interceptors
+clojure -M:test                                 # default suite (excludes ^:e2e)
+clojure -T:build test                           # same suite via tools.build
+clojure -M:e2e                                  # end-to-end memory tests
+LATERALUS_E2E_FAKE=true clojure -M:e2e          # deterministic fake-server e2e
+clojure -T:build uber                           # JVM distributable
+./target/lateralus-v2 -h                      # smoke-test launcher
+rg 'add-.*-tool!' src/                          # no matches
+rg 'http/completion' src/                       # only in llm/http.clj
+rg 'agent\.loop' src/                            # no loop.clj dependency in interceptors
 ```
 
-When editing `build.clj`, `deps.edn`, or `resources/lateralus/config.edn`, run `~/.local/bin/clj-paren-repair PATH` after paren-sensitive changes.
+When editing `build.clj`, `deps.edn`, or `resources/lateralus/config.edn`, run
+`~/.local/bin/clj-paren-repair PATH` after paren-sensitive changes.
 
 Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without integration tests.
 
