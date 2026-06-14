@@ -1,4 +1,5 @@
-;; Example Integrant config enabling the Proximum memory backend.
+;; Example Integrant config: real HTTP LLM + Proximum file-backed memory +
+;; LangChain4j in-process ONNX embedder.
 ;; Copy/adapt this file and pass it with --config PATH.
 ;;
 ;; Requirements:
@@ -15,10 +16,7 @@
  :lateralus/llm-config     {:base-url "https://api.openai.com/v1"
                             :api-key  "sk-..."
                             :model    "gpt-4o-mini"}
- :lateralus/embedder       {:method   :http
-                            :base-url "https://api.openai.com/v1"
-                            :api-key  "sk-..."
-                            :model    "text-embedding-3-small"}
+ :lateralus/embedder       {:method :langchain4j}
  :lateralus/memory-backend {:impl :proximum
                             :embedder #ig/ref :lateralus/embedder
                             ;; File persistence: keep this id stable across restarts

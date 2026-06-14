@@ -2,23 +2,26 @@
   "Integrant system definition for the lateralus-v2 agent.
 
    Components:
-     :lateralus/llm-client       LlmClient implementation (stub for MVP)
-     :lateralus/embedder         Embedder impl (no-op for MVP)
-     :lateralus/memory-backend   MemoryBackend impl (noop stub for MVP;
-                                   a real persistent store — Datalevin,
-                                   SQLite, LMDB, flat files, etc. — is
-                                   a follow-up that satisfies the same
-                                   MemoryBackend protocol)
+     :lateralus/llm-client       LlmClient implementation (stub for tests)
+     :lateralus/embedder         Embedder impl (noop for tests; the
+                                   runtime default in
+                                   resources/lateralus/config.edn is
+                                   LangChain4j in-process ONNX)
+     :lateralus/memory-backend   MemoryBackend impl (noop for tests; the
+                                   runtime default is Proximum HNSW)
      :lateralus/plugins          Seq of plugin maps to assemble
      :lateralus/agent            Agent entry: assembled chain + clients
                                   resolved at init time
 
-   MVP scope: no real persistent memory backend, no real embedding.
-   The MemoryBackend noop impl is the MVP; HTTP/ONNX embedders and
-   a real memory store are follow-ups. The LlmClient stub is the
-   MVP default; the HTTP impl (kschltz.agent.llm.http) is wired
-   when the Integrant config passes `:impl :http` for
-   `:lateralus/llm-client`.
+   In-memory default (`default-config`): stub LLM + noop embedder + noop
+   memory. This keeps tests fast and isolated. The runtime default lives
+   in `resources/lateralus/config.edn` and selects Proximum + LangChain4j;
+   `cli/build-system` loads it automatically and merges `--config PATH` over
+   it.
+
+   To use the real LlmClient HTTP impl, set
+   `:lateralus/llm-client {:impl :http :base-url ... :api-key ... :model ...}`
+   in the runtime config.
 
    Halt policy: only keys with real resources to release define
    `halt-key!` (currently just `:lateralus/memory-backend`).
@@ -51,17 +54,20 @@
 
 (defmethod ig/init-key :lateralus/embedder [_ {:keys [method] :as opts}]
   (case (or method :noop)
-    :noop (embedding/noop-embedder)))
+    :noop         (embedding/noop-embedder)
+    :langchain4j  ((requiring-resolve
+                    'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder))))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl embedder] :as opts}]
-  ;; MVP default: :noop. :proximum is an optional durable HNSW backend.
-  ;; The backend receives the resolved :embedder so it can embed message
-  ;; content at store time.
+  ;; In-memory default: :noop. :proximum is the runtime default and
+  ;; provides durable HNSW-backed memory when configured with a real
+  ;; embedder. The backend receives the resolved :embedder so it can
+  ;; embed message content at store time.
   (case (or impl :noop)
     :noop     (noop-memory/backend)
     :proximum (proximum-memory/backend (cond-> opts
-                                         (not (contains? opts :embedder))
-                                         (assoc :embedder (embedding/noop-embedder))))))
+                                          (not (contains? opts :embedder))
+                                          (assoc :embedder (embedding/noop-embedder))))))
 
 (defmethod ig/init-key :lateralus/plugins [_ {:keys [plugins]}]
   ;; The base plugin is always prepended so that user plugins are
@@ -114,11 +120,9 @@
    automatically when present; it is merged over this map before any
    `--config` file is applied.
 
-   MVP defaults: stub LLM + noop embedder + noop memory. To use
-   the real LlmClient HTTP impl, set
-   `:lateralus/llm-client {:impl :http :base-url ... :api-key ... :model ...}`
-   in the runtime config. A real memory store is a follow-up.
-   A real embedder is also a follow-up (no MVP gate)."
+   In-memory default (tests): stub LLM + noop embedder + noop memory.
+   The runtime default in `resources/lateralus/config.edn` uses
+   Proximum + LangChain4j in-process ONNX embedding."
   {:lateralus/llm-client     {:impl :stub}
    :lateralus/llm-config     {}
    :lateralus/embedder       {:method :noop}

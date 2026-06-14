@@ -10,10 +10,10 @@ Greenfield rewrite of [Lateralus](../lateralus) (v1 archive). A Clojure LLM agen
 ```bash
 cd lateralus-v2
 
-# Run the test suite
+# Run the test suite (Proximum + LangChain4j tests need Java 22+ flags)
 clojure -M:test -m cognitect.test-runner
 
-# One-shot from stdin
+# One-shot from stdin (uses Proximum in-memory memory + LangChain4j ONNX embedder by default)
 echo "What is the capital of France?" | clojure -M:run
 
 # One-shot from a positional argument
@@ -43,7 +43,7 @@ Flags:
 Examples:
 
 ```bash
-# Named session
+# Named session (memory is now enabled by default)
 clojure -M:run -s my-session "Hello"
 
 # Use a real HTTP-backed LLM
@@ -53,7 +53,7 @@ clojure -M:run \
   --api-key "$OPENAI_API_KEY" \
   "Hello"
 
-# Enable the Proximum memory backend (requires Java 22+)
+# Persistent memory: file-backed Proximum + LangChain4j embedder
 clojure -M:run \
   --config resources/lateralus/proximum-example.edn \
   -s my-session \
@@ -72,22 +72,34 @@ For details, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Memory backend
 
-The default Integrant config wires a **noop** memory backend that stores nothing and recalls `[]`. To get real session memory, switch `:lateralus/memory-backend` to `:impl :proximum` and provide a real `Embedder`.
+The runtime Integrant config (`resources/lateralus/config.edn`) now wires a **Proximum** HNSW memory backend and a **LangChain4j** in-process ONNX embedder (`all-MiniLM-L6-v2`, 384 dimensions) by default. Session memory (recent + semantic recall) works out of the box in one-shot mode.
 
-See [`docs/memory-v2.md`](docs/memory-v2.md) for the full configuration reference. Example:
+To disable memory and restore the noop behavior:
 
 ```clojure
-{:lateralus/embedder       {:method :http :base-url "..." :api-key "..." :model "text-embedding-3-small"}
- :lateralus/memory-backend {:impl :proximum
-                            :embedder #ig/ref :lateralus/embedder
-                            :store-config {:backend :file
-                                           :path "sessions/proximum"
-                                           :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
+{:lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :noop}}
 ```
 
-Requirements when using Proximum:
+To make memory durable across JVM restarts, add a file-backed `:store-config`:
+
+```clojure
+{:lateralus/memory-backend
+ {:impl :proximum
+  :embedder #ig/ref :lateralus/embedder
+  :store-config {:backend :file
+                 :path "sessions/proximum"
+                 :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
+```
+
+See [`docs/memory-v2.md`](docs/memory-v2.md) for the full configuration reference.
+
+Requirements:
 - Java 22+
 - JVM flags `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED` (included in the uberjar launcher; pass them manually when running via `clojure -M:run`).
+
+**Note:** LangChain4j in-process embedding uses ONNX and native tokenizer libraries, so it is **not compatible with GraalVM native-image**. For native-image, switch to an HTTP embedder.
+
 
 ## Build
 
@@ -119,16 +131,17 @@ Not yet implemented. The current `build.clj` exposes a `native` target that docu
 
 Implemented:
 - Steps 1–5: bootstrap, chain engine, plugin system, Integrant system, real HTTP-backed LlmClient + Malli schemas
-- Step 6: memory plugin interceptors + noop `MemoryBackend`; **Proximum HNSW backend** implemented as an optional real backend
+- Step 6: memory plugin interceptors + noop `MemoryBackend`; **Proximum HNSW backend** + **LangChain4j in-process ONNX embedder** as the runtime default
 - Step 7: agent outer loop + traceability (synchronous MVP design)
 - Step 8: clean-slate CLI
 - Step 10: docs, JVM distributable, quality-gate tests
 
 Deferred:
-- Step 9: GraalVM native-image build
+- Step 9: GraalVM native-image build (blocked by ONNX JNI until an HTTP embedder is used)
 - Async worker thread for the runtime
 - `--interactive` REPL mode
 - Environment-variable support for `LATERALUS_V2_*`
+- HTTP embedder for native-image / cloud embedding deployments
 
 ## License
 

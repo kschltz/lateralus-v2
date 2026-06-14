@@ -107,7 +107,8 @@
            sync-on-write?  false}}]
   {:pre [(some? embedder)]}
   (let [dim       (or dim (embedding/-dimensions embedder))
-        store-config (or store-config {:backend :memory :id (random-uuid)})
+        store-config (-> (or store-config {:backend :memory})
+                         (update :id #(or % (random-uuid))))
         idx-atom  (atom (prox/create-index
                          {:type              :hnsw
                           :dim               dim

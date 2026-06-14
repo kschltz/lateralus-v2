@@ -7,7 +7,11 @@
         ;; Proximum is optional: it is only loaded when
         ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
         ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.
-        org.replikativ/proximum {:mvn/version "0.1.25"}}
+        org.replikativ/proximum {:mvn/version "0.1.25"}
+        ;; LangChain4j in-process ONNX embedding model. The jar bundles the
+        ;; all-MiniLM-L6-v2 weights, so no network calls are made at runtime.
+        ;; Native-image users should switch to an HTTP embedder instead.
+        dev.langchain4j/langchain4j-embeddings-all-minilm-l6-v2 {:mvn/version "0.36.2"}}
  ;; No Datalevin in MVP — session memory is a noop impl of the
  ;; MemoryBackend protocol. A real persistent store is a follow-up.
  :aliases
