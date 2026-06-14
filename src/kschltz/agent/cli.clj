@@ -154,17 +154,24 @@
 (defn- build-system
   "Build an Integrant system from the cli options.
 
-   The :config path (if set) is read as EDN with Integrant's
-   tag literals bound and merged over system/default-config.
-   CLI LLM flags (--model, --base-url, --api-key) override the
-   resulting :lateralus/llm-client entry.
+   The default base is the classpath resource `resources/lateralus/config.edn`
+   (read with `ig/read-string` so `#ig/ref` tags work), merged over
+   `system/default-config` as a hardcoded fallback. If `--config PATH` is
+   given, that file is also read with `ig/read-string` and merged over
+   the default.
 
-   If :config is not set, returns the default config."
+   CLI LLM flags (--model, --base-url, --api-key) override the
+   resulting :lateralus/llm-client entry."
   [{:keys [config model base-url api-key] :as _opts}]
-  (let [base (if config
-               (merge system/default-config
-                      (ig/read-string (slurp config)))
-               system/default-config)
+  (let [resource-config (some-> (io/resource "lateralus/config.edn")
+                                slurp
+                                ig/read-string)
+        base (cond
+               config        (merge system/default-config
+                                    resource-config
+                                    (ig/read-string (slurp config)))
+               resource-config (merge system/default-config resource-config)
+               :else           system/default-config)
         llm  (cond-> (:lateralus/llm-client base)
                model    (assoc :model model)
                base-url (assoc :base-url base-url)

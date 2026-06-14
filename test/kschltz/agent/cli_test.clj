@@ -15,6 +15,7 @@
    :runner-fn callbacks are the test seam."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [integrant.core :as ig]
             [kschltz.agent.cli :as cli]))
 
 ;; ---- capture helpers ----
@@ -189,7 +190,28 @@
           (is (= 0 rv))
           (is (= "from-stdin" (:prompt @sent))
               "the runner was called with the stdin content")
-          (is (str/includes? out "ok"))))))
+          (is (str/includes? out "ok")))))))
+
+(deftest build-system-loads-bundled-config
+  (testing "build-system reads the bundled resources/lateralus/config.edn
+   with Integrant tag support and merges it over default-config"
+    (let [config (#'cli/build-system {})]
+      (is (contains? config :lateralus/agent))
+      (is (= #{:plugins :llm-client :llm-config :embedder :memory-backend}
+             (set (keys (:lateralus/agent config)))))
+      ;; Pin that #ig/ref tags were resolved (not left as raw symbols).
+      (is (every? ig/reflike?
+                  (vals (select-keys (:lateralus/agent config)
+                                     [:plugins :llm-client :llm-config
+                                      :embedder :memory-backend])))
+          "all agent refs are Integrant refs"))))
+
+(deftest build-system-merges-custom-config
+  (testing "--config file overrides the bundled/default config with ig/read-string"
+    (let [config (#'cli/build-system {:config "resources/lateralus/config.edn"
+                                      :model "overridden"})]
+      (is (= "overridden" (get-in config [:lateralus/llm-client :model])))
+      (is (ig/reflike? (get-in config [:lateralus/agent :llm-client]))))))
 
 (deftest run-cli-honors-config-path
   (testing "--config is read with Integrant tag support and passed to the system-fn"
@@ -207,4 +229,4 @@
           :system-fn system-fn
           :runner-fn (fn [_] {:exchange/response "ok"})}))
       (is (= config-path (:config @seen-opts))
-          "the config path is passed through to the system-fn")))))
+          "the config path is passed through to the system-fn"))))

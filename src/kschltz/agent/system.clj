@@ -88,9 +88,12 @@
 ;; ---- System helper ----
 
 (def default-config
-  "Default Integrant config. Reads from
-   `resources/lateralus/config.edn` at startup, falling back to this
-   in-memory map when no file is present.
+  "Default Integrant config. `cli/build-system` merges a custom EDN
+   file (passed via `--config PATH`) over this in-memory map using
+   `ig/read-string`, so the file can use `#ig/ref` tag literals. The
+   classpath resource `resources/lateralus/config.edn` is also loaded
+   automatically when present; it is merged over this map before any
+   `--config` file is applied.
 
    MVP defaults: stub LLM + noop embedder + noop memory. To use
    the real LlmClient HTTP impl, set
@@ -98,7 +101,7 @@
    in the runtime config. A real memory store is a follow-up.
    A real embedder is also a follow-up (no MVP gate)."
   {:lateralus/llm-client     {:impl :stub}
-   :lateralus/llm-config     {:impl :stub}
+   :lateralus/llm-config     {}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop}
    :lateralus/plugins        {:plugins []}
