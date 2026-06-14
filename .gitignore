@@ -16,6 +16,7 @@
 .env
 .env.*
 !.env.example
+.pi-loop.json
 .pi-loop.json.lock
 *.pid
 

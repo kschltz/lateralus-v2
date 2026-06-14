@@ -37,6 +37,8 @@
       (is (some? (:lateralus/llm-client s)))
       (is (some? (:lateralus/embedder s)))
       (is (some? (:lateralus/memory-backend s)))
+      (is (some? (:lateralus/base-plugin s)))
+      (is (some? (:lateralus/memory-plugin s)))
       (is (vector? (:lateralus/plugins s)))
       (is (some? (:lateralus/agent s))))))
 
@@ -50,13 +52,29 @@
       (is (contains? agent :assembled))
       (is (vector? (:assembled agent))
           "assembled chain is a vector of interceptors")
-      (is (vector? (:exchange-chain agent))))))
+      (is (vector? (:exchange-chain agent)))
+      (is (some #(= :memory.enrich (:name %)) (:assembled agent))
+          "memory recall is in the assembled chain")
+      (is (some #(= :memory.persist (:name %)) (:assembled agent))
+          "memory persist is in the assembled chain"))))
 
-(deftest empty-plugins-produce-empty-assembled-chain
-  (testing "MVP default: no plugins, empty assembled chain"
-    (let [s (with-system system/default-config)
+(deftest empty-user-plugins-produce-base-chain-only
+  (testing "explicitly empty user plugins still gets the prepended base chain"
+    (let [s (with-system (assoc-in system/default-config
+                                   [:lateralus/plugins :plugins]
+                                   []))
           agent (:lateralus/agent s)]
-      (is (= [] (:assembled agent))))))
+      (is (pos? (count (:assembled agent)))
+          "base plugin interceptors are still present")
+      (is (not (some #(= :memory (:plugin/name %)) (:assembled agent)))
+          "memory plugin interceptors are absent when not listed"))))
+
+(deftest base-plugin-is-first-in-default-plugins
+  (testing "the default plugins vector begins with the base plugin"
+    (let [s (with-system system/default-config)
+          plugins (:lateralus/plugins s)]
+      (is (= :base (:plugin/name (first plugins))))
+      (is (= :memory (:plugin/name (second plugins)))))))
 
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"

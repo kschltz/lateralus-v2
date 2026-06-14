@@ -27,6 +27,8 @@
   (:require [integrant.core :as ig]
             [kschltz.agent.exchange :as exchange]
             [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.protocol :as memory-protocol]
             [kschltz.agent.memory.embedding :as embedding]
@@ -58,7 +60,16 @@
     :noop (noop-memory/backend)))
 
 (defmethod ig/init-key :lateralus/plugins [_ {:keys [plugins]}]
-  (vec plugins))
+  ;; The base plugin is always prepended so that user plugins are
+  ;; assembled around the default exchange chain. A config that
+  ;; explicitly sets `:plugins []` gets just the base chain.
+  (vec (cons (plugins.base/base-plugin) plugins)))
+
+(defmethod ig/init-key :lateralus/base-plugin [_ _]
+  (plugins.base/base-plugin))
+
+(defmethod ig/init-key :lateralus/memory-plugin [_ opts]
+  (plugins.memory/memory-plugin opts))
 
 (defmethod ig/init-key :lateralus/agent
   [_ {:keys [plugins llm-client embedder memory-backend llm-config]}]
@@ -67,12 +78,16 @@
   ;; LLM config (:base-url / :api-key / :model) and any other
   ;; persistent context. The state atom is the only place chain
   ;; stages should read persistent context from.
-  (let [llm-config (or llm-config {})]
+  (let [llm-config (or llm-config {})
+        assembled (plugin/assemble-chain (or plugins []))]
     {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
      :embedder          embedder
      :memory-backend    memory-backend
-     :assembled         (plugin/assemble-chain (or plugins []))
-     :exchange-chain    exchange/default-exchange-chain
+     :assembled         assembled
+     ;; If plugins assembled an empty chain, fall back to the legacy
+     ;; hardcoded default exchange chain (e.g. a test config with
+     ;; `:plugins []`). Otherwise the assembled chain is the live chain.
+     :exchange-chain    (if (seq assembled) assembled exchange/default-exchange-chain)
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
                                (select-keys llm-config
                                             [:base-url :api-key :model]))}))
@@ -104,7 +119,12 @@
    :lateralus/llm-config     {}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop}
-   :lateralus/plugins        {:plugins []}
+   :lateralus/base-plugin    {}
+   :lateralus/memory-plugin  {:backend  (ig/ref :lateralus/memory-backend)
+                              :embedder (ig/ref :lateralus/embedder)
+                              :top-y    3
+                              :last-n   5}
+   :lateralus/plugins        {:plugins [(ig/ref :lateralus/memory-plugin)]}
    :lateralus/agent          {:plugins        (ig/ref :lateralus/plugins)
                               :llm-client     (ig/ref :lateralus/llm-client)
                               :llm-config     (ig/ref :lateralus/llm-config)
