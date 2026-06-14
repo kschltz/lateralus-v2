@@ -2,9 +2,9 @@
   "Memory backend protocol.
 
    MVP ships the no-op impl (`kschltz.agent.memory.noop-backend`).
-   A real persistent store — Datalevin, SQLite, LMDB, flat files —
-   is a follow-up that satisfies this same protocol; no consumer
-   changes required when it lands.
+   A real persistent store — Datalevin, SQLite, LMDB, flat files,
+   Proximum, etc. — is a follow-up that satisfies this same protocol;
+   no consumer changes required when it lands.
 
    The protocol is intentionally narrow: storage and recall are the
    only two operations MVP needs (no search-time mutation)."
@@ -22,9 +22,8 @@
      semantic recall; backends that do not implement semantic search
      can ignore those keys.
 
-     Each returned message should be consumable by `compose-context`,
-     which stringifies it with `(str \"[recall] \" message)`. A real
-     backend typically returns maps with `:role`, `:content`,
-     `:timestamp`, and `:msg-id`; the noop backend returns [].")
+     Each returned message is typically a map with `:role`, `:content`,
+     `:timestamp`, and `:msg-id`; `compose-context` extracts `:content`
+     and prefixes it with `[recall] `. The noop backend returns [].")
   (-close [backend]
     "Release resources. Called from `ig/halt-key!`."))

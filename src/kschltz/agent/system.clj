@@ -30,9 +30,10 @@
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.llm.client :as llm-client]
-            [kschltz.agent.memory.protocol :as memory-protocol]
             [kschltz.agent.memory.embedding :as embedding]
-            [kschltz.agent.memory.noop-backend :as noop-memory]))
+            [kschltz.agent.memory.noop-backend :as noop-memory]
+            [kschltz.agent.memory.proximum-backend :as proximum-memory]
+            [kschltz.agent.memory.protocol :as memory-protocol]))
 
 ;; ---- Component definitions ----
 
@@ -52,12 +53,15 @@
   (case (or method :noop)
     :noop (embedding/noop-embedder)))
 
-(defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl] :as opts}]
-  ;; MVP: only :noop. A real persistent store (Datalevin, SQLite,
-  ;; LMDB, etc.) is a follow-up — add the case + impl together as
-  ;; part of that PR.
+(defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl embedder] :as opts}]
+  ;; MVP default: :noop. :proximum is an optional durable HNSW backend.
+  ;; The backend receives the resolved :embedder so it can embed message
+  ;; content at store time.
   (case (or impl :noop)
-    :noop (noop-memory/backend)))
+    :noop     (noop-memory/backend)
+    :proximum (proximum-memory/backend (cond-> opts
+                                         (not (contains? opts :embedder))
+                                         (assoc :embedder (embedding/noop-embedder))))))
 
 (defmethod ig/init-key :lateralus/plugins [_ {:keys [plugins]}]
   ;; The base plugin is always prepended so that user plugins are
@@ -118,7 +122,8 @@
   {:lateralus/llm-client     {:impl :stub}
    :lateralus/llm-config     {}
    :lateralus/embedder       {:method :noop}
-   :lateralus/memory-backend {:impl :noop}
+   :lateralus/memory-backend {:impl :noop
+                              :embedder (ig/ref :lateralus/embedder)}
    :lateralus/base-plugin    {}
    :lateralus/memory-plugin  {:backend  (ig/ref :lateralus/memory-backend)
                               :embedder (ig/ref :lateralus/embedder)

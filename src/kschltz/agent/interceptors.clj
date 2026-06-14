@@ -1,5 +1,5 @@
-/(ns kschltz.agent.interceptors
-  "v2 interceptor stages for the agent exchange pipeline.
+/ (ns kschltz.agent.interceptors
+    "v2 interceptor stages for the agent exchange pipeline.
 
    Each stage is a plain map satisfying
    `kschltz.agent.interceptors.schema/Interceptor`.
@@ -33,10 +33,10 @@
      store-exchange   — leave stage; records the final exchange
      deliver-responses — leave stage; hands responses to listeners
      notify           — leave stage; fires on-thought / on-response"
-  (:require [kschltz.agent.chain :as chain]
-            [kschltz.agent.interceptors.schema :as schema]
-            [kschltz.agent.llm.client :as llm-client]
-            [malli.core :as m]))
+    (:require [kschltz.agent.chain :as chain]
+              [kschltz.agent.interceptors.schema :as schema]
+              [kschltz.agent.llm.client :as llm-client]
+              [malli.core :as m]))
 
 ;; ---- LlmClient comes from `kschltz.agent.llm.client` (canonical).
 ;;      The interceptor namespace only knows the protocol boundary;
@@ -141,9 +141,12 @@
                   sys-msg   (or (:agent/system-message state) "lateralus-v2 MVP")
                   messages  (cond-> [{:role "system" :content sys-msg}]
                               (seq recall) (into (mapv (fn [m]
-                                                          {:role    "system"
-                                                          :content (str "[recall] " m)})
-                                                        recall))
+                                                         {:role    "system"
+                                                          :content (str "[recall] "
+                                                                        (if (map? m)
+                                                                          (:content m "")
+                                                                          m))})
+                                                       recall))
                               (seq user-text) (conj {:role "user" :content user-text}))
                   ;; TODO memory-followup: replace the trim-history-stub
                   ;; call with the real implementation.

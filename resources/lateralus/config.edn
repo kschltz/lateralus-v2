@@ -10,7 +10,11 @@
 {:lateralus/llm-client     {:impl :stub}
  :lateralus/llm-config     {}
  :lateralus/embedder       {:method :noop}
- :lateralus/memory-backend {:impl :noop}
+ ;; The memory backend receives the resolved embedder so it can embed
+ ;; message content at store time. Use :impl :proximum for a durable
+ ;; HNSW backend (requires Java 22+ and Vector/FFM JVM flags).
+ :lateralus/memory-backend {:impl :noop
+                            :embedder #ig/ref :lateralus/embedder}
  :lateralus/base-plugin    {}
  :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
                             :embedder #ig/ref :lateralus/embedder
