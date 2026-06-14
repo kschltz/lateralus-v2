@@ -23,8 +23,8 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │                     Integrant system                            │
 │  :lateralus/llm-client  ──▶  LlmClient protocol impl (stub/http)  │
 │  :lateralus/llm-config  ──▶  raw opts (base-url/api-key/model)  │
-│  :lateralus/embedder    ──▶  Embedder protocol impl (noop)        │
-│  :lateralus/memory-backend ──▶ MemoryBackend protocol (noop/proximum) │
+│  :lateralus/embedder    ──▶  Embedder protocol impl (noop / langchain4j) │
+│  :lateralus/memory-backend ──▶ MemoryBackend protocol (noop / proximum) │
 │  :lateralus/plugins     ──▶  plugin maps (base + memory)            │
 │  :lateralus/agent       ──▶  agent-map + exchange-chain         │
 └──────────────────────────────────┬──────────────────────────────┘
@@ -83,7 +83,7 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
 - **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. The current implementation includes a noop backend and a Proximum HNSW backend (`kschltz.agent.memory.proximum-backend`).
-- **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`.
+- **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. The current implementation includes a noop embedder and a LangChain4j in-process ONNX embedder (`kschltz.agent.memory.langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config.
 - **New chain stage:** build an interceptor map and add it to `default-exchange-chain` in `kschltz.agent.exchange` (or assemble it via a plugin).
 
@@ -116,5 +116,6 @@ No `http/completion` calls exist outside `llm/http.clj`. No `kschltz.agent.loop`
 | `src/kschltz/agent/llm/http.clj` | real OpenAI-shaped HTTP client |
 | `src/kschltz/agent/memory/protocol.clj` | `MemoryBackend` protocol |
 | `src/kschltz/agent/memory/embedding.clj` | `Embedder` protocol + noop impl |
+| `src/kschltz/agent/memory/langchain4j_embedding.clj` | LangChain4j in-process ONNX `Embedder` impl |
 | `src/kschltz/agent/memory/proximum_backend.clj` | Proximum HNSW `MemoryBackend` impl |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` impl |

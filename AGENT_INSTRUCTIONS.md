@@ -25,7 +25,7 @@ Portable v1 seed: `chain.clj`, `plugin.clj`, `interceptors/schema.clj`, `interce
 
 ## MVP Scope
 
-Core loop (empty tool registry, stub-tested dispatch) + session memory (`MemoryBackend` protocol with noop and Proximum implementations) + clean-slate CLI + JVM distributable. GraalVM native-image is stretch (Step 9). No v1 tools in MVP. **No Datalevin in MVP.**
+Core loop (empty tool registry, stub-tested dispatch) + session memory (`MemoryBackend` protocol with noop and Proximum implementations; runtime default is Proximum + LangChain4j in-process ONNX embedder) + clean-slate CLI + JVM distributable. GraalVM native-image is stretch (Step 9). No v1 tools in MVP. **No Datalevin in MVP.**
 
 ## Verify
 
@@ -46,6 +46,6 @@ Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without
 ## MVP status
 
 - Steps 1–6, 7–8, and 10 are implemented.
-- Step 6 ships the memory plugin interceptors, a noop `MemoryBackend`, and an optional **Proximum** HNSW backend.
+- Step 6 ships the memory plugin interceptors, a noop `MemoryBackend`, and a **Proximum** HNSW backend with **LangChain4j in-process ONNX embedding** as the runtime default.
 - Step 9 (GraalVM native-image) is a deferred follow-up.
 - Step 10 (docs + quality gate) is complete.

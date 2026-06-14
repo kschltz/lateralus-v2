@@ -1,19 +1,30 @@
-;; Integrant system config — mirrors kschltz.agent.system/default-config.
-;; Loaded automatically when present on the classpath; override any key here
-;; to change runtime behavior without editing code, or pass --config PATH.
+;; Runtime default Integrant config for lateralus-v2.
+;; Loaded automatically from the classpath; override any key here,
+;; or pass --config PATH to merge a custom EDN file over this one.
 ;;
-;; Examples:
+;; Runtime default: stub LLM + LangChain4j in-process ONNX embedder +
+;; Proximum in-memory HNSW memory backend.
+;;
+;; Requirements for this default:
+;;   - Java 22+
+;;   - JVM flags: --add-modules=jdk.incubator.vector
+;;                --enable-native-access=ALL-UNNAMED
+;;     (included in the ./target/lateralus-v2 uberjar launcher;
+;;      pass them manually when running via clojure -M:run)
+;;
+;; Override examples:
 ;;   :lateralus/llm-client     {:impl :http :base-url "..." :api-key "..." :model "gpt-4"}
-;;   :lateralus/memory-backend   {:impl :noop}
+;;   :lateralus/memory-backend   {:impl :proximum
+;;                               :store-config {:backend :file
+;;                                              :path "sessions/proximum"
+;;                                              :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}
 ;;   :lateralus/plugins          {:plugins [...]}
 
 {:lateralus/llm-client     {:impl :stub}
  :lateralus/llm-config     {}
- :lateralus/embedder       {:method :noop}
- ;; The memory backend receives the resolved embedder so it can embed
- ;; message content at store time. Use :impl :proximum for a durable
- ;; HNSW backend (requires Java 22+ and Vector/FFM JVM flags).
- :lateralus/memory-backend {:impl :noop
+ :lateralus/embedder       {:method :langchain4j}
+ ;; In-memory Proximum backend. Set :store-config for file persistence.
+ :lateralus/memory-backend {:impl :proximum
                             :embedder #ig/ref :lateralus/embedder}
  :lateralus/base-plugin    {}
  :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
