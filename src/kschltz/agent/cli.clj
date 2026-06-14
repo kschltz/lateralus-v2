@@ -28,8 +28,7 @@
      --model NAME           LLM model name (overrides config)
      --base-url URL         LLM base URL (overrides config)
      --api-key KEY          LLM API key (overrides config; env support is a follow-up)"
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [integrant.core :as ig]
             [kschltz.agent.runtime :as runtime]
@@ -155,16 +154,16 @@
 (defn- build-system
   "Build an Integrant system from the cli options.
 
-   The :config path (if set) is read as EDN and merged over
-   system/default-config. CLI LLM flags (--model, --base-url,
-   --api-key) override the resulting :lateralus/llm-client
-   entry.
+   The :config path (if set) is read as EDN with Integrant's
+   tag literals bound and merged over system/default-config.
+   CLI LLM flags (--model, --base-url, --api-key) override the
+   resulting :lateralus/llm-client entry.
 
    If :config is not set, returns the default config."
   [{:keys [config model base-url api-key] :as _opts}]
   (let [base (if config
                (merge system/default-config
-                      (edn/read-string (slurp config)))
+                      (ig/read-string (slurp config)))
                system/default-config)
         llm  (cond-> (:lateralus/llm-client base)
                model    (assoc :model model)

@@ -189,4 +189,22 @@
           (is (= 0 rv))
           (is (= "from-stdin" (:prompt @sent))
               "the runner was called with the stdin content")
-          (is (str/includes? out "ok")))))))
+          (is (str/includes? out "ok"))))))
+
+(deftest run-cli-honors-config-path
+  (testing "--config is read with Integrant tag support and passed to the system-fn"
+    (let [config-path "resources/lateralus/config.edn"
+          seen-opts   (atom nil)
+          system-fn   (fn [opts]
+                        (reset! seen-opts opts)
+                        [{:exchange-chain []} "sid" (constantly nil)])
+          captured    (atom nil)]
+      (capture-out
+       #(cli/run-cli
+         {:action :one-shot :config config-path :prompt "x"}
+         {:out       *out*
+          :exit      (silent-exit captured)
+          :system-fn system-fn
+          :runner-fn (fn [_] {:exchange/response "ok"})}))
+      (is (= config-path (:config @seen-opts))
+          "the config path is passed through to the system-fn")))))

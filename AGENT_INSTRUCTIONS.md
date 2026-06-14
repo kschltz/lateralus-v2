@@ -31,10 +31,18 @@ Core loop (empty tool registry, stub-tested dispatch) + session memory (`MemoryB
 
 ```bash
 clojure -M:test -m cognitect.test-runner          # all tests green
+clojure -T:build test                             # same suite via tools.build
 clojure -T:build uber                             # JVM distributable
+./target/lateralus-v2 -h                          # smoke-test launcher
 rg 'add-.*-tool!' src/                            # no matches
-rg 'http/completion' src/                         # only in llm/http layer (once implemented)
-rg 'agent\.loop' src/                             # no loop.clj dependency in interceptors
+rg 'http/completion' src/                         # only in llm/http.clj
+rg 'agent\.loop' src/                              # no loop.clj dependency in interceptors
 ```
 
 Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without integration tests.
+
+## MVP status
+
+- Steps 1–5, 7–8 are implemented.
+- Step 6 (memory plugin interceptors) and Step 9 (GraalVM native-image) are deferred follow-ups.
+- Step 10 (docs + quality gate) is in progress; see README.md, docs/architecture.md, and CHANGELOG.md.
