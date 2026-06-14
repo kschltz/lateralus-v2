@@ -15,7 +15,10 @@
   (let [basis (b/create-basis {:aliases [:test]})
         cmds  (b/java-command {:basis     basis
                                :main      'clojure.main
-                               :main-args ["-m" "cognitect.test-runner"]})]
+                               :main-args ["-m" "cognitect.test-runner"]
+                               ;; Proximum needs Vector API + FFM at runtime.
+                               :jvm-opts  ["--add-modules=jdk.incubator.vector"
+                                           "--enable-native-access=ALL-UNNAMED"]})]
     (b/process cmds)
     opts))
 
@@ -26,7 +29,10 @@
          :basis (b/create-basis {})
          :class-dir class-dir
          :src-dirs ["src" "resources"]
-         :ns-compile [main]))
+         :ns-compile [main]
+         ;; Proximum references the incubator Vector API at compile time.
+         :java-opts ["--add-modules=jdk.incubator.vector"
+                     "--enable-native-access=ALL-UNNAMED"]))
 
 (defn- write-launcher! [jar-path launcher-path]
   (let [launcher-dir (.getParentFile (java.io.File. launcher-path))
@@ -37,7 +43,10 @@
                           "set -euo pipefail\n"
                           "DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
                           "JAR=\"$DIR/" jar-rel "\"\n"
-                          "exec java -jar \"$JAR\" \"$@\"\n")]
+                          ;; Proximum requires the incubator Vector API and FFM.
+                          "exec java --add-modules=jdk.incubator.vector \\\n"
+                          "     --enable-native-access=ALL-UNNAMED \\\n"
+                          "     -jar \"$JAR\" \"$@\"\n")]
     (spit launcher-path script)
     (.setExecutable (java.io.File. launcher-path) true true)
     (println "Wrote launcher" launcher-path)))

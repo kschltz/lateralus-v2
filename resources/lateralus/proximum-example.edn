@@ -1,0 +1,46 @@
+;; Example Integrant config enabling the Proximum memory backend.
+;; Copy/adapt this file and pass it with --config PATH.
+;;
+;; Requirements:
+;;   - Java 22+
+;;   - JVM flags: --add-modules=jdk.incubator.vector
+;;                --enable-native-access=ALL-UNNAMED
+;;     (already included in the ./target/lateralus-v2 launcher;
+;;      pass them manually when running via clojure -M:run)
+
+{:lateralus/llm-client     {:impl :http
+                            :base-url "https://api.openai.com/v1"
+                            :api-key  "sk-..."
+                            :model    "gpt-4o-mini"}
+ :lateralus/llm-config     {:base-url "https://api.openai.com/v1"
+                            :api-key  "sk-..."
+                            :model    "gpt-4o-mini"}
+ :lateralus/embedder       {:method   :http
+                            :base-url "https://api.openai.com/v1"
+                            :api-key  "sk-..."
+                            :model    "text-embedding-3-small"}
+ :lateralus/memory-backend {:impl :proximum
+                            :embedder #ig/ref :lateralus/embedder
+                            ;; File persistence: keep this id stable across restarts
+                            ;; or the store will appear empty next run.
+                            :store-config {:backend :file
+                                           :path "sessions/proximum"
+                                           :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}
+                            :capacity 10000
+                            :M 16
+                            :ef-construction 200
+                            :ef-search 50
+                            :distance :euclidean
+                            ;; Set true to fsync after every message.
+                            :sync-on-write? false}
+ :lateralus/base-plugin    {}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/plugins        {:plugins [#ig/ref :lateralus/memory-plugin]}
+ :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
+                            :llm-client     #ig/ref :lateralus/llm-client
+                            :llm-config     #ig/ref :lateralus/llm-config
+                            :embedder       #ig/ref :lateralus/embedder
+                            :memory-backend #ig/ref :lateralus/memory-backend}}

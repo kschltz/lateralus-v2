@@ -12,6 +12,7 @@
    satisfies the MemoryBackend protocol."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
+            [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.protocol :as mem]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.system :as system]))
@@ -31,6 +32,17 @@
   (let [s (ig/init config)]
     (reset! system-atom s)
     s))
+
+(defn- fake-embedder
+  "Deterministic embedder for integration tests. Maps the first 16
+   character codes of a string to a float vector, zero-padded."
+  []
+  (reify embedding/Embedder
+    (-embed [_ text]
+      (let [codes (map float (map int (or text "")))
+            padded (take 16 (concat codes (repeat 0.0)))]
+        (vec padded)))
+    (-dimensions [_] 16)))
 
 (defn- recording-backend
   "Fake backend that records store calls and returns canned recall."
@@ -81,6 +93,33 @@
                       (= "assistant" (get-in % [1 :role])))
                 @store)
           "assistant message was stored"))))
+
+(deftest proximum-backend-wired-through-runtime
+  (testing "the real Proximum backend stores and recalls across exchanges"
+    (let [embedder (fake-embedder)
+          config   (-> system/default-config
+                       (assoc-in [:lateralus/memory-backend]
+                                 {:impl     :proximum
+                                  :embedder embedder
+                                  :dim      16
+                                  :capacity 100
+                                  :M        8
+                                  :ef-construction 100
+                                  :ef-search 100})
+                       (assoc-in [:lateralus/memory-plugin :embedder] embedder)
+                       (assoc-in [:lateralus/memory-plugin :top-y] 1)
+                       (assoc-in [:lateralus/memory-plugin :last-n] 5))
+          s       (with-system config)
+          agent   (:lateralus/agent s)
+          rt      (runtime/start agent "prox-session")
+          _       (runtime/send-message rt "hello")
+          out2    (runtime/send-message rt "hello again")
+          _       (runtime/stop rt)
+          msgs2   (-> out2 :llm/request :messages)]
+      (is (some #(= "[recall] hello" (:content %)) msgs2)
+          "the second exchange recalls the first user message")
+      (is (some #(re-find #"stub LLM echoed" (:content %)) msgs2)
+          "the second exchange recalls the first assistant response"))))
 
 (deftest memory-recall-feeds-compose-context
   (testing "recalled messages appear in the composed LLM request"

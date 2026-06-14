@@ -52,6 +52,12 @@ clojure -M:run \
   --base-url https://api.openai.com/v1 \
   --api-key "$OPENAI_API_KEY" \
   "Hello"
+
+# Enable the Proximum memory backend (requires Java 22+)
+clojure -M:run \
+  --config resources/lateralus/proximum-example.edn \
+  -s my-session \
+  "Remember this"
 ```
 
 ## Architecture
@@ -64,9 +70,26 @@ Lateralus v2 is built on three ideas:
 
 For details, see [`docs/architecture.md`](docs/architecture.md).
 
-## Build
+## Memory backend
 
-### JVM distributable (required MVP gate)
+The default Integrant config wires a **noop** memory backend that stores nothing and recalls `[]`. To get real session memory, switch `:lateralus/memory-backend` to `:impl :proximum` and provide a real `Embedder`.
+
+See [`docs/memory-v2.md`](docs/memory-v2.md) for the full configuration reference. Example:
+
+```clojure
+{:lateralus/embedder       {:method :http :base-url "..." :api-key "..." :model "text-embedding-3-small"}
+ :lateralus/memory-backend {:impl :proximum
+                            :embedder #ig/ref :lateralus/embedder
+                            :store-config {:backend :file
+                                           :path "sessions/proximum"
+                                           :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
+```
+
+Requirements when using Proximum:
+- Java 22+
+- JVM flags `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED` (included in the uberjar launcher; pass them manually when running via `clojure -M:run`).
+
+## Build
 
 ```bash
 clojure -T:build uber
@@ -96,13 +119,16 @@ Not yet implemented. The current `build.clj` exposes a `native` target that docu
 
 Implemented:
 - Steps 1–5: bootstrap, chain engine, plugin system, Integrant system, real HTTP-backed LlmClient + Malli schemas
+- Step 6: memory plugin interceptors + noop `MemoryBackend`; **Proximum HNSW backend** implemented as an optional real backend
 - Step 7: agent outer loop + traceability (synchronous MVP design)
 - Step 8: clean-slate CLI
-- Step 10 (partial): docs, JVM distributable, quality-gate tests
+- Step 10: docs, JVM distributable, quality-gate tests
 
 Deferred:
-- Step 6: full memory plugin wiring (noop backend exists; recall/persist interceptors are a follow-up)
 - Step 9: GraalVM native-image build
+- Async worker thread for the runtime
+- `--interactive` REPL mode
+- Environment-variable support for `LATERALUS_V2_*`
 
 ## License
 

@@ -3,7 +3,11 @@
         integrant/integrant {:mvn/version "0.13.1"}
         metosin/malli {:mvn/version "0.16.4"}
         hato/hato {:mvn/version "1.0.0"}
-        cheshire/cheshire {:mvn/version "6.2.0"}}
+        cheshire/cheshire {:mvn/version "6.2.0"}
+        ;; Proximum is optional: it is only loaded when
+        ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
+        ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.
+        org.replikativ/proximum {:mvn/version "0.1.25"}}
  ;; No Datalevin in MVP — session memory is a noop impl of the
  ;; MemoryBackend protocol. A real persistent store is a follow-up.
  :aliases
@@ -18,4 +22,7 @@
                       ;; Not on the production classpath; the runtime
                       ;; build doesn't need it.
                       ring/ring-core {:mvn/version "1.13.0"}
-                      ring/ring-jetty-adapter {:mvn/version "1.13.0"}}}}}
+                      ring/ring-jetty-adapter {:mvn/version "1.13.0"}}
+         ;; Proximum tests need the Vector API and Foreign Memory API.
+         :jvm-opts ["--add-modules=jdk.incubator.vector"
+                    "--enable-native-access=ALL-UNNAMED"]}}}
