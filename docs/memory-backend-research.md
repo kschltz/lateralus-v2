@@ -2,7 +2,10 @@
 
 This document surveys lightweight embedded options for a real
 `MemoryBackend` implementation in lateralus-v2. The MVP ships a
-noop backend; a real backend is a follow-up. The criteria are:
+noop backend; a real backend is a follow-up. For embedding-free
+alternatives, see [`memory-embedding-free-alternatives.md`](./memory-embedding-free-alternatives.md).
+
+The criteria are:
 
 1. **Speed** — low-latency read/write for session-sized data.
 2. **Lightweight embedded setup** — single-file or small-directory,

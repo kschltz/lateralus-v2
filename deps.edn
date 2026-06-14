@@ -17,8 +17,25 @@
  :aliases
  {:run {:main-opts ["-m" "kschltz.lateralus"]}
   :build {:deps {io.github.clojure/tools.build
-                 {:mvn/version "0.10.13"}}
-          :ns-default build}
+                  {:mvn/version "0.10.13"}}
+           :ns-default build}
+  :dev {:extra-paths ["dev"]
+        ;; Dev scripts may exercise Proximum / LangChain4j, so keep
+        ;; the incubator module flags available.
+        :jvm-opts ["--add-modules=jdk.incubator.vector"
+                   "--enable-native-access=ALL-UNNAMED"]}
+  ;; Native-image alias: builds a native executable that excludes the
+  ;; JVM-only Proximum HNSW index and the LangChain4j ONNX embedder.
+  ;; Only the KG + BM25 memory backend (and optionally the HTTP embedder)
+  ;; is available in this profile.
+  :native {:replace-deps {org.clojure/clojure {:mvn/version "1.12.5"}
+                          integrant/integrant {:mvn/version "0.13.1"}
+                          metosin/malli {:mvn/version "0.16.4"}
+                          hato/hato {:mvn/version "1.0.0"}
+                          cheshire/cheshire {:mvn/version "6.2.0"}
+                          io.github.clojure/tools.build {:mvn/version "0.10.13"}
+                          com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
+           :ns-default build}
   :test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}

@@ -1,11 +1,12 @@
 # Memory v2 — Protocol Sketch
 
-Fresh-start session storage for lateralus-v2. **No read/migration of v1 sessions.** **No Datalevin in MVP** — the `MemoryBackend` protocol is the contract. Two implementations ship:
+Fresh-start session storage for lateralus-v2. **No read/migration of v1 sessions.** **No Datalevin in MVP** — the `MemoryBackend` protocol is the contract. Three implementations ship:
 
 - **`noop`** — test default; stores nothing, recalls `[]`.
 - **`proximum`** — runtime default; pure-JVM HNSW vector store + message metadata.
+- **`kg-bm25`** — embedding-free, file-backed BM25 + knowledge-graph hybrid recall. Pure Clojure, no incubator flags, native-image-friendly.
 
-A non-Proximum backend (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up that slots in as another implementation of the same protocol; no consumer changes required.
+A non-Proximum backend (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up that slots in as another implementation of the same protocol; no consumer changes required. Embedding-free options (BM25/keyword, knowledge-graph, episodic/procedural) are catalogued in `docs/memory-embedding-free-alternatives.md`.
 
 Conceptual reference: `docs/memory-system-mvi.md` (v1). v2 uses a new attribute namespace to avoid accidental v1 reads.
 
@@ -37,56 +38,43 @@ Hybrid recall = **top-Y semantic** + **last-N recent**, deduped, sorted chronolo
 
 The default embedder is `kschltz.agent.memory.langchain4j-embedding` (`:method :langchain4j`), which runs the bundled all-MiniLM-L6-v2 ONNX model in-process. It is JVM-only; native-image users must switch to an HTTP embedder.
 
-### Requirements
+## Implemented backend: KG + BM25
 
-- Java 22+.
-- JVM flags:
+`kschltz.agent.memory.kg-bm25-backend` is an embedding-free implementation:
+
+- **Storage**: per-session `messages.edn` + `index.edn` under the configured `:path`.
+- **Index**: inverted index for BM25 plus an entity-to-message knowledge graph built from tokenized message content.
+- **Recall**: top-Y is the RRF fusion of BM25(query-text) and graph-entity(query-text); last-N is a timestamp scan.
+- **Configuration**:
+
+  ```clojure
+  {:lateralus/memory-backend {:impl :kg-bm25
+                              :store {:backend :file
+                                      :path "sessions/kg-bm25"}
+                              :top-y 5
+                              :last-n 10}}
   ```
-  --add-modules=jdk.incubator.vector
-  --enable-native-access=ALL-UNNAMED
-  ```
-  These flags are included in:
-  - `deps.edn` `:test` alias
-  - `build.clj` `test` and `uber` tasks
-  - the `./target/lateralus-v2` launcher script
 
-### Configuration
+- **Native-image**: safe; no ONNX, no Panama Vector API, no native libraries.
 
-```clojure
-:lateralus/memory-backend
-{:impl :proximum
- :embedder #ig/ref :lateralus/embedder
- :store-config {:backend :file
-                :path "sessions/proximum"
-                :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}
- :dim 384            ; optional, defaults to embedder dimensions
- :capacity 10000     ; optional
- :M 16               ; optional
- :ef-construction 200 ; optional
- :ef-search 50       ; optional
- :distance :euclidean ; optional (or :cosine for normalized embeddings)
- :sync-on-write? false} ; optional; true syncs every store
+A live transcription demo is in `dev/kg_bm25_transcription_demo.clj`:
+
+```bash
+clojure -M:dev -m kg-bm25-transcription-demo
 ```
 
-If `:store-config` is omitted, the backend defaults to in-memory storage and data is lost on close. The runtime default config omits `:store-config` for a zero-setup in-memory experience; add `{:backend :file :path "..." :id #uuid "..."}` for durability. Set `:sync-on-write? true` for durability on every exchange, or rely on `-close` (halt) to sync before shutdown.
+It runs a scripted multi-turn session with the stub LLM and prints the
+recall block injected into each LLM request, plus the final persisted
+transcript.
 
-### In-memory example
+## Storage layout
 
-```clojure
-:lateralus/memory-backend
-{:impl :proximum
- :embedder #ig/ref :lateralus/embedder
- :store-config {:backend :memory :id #uuid "..."}}
-```
-
-## Storage layout (sketch for a future Datalevin/SQLite store)
-
-If a non-Proximum backend lands later, the sketch below still applies:
+Proximum keeps its index under the configured `:store-config`. KG + BM25 stores one directory per session:
 
 ```
-<LATERALUS_SESSIONS_DIR>/<session-id>/
-  data.mdb          ; entities (Datalog, LMDB, or whatever the store uses)
-  vectors/          ; HNSW vector index (separate from entities)
+sessions/kg-bm25/<session-id>/
+  messages.edn    ; raw messages, one EDN map per line
+  index.edn       ; inverted index + graph + derived stats
 ```
 
 Default sessions root: `./sessions/` (override via env/CLI in v2). The noop backend does not read or write this directory.

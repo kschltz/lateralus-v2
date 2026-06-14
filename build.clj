@@ -58,19 +58,53 @@
   (b/uber opts)
   (write-launcher! (:uber-file opts) launcher-file))
 
+(defn- native-uber-opts [opts]
+  (assoc opts
+         :lib lib :main main
+         :uber-file "target/lateralus-v2-native.jar"
+         :class-dir class-dir
+         :basis (b/create-basis {:aliases [:native]})
+         :src-dirs ["resources" "src"]
+         :ns-compile [main 'kschltz.agent.llm.http 'kschltz.agent.memory.http-embedding]))
+
+(defn- build-native-uber!
+  "Copy source files to class-dir, excluding JVM-only namespaces that
+   are not on the native classpath, then compile and uberjar."
+  [opts]
+  (b/delete {:path "target"})
+  (let [exclude? #{"src/kschltz/agent/memory/proximum_backend.clj"
+                   "src/kschltz/agent/memory/langchain4j_embedding.clj"}]
+    ;; Recreate class-dir with filtered source tree.
+    (.mkdirs (java.io.File. class-dir))
+    (doseq [src-dir ["resources" "src"]
+            ^java.io.File f (file-seq (java.io.File. src-dir))
+            :when (.isFile f)]
+      (let [rel (.substring (.getPath f) (inc (count src-dir)))
+            dest (java.io.File. class-dir rel)]
+        (when-not (exclude? (str src-dir "/" rel))
+          (.mkdirs (.getParentFile dest))
+          (b/copy-file {:src (.getPath f) :target (.getPath dest)})))))
+  (b/compile-clj (native-uber-opts opts))
+  (b/uber (native-uber-opts opts)))
+
+(defn native "Build a native executable for the KG + BM25 backend." [opts]
+  (build-native-uber! opts)
+  (let [graal-java "/tmp/graalvm/graalvm-jdk-25.0.3+9.1/Contents/Home"
+        native-image (str graal-java "/bin/native-image")]
+    (b/process {:command-args [native-image
+                               "-cp" "target/lateralus-v2-native.jar"
+                               "--initialize-at-build-time=com.fasterxml.jackson"
+                               "-H:+UnlockExperimentalVMOptions"
+                               "-H:Name=target/lateralus-v2-native"
+                               "-H:Path=/Users/schltzk/projects/lateralus-v2"
+                               "-H:Class=kschltz.lateralus"
+                               "-H:EnableURLProtocols=http,https"
+                               "--features=clj_easy.graal_build_time.InitClojureClasses"
+                               "--no-fallback"
+                               "-O2"]}))
+  opts)
+
 (defn uber "Build the uberjar and launcher script." [opts]
   (b/delete {:path "target"})
   (build-uber! (uber-opts opts))
   opts)
-
-(defn native "Attempt a GraalVM native-image build (stretch goal)." [opts]
-  ;; Step 9 stretch target. Implementing this requires:
-  ;;   - GraalVM toolchain installed locally
-  ;;   - clj-easy/graal-build-time build-time dep
-  ;;   - reflect-config.json for any runtime reflection
-  ;;   - native-image invocation against the uber jar
-  ;; If it blocks, document the blocker in README.md and CHANGELOG.md
-  ;; and ship the JVM uber/launcher as the MVP distributable.
-  (throw (ex-info "native-image build not yet implemented; use 'uber' for the JVM distributable"
-                  {:status :deferred
-                   :next-step "document blocker + JVM fallback in README.md"})))
