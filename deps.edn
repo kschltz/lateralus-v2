@@ -28,6 +28,10 @@
   ;; JVM-only Proximum HNSW index and the LangChain4j ONNX embedder.
   ;; Only the KG + BM25 memory backend (and optionally the HTTP embedder)
   ;; is available in this profile.
+  :jvm-full {:extra-deps {org.replikativ/proximum {:mvn/version "0.1.25"}
+                          dev.langchain4j/langchain4j-embeddings-all-minilm-l6-v2 {:mvn/version "0.36.2"}}
+             :jvm-opts ["--add-modules=jdk.incubator.vector"
+                        "--enable-native-access=ALL-UNNAMED"]}
   :native {:replace-deps {org.clojure/clojure {:mvn/version "1.12.5"}
                           integrant/integrant {:mvn/version "0.13.1"}
                           metosin/malli {:mvn/version "0.16.4"}
