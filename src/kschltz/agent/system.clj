@@ -36,7 +36,7 @@
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
             [kschltz.agent.memory.noop-backend :as noop-memory]
-            [kschltz.agent.memory.kg-bm25-backend :as kg-bm25-memory]
+            [kschltz.agent.memory.kg-bm25 :as kg-bm25-memory]
             [kschltz.agent.memory.protocol :as memory-protocol]))
 
 ;; Load optional JVM-only implementations when present on the classpath.

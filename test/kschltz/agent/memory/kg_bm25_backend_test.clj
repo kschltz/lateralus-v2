@@ -7,7 +7,7 @@
    persistence writes and reloads a session."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [kschltz.agent.memory.kg-bm25-backend :as kg]
+            [kschltz.agent.memory.kg-bm25 :as kg]
             [kschltz.agent.memory.protocol :as mem])
   (:import [java.io File]))
 

@@ -15,7 +15,10 @@ A non-Proximum backend (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-u
 ```clojure
 {:lateralus/embedder       {:method :langchain4j}
  :lateralus/memory-backend {:impl :proximum
-                            :embedder #ig/ref :lateralus/embedder}}
+                            :embedder #ig/ref :lateralus/embedder
+                            :store {:backend :file
+                                    :path "sessions/proximum"
+                                    :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
 ```
 
 This gives real session memory (recent + semantic recall) out of the box when running via the CLI or the uberjar launcher. The in-memory `system/default-config` keeps the noop backend + noop embedder so tests stay fast and isolated.
@@ -114,6 +117,8 @@ To enable dense embeddings in native-image, replace the noop embedder with the H
 ## Datalevin-style schema (future-only sketch; not used)
 
 > **Future backend only.** The current codebase does not use Datalevin. This schema is retained as a sketch in case a Datalevin backend lands later.
+
+```clojure
 {:v2/session-id   {:db/valueType :db.type/string :db/unique :db.unique/identity}
  :v2/model        {:db/valueType :db.type/string}
  :v2/emb-method   {:db/valueType :db.type/string}  ;; "http" | "onnx" (JVM only)
