@@ -1,3 +1,5 @@
+**Historical / archived — does not describe the current Integrant + plugin architecture. See `docs/architecture.md` for current design.**
+
 # Lateralus Architecture Remediation Plan
 
 Evidence-backed fixes from the 2026 architecture audit. Each item cites the flaw ID and acceptance checks.
@@ -98,55 +100,30 @@ Evidence-backed fixes from the 2026 architecture audit. Each item cites the flaw
 
 ---
 
-## Phase 4 — nREPL & docs (P3)
+## Phase 4 — Memory backend selection (P2, optional)
 
 | ID | Owner | Title | Scope | Depends |
 |----|-------|-------|-------|---------|
-| fix-040 | leader | nREPL: implement or remove stub | `repl.clj`, `nrepl_server.clj`, `deps.edn` | Phase 2 |
-| fix-041 | follower1 | Rename memory `:connection` → `:store` in API | `memory.clj`, `datalevin.clj`, `core.clj`, tests | fix-032 |
+| fix-040 | follower1 | Swap Datalevin for non-Datalevin store (SQLite/LMDB) | `src/kschltz/agent/memory/` + deps | fix-021 |
 
-**Decision needed (leader):** Option A — add `nrepl` to main deps + wire `:nrepl` tool. Option B — remove `nrepl_server.clj` and stub tool until ready.
+**Evidence:** Datalevin adds native LMDB complexity; SQLite or LMDB may be simpler for MVP.
+
+**Acceptance:**
+- Same `MemoryBackend` protocol surface
+- Existing memory tests pass against new backend
+- No Datalevin dependency in `:deps` if removed
 
 ---
 
-## Execution order (waves)
+## Verification Checklist
 
-```
-Wave 1 (now):  fix-001 → fix-002
-Wave 2:        fix-010 ‖ fix-011 → fix-012
-Wave 3:        fix-020 ‖ fix-021 ‖ fix-022
-Wave 4:        fix-030 → fix-031 ‖ fix-032
-Wave 5:        fix-040, fix-041 (after decision)
-```
+- [ ] `clojure -M:test -m cognitect.test-runner` green on `main` after each merge
+- [ ] `rg 'http/completion' src/kschltz/agent/core.clj` empty
+- [ ] `rg 'pmap' src/kschltz/agent/core.clj` empty (or behind explicit flag)
+- [ ] `core.clj` < 800 LOC
+- [ ] Each fix branch has its own test file update
 
-## Current wave status (2026-05-29)
+## Open Risks
 
-| ID | Owner | Status | Branch |
-|----|-------|--------|--------|
-| fix-001 | follower1 | **QA accept** — keyword+string parse fixed; cli_test green | `feature/fix-011-http-completion-malli` |
-| fix-002 | leader | **in progress** — full nohup verify `/tmp/lateralus-test-verify.log` | same |
-| fix-010 | leader | **QA accept** — `core` → `llm/call` | same branch |
-| fix-011 | follower1 | **QA accept** — Malli on completion; awaiting `[DONE]` | same |
-| fix-012 | leader | ready after fix-011 `[DONE]` | — |
-| fix-021 | follower2 | **QA accept** — mapv replaces pmap; awaiting `[DONE]` | same |
-| fix-022 | follower2 | **QA accept** — proximum removed; awaiting `[DONE]` | same |
-| fix-023 | follower1 | **assigned** — e2e_test tool counts (3→4); 6 suite failures | same |
-
-## Verification checklist (coordinator)
-
-- [ ] Full suite green after each wave — run with **nohup** (tests take several minutes):
-  ```bash
-  nohup clojure -M:test -m cognitect.test-runner > /tmp/lateralus-test-<agent>.log 2>&1 &
-  tail -20 /tmp/lateralus-test-<agent>.log   # when complete: 0 failures, 0 errors
-  ```
-- [ ] `[DONE]` messages include last 10 lines of test log
-- [ ] No direct `http/completion` from `core.clj`
-- [ ] `rg proximum deps.edn` → no match
-- [ ] Intercom `[DONE]` received per task with branch + test output
-- [ ] `AGENTS.md` or README note on repl-eval security (human-curated) after Wave 3
-
-## Out of scope (this plan)
-
-- Replacing HTML scraping with paid search APIs
-- Full `core.clj` rewrite in one PR
-- Sandbox for `repl-eval` (separate security initiative)
+1. `core.clj` split may change callback/event ordering — parity tests required before merge.
+2. Removing Datalevin may require migration/reset of dev session data; acceptable for MVP.

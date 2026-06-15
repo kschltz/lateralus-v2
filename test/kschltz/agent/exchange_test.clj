@@ -9,8 +9,8 @@
      - compose-context trim stub pin (memory-followup marker)
      - error-boundary handles errors so :leave stages still run
      - decoupling verification (no agent.loop dependency)
-     - LlmClient boundary (no direct HTTP in interceptors)
-     - bind-llm-client wires the agent's LlmClient into the chain"
+    - LlmClient boundary (no direct HTTP in interceptors)
+    - Pre-wired dependencies flow into the exchange context"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [kschltz.agent.chain :as chain]
@@ -46,7 +46,6 @@
 (deftest chain-loads-in-correct-order
   (testing "default chain has the locked stage order"
     (is (= [::ix/error-boundary
-            ::ix/bind-llm-client
             ::ix/compose-context
             ::ix/llm-call
             ::ix/parse-response
@@ -183,7 +182,7 @@
     (is (not (contains? out ::chain/error))
         "error-boundary cleared engine ::error so chain doesn't rethrow")))
 
-;; ---- bind-llm-client: agent's client flows through to llm-call ----
+;; ---- Pre-wired client: agent's client flows through to llm-call ----
 
 (defn- marker-client []
   (reify LlmClient
@@ -192,35 +191,10 @@
        :model "marker/v0"
        :stub? true})))
 
-(deftest bind-llm-client-copies-agent-client
-  (testing "bind-llm-client copies :agent/llm-client onto ctx as :llm/client"
-    (let [agent-client (marker-client)
-          enter-fn     (:enter ix/bind-llm-client)
-          ctx          {:agent/llm-client agent-client}
-          out          (enter-fn ctx)]
-      (is (identical? agent-client (:llm/client out))
-          "agent's LlmClient is now visible to llm-call via ctx"))))
-
-(deftest bind-llm-client-prefers-ctx-client
-  (testing "an explicit :llm/client on ctx takes precedence over the agent's"
-    (let [agent-client (marker-client)
-          ctx-client   (marker-client)
-          enter-fn     (:enter ix/bind-llm-client)
-          ctx          {:agent/llm-client agent-client
-                        :llm/client      ctx-client}
-          out          (enter-fn ctx)]
-      (is (identical? ctx-client (:llm/client out))
-          "ctx-provided client wins (tests may inject a fake this way)"))))
-
 (deftest agent-map-client-flows-into-exchange
   (testing "agent-map-configured LlmClient is what the chain uses end-to-end"
-    ;; The marker client lives on the agent map (no Integrant call).
-    ;; The per-exchange ctx carries ONLY :agent/llm-client (not
-    ;; :llm/client). The bind-llm-client stage copies the agent's
-    ;; client onto ctx, and llm-call invokes the marker.
-    ;;
-    ;; :embedder and :memory-backend are placeholders only — the
-    ;; chain doesn't read them off the agent map during execute.
+    ;; The marker client lives on the agent map. The runtime pre-wires
+    ;; it onto ctx as :llm/client, so llm-call invokes the marker.
     (let [marker    (marker-client)
           agent-map {:agent/llm-client  marker
                      :embedder          :placeholder
@@ -230,7 +204,7 @@
           out       (chain/execute
                      {:agent/state        {:base-url "stub" :api-key nil :model "stub/v0"
                                            :agent/system-message "sys"}
-                      :agent/llm-client   marker
+                      :llm/client         marker
                       :exchange/user-text "hello"
                       :exchange/session-id :test-session
                       :exchange/user-msg-id (str (random-uuid))}

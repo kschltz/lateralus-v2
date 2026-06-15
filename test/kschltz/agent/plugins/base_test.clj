@@ -13,7 +13,7 @@
   (testing "base plugin contributes core interceptors in expected slots"
     (let [p (base/base-plugin)]
       (is (= :base (:plugin/name p)))
-      (is (= [::ix/error-boundary ::ix/bind-llm-client]
+      (is (= [::ix/error-boundary]
              (mapv :name (get-in p [:plugin/slots :guard]))))
       (is (= [::ix/compose-context]
              (mapv :name (get-in p [:plugin/slots :compose]))))
@@ -33,7 +33,6 @@
     (let [chain (plugin/assemble-chain [(base/base-plugin)])
           original-names (mapv :plugin/original-name chain)]
       (is (= [::ix/error-boundary
-              ::ix/bind-llm-client
               ::ix/compose-context
               ::ix/llm-call
               ::ix/parse-response

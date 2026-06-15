@@ -7,7 +7,7 @@
    Slot assignment matches the default slot order in
    `kschltz.agent.plugin/default-slot-order`:
 
-     :guard    — error-boundary, bind-llm-client
+     :guard    — error-boundary
      :compose  — compose-context
      :llm      — llm-call, parse-response
      :dispatch — dispatch
@@ -28,8 +28,7 @@
   []
   {:plugin/name :base
    :plugin/slots
-   {:guard    [ix/error-boundary
-               ix/bind-llm-client]
+   {:guard    [ix/error-boundary]
     :compose  [ix/compose-context]
     :llm      [ix/llm-call
                ix/parse-response]

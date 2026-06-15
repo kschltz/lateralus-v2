@@ -20,10 +20,6 @@
                         engine ::error, annotates :error/raised) so
                         subsequent :leave stages run and the
                         annotation is observable on the final ctx
-     bind-llm-client  — copies the agent's Integrant-configured
-                        LlmClient from :agent/llm-client onto
-                        :llm/client on the per-exchange ctx so
-                        llm-call actually sees the wired client
      compose-context  — assembles the LLM request from :agent/state +
                         :exchange/user-text + recall
      llm-call         — invokes the configured LlmClient; protocol-only
@@ -49,10 +45,10 @@
   (llm-client/stub-client))
 
 (defn call-llm
-  "Invoke the LlmClient on ctx. Reads `:llm/client` (set by
-   `bind-llm-client` from the agent map; falls back to the stub
-   when no agent client is configured). Reads `:llm/request`.
-   Writes `:llm/response`."
+  "Invoke the LlmClient on ctx. Reads `:llm/client` (pre-wired by
+   the runtime from the agent map). Falls back to the stub only
+   when no client is present, preserving the legacy test path.
+   Reads `:llm/request`. Writes `:llm/response`."
   [ctx]
   (let [client (or (:llm/client ctx) (default-llm-client))
         req    (:llm/request ctx)]
@@ -80,38 +76,6 @@
    :compose/trimmed? marker on ctx."
   [messages]
   messages)
-
-(def bind-llm-client
-  "Copy the agent's LlmClient from `:agent/llm-client` (set by the
-   runtime per exchange) onto ctx as `:llm/client`. This makes the
-   Integrant-configured LlmClient actually visible to the chain —
-   without this stage, `llm-call` would always fall back to a fresh
-   stub because the agent's client lives on the agent map, not on
-   the per-exchange ctx.
-
-   Placed first (after error-boundary) so the client is bound
-   before any stage that might need it.
-
-   Contract: only assoc `:llm/client` when a client is found (either
-   on ctx or in the agent map). When no client is available, the
-   stage is a no-op and `llm-call` falls back to a fresh stub.
-   This avoids stamping nil into the ctx, which would break code
-   that distinguishes 'absent' from 'present, nil'.
-
-   Ctx-precedence: if `:llm/client` is already on ctx (a plugin or
-   test set it explicitly), the ctx value wins — `bind-llm-client`
-   is a *fallback* binding, not an override. See
-   `bind-llm-client-prefers-ctx-client` in the test file.
-
-   MVP note: only `:stub` impl is wired in `kschltz.agent.llm.client`;
-   the `:http` impl throws at init time and the chain cannot recover
-   from this until Step 5 lands."
-  {:name ::bind-llm-client
-   :enter (fn [ctx]
-            (if-let [client (or (:llm/client ctx)
-                                (:agent/llm-client ctx))]
-              (assoc ctx :llm/client client)
-              ctx))})
 
 (def error-boundary
   "Handles any error raised by the chain. Clears the engine ::error
@@ -161,7 +125,7 @@
 
 (def llm-call
   "Invoke the LlmClient. Wraps `call-llm`. No business logic — only
-   reads `:llm/client` (set by `bind-llm-client`) and `:llm/request`,
+   reads `:llm/client` (pre-wired by the runtime) and `:llm/request`,
    writes `:llm/response`."
   {:name ::llm-call
    :enter call-llm})
@@ -228,7 +192,7 @@
 (def all-stages
   "All defined stages. Order is not significant here; assembly
    happens through the base plugin in `kschltz.agent.plugins.base`."
-  [error-boundary bind-llm-client compose-context llm-call
+  [error-boundary compose-context llm-call
    parse-response dispatch store-exchange deliver-responses notify])
 
 ;; ---- Schema self-check ----
