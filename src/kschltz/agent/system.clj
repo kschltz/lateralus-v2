@@ -28,6 +28,7 @@
    Integrant skips keys with no `halt-key!` defined, which is the
    correct behavior — defining a no-op halt is misleading."
   (:require [integrant.core :as ig]
+            [malli.core :as m]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
@@ -46,6 +47,77 @@
   (require 'kschltz.agent.memory.langchain4j-embedding)
   (require 'kschltz.agent.memory.proximum-backend)
   (catch Throwable _))
+
+;; ---- Component definitions ----
+
+;; ---- Malli pre-init validation ----
+;;
+;; `ig/assert-key` is called before any resources are allocated, so
+;; malformed configs fail fast with a clear explanation of which key
+;; is wrong and which fields are missing or invalid.
+
+(defn- assert-malli!
+  "Validate `value` with Malli `schema`. On failure throw an ex-info
+   with `:key` and `:problems` so callers (and Integrant's wrapper)
+   can surface the exact failure."
+  [key schema value]
+  (when-let [problems (m/explain schema value)]
+    (throw (ex-info (str "Integrant config failed Malli validation for " key)
+                    {:key key
+                     :schema schema
+                     :problems (:errors problems)}))))
+
+(def ^:private LlmClientConfig
+  "Malli schema for :lateralus/llm-client."
+  [:multi {:dispatch :impl}
+   [:stub [:map [:impl [:= :stub]]]]
+   [:http [:map
+           [:impl [:= :http]]
+           [:base-url :string]
+           [:model :string]
+           [:api-key {:optional true} [:maybe :string]]
+           [:connect-timeout-ms {:optional true} :int]
+           [:request-timeout-ms {:optional true} :int]
+           [:max-retries {:optional true} :int]]]])
+
+(def ^:private EmbedderConfig
+  "Malli schema for :lateralus/embedder."
+  [:multi {:dispatch :method}
+   [:noop [:map [:method [:= :noop]]]]
+   [:http [:map
+           [:method [:= :http]]
+           [:base-url :string]
+           [:model :string]
+           [:dimensions :int]
+           [:api-key {:optional true} [:maybe :string]]
+           [:connect-timeout-ms {:optional true} :int]
+           [:request-timeout-ms {:optional true} :int]]]
+   [:langchain4j [:map [:method [:= :langchain4j]]]]])
+
+(def ^:private MemoryBackendConfig
+  "Malli schema for :lateralus/memory-backend."
+  [:multi {:dispatch :impl}
+   [:noop [:map [:impl [:= :noop]]]]
+   [:proximum [:map
+               [:impl [:= :proximum]]
+               [:store {:optional true} :map]
+               [:embedder {:optional true} some?]]]
+   [:kg-bm25 [:map
+              [:impl [:= :kg-bm25]]
+              [:store :map]
+              [:top-y {:optional true} :int]
+              [:last-n {:optional true} :int]
+              [:rrf-k {:optional true} :int]
+              [:extract-fn {:optional true} fn?]]]])
+
+(defmethod ig/assert-key :lateralus/llm-client [_ config]
+  (assert-malli! :lateralus/llm-client LlmClientConfig config))
+
+(defmethod ig/assert-key :lateralus/embedder [_ config]
+  (assert-malli! :lateralus/embedder EmbedderConfig config))
+
+(defmethod ig/assert-key :lateralus/memory-backend [_ config]
+  (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
 
 ;; ---- Component definitions ----
 
