@@ -1,3 +1,7 @@
+**Historical / archived — does not describe the current Integrant + plugin architecture. See `docs/architecture.md` for current design.**
+
+---
+
 # Session Memory System — MVI Spec
 
 ## Architecture

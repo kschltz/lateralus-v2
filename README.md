@@ -86,15 +86,15 @@ To disable memory and restore the noop behavior:
  :lateralus/memory-backend {:impl :noop}}
 ```
 
-To make memory durable across JVM restarts, add a file-backed `:store-config`:
+To make memory durable across JVM restarts, add a file-backed `:store`:
 
 ```clojure
 {:lateralus/memory-backend
  {:impl :proximum
   :embedder #ig/ref :lateralus/embedder
-  :store-config {:backend :file
-                 :path "sessions/proximum"
-                 :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
+  :store {:backend :file
+          :path "sessions/proximum"
+          :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
 ```
 
 See [`docs/memory-v2.md`](docs/memory-v2.md) for the full configuration reference.
@@ -199,26 +199,53 @@ Notes and limitations:
 | Path | Description |
 |------|-------------|
 | [`goals/lateralus-v2-rewrite/`](goals/lateralus-v2-rewrite/) | Active goal — facts, plan, interview artifacts |
-| [`docs/architecture.md`](docs/architecture.md) | Architecture overview and component graph |
-| [`docs/interceptor-loop-implementation-plan.md`](docs/interceptor-loop-implementation-plan.md) | Original interceptor-chain thesis |
-| [`docs/memory-v2.md`](docs/memory-v2.md) | v2 memory schema sketch |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture overview, component graph, and plugin slot vocabulary |
+| [`docs/interceptor-loop-design-note.md`](docs/interceptor-loop-design-note.md) | Historical interceptor-chain thesis (superseded, kept for context) |
+| [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
+| [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
+| [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
+| [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
+| [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
+| [`src/kschltz/agent/runtime.clj`](src/kschltz/agent/runtime.clj) | Outer loop: ctx creation + chain call + state merge |
+| [`src/kschltz/agent/system.clj`](src/kschltz/agent/system.clj) | Integrant component definitions, default config, Malli `ig/assert-key` validation |
+| [`src/kschltz/agent/chain.clj`](src/kschltz/agent/chain.clj) | Interceptor engine |
+| [`src/kschltz/agent/plugin.clj`](src/kschltz/agent/plugin.clj) | Plugin assembly and slot-order contract |
+| [`src/kschltz/agent/plugins/base.clj`](src/kschltz/agent/plugins/base.clj) | Default base plugin with the standard exchange chain |
+| [`src/kschltz/agent/plugins/memory.clj`](src/kschltz/agent/plugins/memory.clj) | Memory plugin: recall (`:enrich`) and persist (`:persist`) |
+| [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
+| [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
+| [`src/kschltz/agent/llm/client.clj`](src/kschltz/agent/llm/client.clj) | `LlmClient` protocol + stub + HTTP wrapper |
+| [`src/kschltz/agent/llm/schemas.clj`](src/kschltz/agent/llm/schemas.clj) | OpenAI-shaped request/response Malli schemas |
+| [`src/kschltz/agent/memory/protocol.clj`](src/kschltz/agent/memory/protocol.clj) | `MemoryBackend` and `Embedder` protocols |
+| [`src/kschltz/agent/memory/kg_bm25_backend.clj`](src/kschltz/agent/memory/kg_bm25_backend.clj) | Embedding-free KG + BM25 backend (native-image default) |
+| [`src/kschltz/agent/memory/http_embedding.clj`](src/kschltz/agent/memory/http_embedding.clj) | OpenAI-compatible HTTP embedder (native-image friendly) |
+| [`resources/lateralus/config.edn`](resources/lateralus/config.edn) | JVM runtime default config (Proximum + LangChain4j) |
+| [`resources/lateralus/native.edn`](resources/lateralus/native.edn) | Native-image runtime config (KG-BM25 + noop HTTP embedder) |
 | [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) | Short contributor guide |
 
 ## Status
 
 Implemented:
-- Steps 1–5: bootstrap, chain engine, plugin system, Integrant system, real HTTP-backed LlmClient + Malli schemas
-- Step 6: memory plugin interceptors + noop `MemoryBackend`; **Proximum HNSW backend** + **LangChain4j in-process ONNX embedder** as the runtime default
+- Steps 1–5: bootstrap, chain engine, plugin system, Integrant system, real HTTP-backed `LlmClient` + Malli schemas
+- Step 6: memory plugin interceptors + noop `MemoryBackend`; **Proximum HNSW backend** + **LangChain4j in-process ONNX embedder** as the JVM runtime default; **KG + BM25 backend** as the native-image default
 - Step 7: agent outer loop + traceability (synchronous MVP design)
 - Step 8: clean-slate CLI
+- Step 9: **GraalVM native-image build** with the KG + BM25 backend and a filtered classpath that excludes JVM-only Proximum / LangChain4j sources
 - Step 10: docs, JVM distributable, quality-gate tests
 
+Current work (see `kb status`):
+- [006] Replace shallow state merge with deep or explicit state update
+- [007] Pre-wire dependencies into context instead of bind-llm-client
+- [008] Refactor KG-BM25 backend into focused namespaces
+
+Recently completed:
+- [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
+
 Deferred:
-- Step 9: GraalVM native-image build (blocked by ONNX JNI until an HTTP embedder is used)
 - Async worker thread for the runtime
 - `--interactive` REPL mode
 - Environment-variable support for `LATERALUS_V2_*`
-- HTTP embedder for native-image / cloud embedding deployments
+- Multi-agent communication plugin (`docs/file-backed-comms-plan-consensus.md`)
 
 ## License
 

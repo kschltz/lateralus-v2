@@ -3,10 +3,11 @@
 ## Canonical Sources
 
 - **Active goal:** `goals/lateralus-v2-rewrite/goal.md` → `facts.md` → `plan.md`
-- **Architecture thesis:** `docs/interceptor-loop-implementation-plan.md`
+- **Architecture overview:** `docs/architecture.md`
+- **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **v1 reference (archive):** sibling repo `../lateralus/` — port seed code only, do not copy `core.clj` or `loop.clj`
-- **Historical goals/plans:** `goals/lateralus-file-editing/`, `docs/arch-remediation-plan.md`, `docs/clj-edit-implementation-plan.md`, `docs/memory-system-mvi.md`
+- **Historical goals/plans (archived):** `goals/lateralus-file-editing/`, `docs/archive/arch-remediation-plan.md`, `docs/archive/clj-edit-implementation-plan.md`, `docs/archive/memory-system-mvi.md`
 
 ## The One Rule
 
@@ -49,6 +50,10 @@ Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without
 ## MVP status
 
 - Steps 1–6, 7–8, and 10 are implemented.
-- Step 6 ships the memory plugin interceptors, a noop `MemoryBackend`, and a **Proximum** HNSW backend with **LangChain4j in-process ONNX embedding** as the runtime default.
-- Step 9 (GraalVM native-image) is a deferred follow-up: attempted with GraalVM 25 on macOS arm64; blocked by (1) LangChain4j ONNX JNI/native libs and (2) transitive Timbre mutable logger heap state via `org.replikativ/konserve`. An HTTP embedder and either a non-Proximum backend or Timbre replacement are prerequisites.
+- Step 6 ships the memory plugin interceptors, a noop `MemoryBackend`, and a **Proximum** HNSW backend with **LangChain4j in-process ONNX embedding** as the JVM runtime default. A **KG + BM25** backend is the native-image default.
+- Step 9 (GraalVM native-image) is implemented using the KG + BM25 backend and a noop HTTP embedder, with Proximum / LangChain4j sources excluded from the filtered native classpath.
 - Step 10 (docs + quality gate) is complete.
+
+## Doc freshness policy
+
+When a Kanban card changes architecture (new Integrant keys, plugin slots, protocol surface, or default config), update `docs/architecture.md` and `README.md` status before advancing the card.

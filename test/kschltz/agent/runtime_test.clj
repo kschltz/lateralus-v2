@@ -149,6 +149,28 @@
       (is (= {:n 3} (runtime/stop runtime))
           "after three sends, state is {:n 3}"))))
 
+(deftest send-message-deep-merges-nested-state-delta
+  (testing "nested maps in :agent/state-delta are merged deeply, while
+   scalars remain last-write-wins across exchanges"
+    (let [chain [{:name ::nested-delta
+                  :leave (fn [ctx]
+                           (let [turn (inc (:n (:agent/state ctx) 0))]
+                             (assoc ctx :agent/state-delta
+                                    {:n turn
+                                     :config (case turn
+                                               1 {:turn 1 :extra :one}
+                                               2 {:turn 2}
+                                               3 {:extra :three})})))}]
+          runtime (runtime/start {:exchange-chain chain})]
+      (runtime/send-message runtime "first")
+      (is (= {:n 1 :config {:turn 1 :extra :one}} (runtime/stop runtime)))
+      (runtime/send-message runtime "second")
+      (is (= {:n 2 :config {:turn 2 :extra :one}} (runtime/stop runtime))
+          "nested config map is merged, preserving sibling :extra from turn 1")
+      (runtime/send-message runtime "third")
+      (is (= {:n 3 :config {:turn 2 :extra :three}} (runtime/stop runtime))
+          "scalar :extra is last-write-wins; nested :turn keeps its prior value"))))
+
 (deftest send-message-uses-custom-chain
   (testing "send-message runs the chain from :exchange-chain in agent-map"
     (let [events  (atom [])
@@ -211,22 +233,30 @@
       (is (= {:n 1} (runtime/stop runtime))
           "stop after one send returns the merged state"))))
 
-(deftest send-message-forwards-agent-llm-client
-  (testing "send-message forwards the agent-map's :agent/llm-client
-   onto the per-exchange ctx, so bind-llm-client can find it
-   and llm-call can invoke it."
-    (let [marker    (reify Object) ; any object
-          seen-ctx  (atom nil)
-          spy-chain [{:name ::spy
-                      :enter (fn [ctx]
-                               (reset! seen-ctx ctx)
-                               (assoc ctx :agent/state-delta {:spied? true}))}]
-          runtime   (runtime/start
-                     {:exchange-chain    spy-chain
-                      :agent/llm-client  marker})]
+(deftest send-message-prewires-dependencies-in-ctx
+  (testing "send-message pre-wires :llm/client, :memory/backend and
+   :embedder directly on the per-exchange ctx, so interceptors do not
+   need to copy them."
+    (let [llm-client     (reify Object)
+          memory-backend (reify Object)
+          embedder       (reify Object)
+          seen-ctx       (atom nil)
+          spy-chain      [{:name ::spy
+                           :enter (fn [ctx]
+                                    (reset! seen-ctx ctx)
+                                    (assoc ctx :agent/state-delta {:spied? true}))}]
+          runtime        (runtime/start
+                          {:exchange-chain    spy-chain
+                           :agent/llm-client  llm-client
+                           :memory-backend    memory-backend
+                           :embedder          embedder})]
       (runtime/send-message runtime "hi")
-      (is (identical? marker (:agent/llm-client @seen-ctx))
-          "the agent-map's :agent/llm-client is on the per-exchange ctx"))))
+      (is (identical? llm-client (:llm/client @seen-ctx))
+          "the agent-map's LLM client is on ctx as :llm/client")
+      (is (identical? memory-backend (:memory/backend @seen-ctx))
+          "the agent-map's memory backend is on ctx as :memory/backend")
+      (is (identical? embedder (:embedder @seen-ctx))
+          "the agent-map's embedder is on ctx as :embedder"))))
 
 (deftest runtime-is-small
   (testing "the runtime ns is small (plan verification: < 150 LOC)"

@@ -66,7 +66,7 @@
           "memory recall interceptor is present")
       (is (some #(= :memory.persist (:name %)) chain)
           "memory persist interceptor is present")
-      (is (= :memory.enrich (nth names 2))
+      (is (= :memory.enrich (nth names 1))
           "recall runs in the enrich slot, before compose-context"))))
 
 (deftest runtime-uses-memory-plugin

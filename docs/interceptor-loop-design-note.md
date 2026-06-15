@@ -1,5 +1,7 @@
 # Interceptor Architecture — Everything Is an Interceptor
 
+> **Historical design note — superseded.** This document records the pre-v2 interceptor-chain thesis. The current architecture is documented in [`docs/architecture.md`](./architecture.md) and implemented in `src/kschltz/agent/chain.clj`, `src/kschltz/agent/plugin.clj`, `src/kschltz/agent/plugins/base.clj`, `src/kschltz/agent/plugins/memory.clj`, `src/kschltz/agent/interceptors.clj`, and `src/kschltz/agent/interceptors/schema.clj`. Do not use this file as a spec for new work.
+
 Status: **superseded by the v2 implementation** (commits ed22b45+).
 Scope: new `kschltz.agent.chain` (engine), new `kschltz.agent.interceptors.*`,
 rewrite of `kschltz.agent.loop`, surface changes in `kschltz.agent.core`
@@ -11,9 +13,7 @@ to v1's `loop/` namespace and not ported. In v2, retry/tool-error handling
 lives in plugin slots (`:guard`, `:enrich`, etc.) rather than dedicated
 chain stages, and the engine treats any unhandled error as a hard rethrow
 (see `kschltz.agent.chain/execute`). Treat the rest of this doc as design
-context, not a current implementation spec — the source of truth is
-`src/kschltz/agent/{chain,interceptors,plugin,exchange}.clj` and the
-audit history under `goals/lateralus-v2-rewrite/`.
+context, not a current implementation spec.
 
 ## Thesis
 
@@ -79,7 +79,7 @@ Why own it rather than depend on `io.pedestal/pedestal.interceptor`:
   awkward to bolt onto Pedestal
 - the contract is small and frozen; the cost is ~120 lines + tests once
 
-## 2. The ctx — one map, Malli-schemed
+## 2. The ctx — one map, intentionally open
 
 Created per exchange in the (thin) outer loop, threaded through everything:
 
@@ -104,10 +104,12 @@ Created per exchange in the (thin) outer loop, threaded through everything:
  :memory/stored      nil}
 ```
 
-`Ctx` Malli schema in `kschltz.agent.interceptors.schema`. The engine
-optionally validates ctx after every stage when `:chain/instrument? true`
-(dev/test default, off in prod) — every interceptor gets input/output
-checking for free, consistent with existing Malli usage.
+`Ctx` Malli schema in `src/kschltz/agent/interceptors/schema.clj`. The
+schema is intentionally open: it validates only a few instrumentation and
+traceability keys, leaving domain keys free for plugins to extend without a
+schema migration. The engine does not enforce a closed ctx shape after every
+stage; Malli instrumentation is used for Integrant config validation and
+protocol I/O boundaries, not for the context map itself.
 
 Per project convention, anything that touches the network stays behind a
 protocol with Malli-instrumented implementation fns:
@@ -195,7 +197,35 @@ What this buys over the current code:
 - a tracing plugin sees *every* stage uniformly, including each tool call
 - adding a capability never means editing `loop.clj` again
 
-## 5. Migration phases (each lands green)
+## Current chain at a glance
+
+The assembled default chain today (from `src/kschltz/agent/plugin.clj` and `src/kschltz/agent/plugins/base.clj`) is:
+
+| Order | Slot | Interceptor | Source |
+|-------|------|-------------|--------|
+| enter | `:guard` | `error-boundary` | `src/kschltz/agent/interceptors.clj` |
+| enter | `:guard` | `bind-llm-client` | `src/kschltz/agent/interceptors.clj` |
+| enter | `:enrich` | `memory-recall` | `src/kschltz/agent/plugins/memory.clj` |
+| enter | `:compose` | `compose-context` | `src/kschltz/agent/interceptors.clj` |
+| enter | `:llm` | `llm-call` | `src/kschltz/agent/interceptors.clj` |
+| enter | `:llm` | `parse-response` | `src/kschltz/agent/interceptors.clj` |
+| enter | `:dispatch` | `dispatch` | `src/kschltz/agent/interceptors.clj` |
+| leave | `:history` | `store-exchange` | `src/kschltz/agent/interceptors.clj` |
+| leave | `:persist` | `memory-persist` | `src/kschltz/agent/plugins/memory.clj` |
+| leave | `:observe` | `deliver-responses` | `src/kschltz/agent/interceptors.clj` |
+| leave | `:notify` | `notify` | `src/kschltz/agent/interceptors.clj` |
+
+The source of truth is `src/kschltz/agent/interceptors.clj` for base interceptors and `src/kschltz/agent/plugins/base.clj` / `src/kschltz/agent/plugins/memory.clj` for plugin contributions.
+
+## Relationship to in-progress cards
+
+Three active kanban cards touch this chain directly:
+
+- **[006] Replace shallow state merge with deep or explicit state update** — will change how `:agent/state-delta` is merged by the runtime after the chain unwinds; the interceptor contract (`:agent/state-delta` staging) is unchanged.
+- **[007] Pre-wire dependencies into context instead of bind-llm-client** — will remove the `:guard`-stage `bind-llm-client` indirection and instead inject dependencies (LLM client, embedder, memory backend) directly into the ctx map before the chain starts.
+- **[008] Refactor KG-BM25 backend into focused namespaces** — does not change chain order but affects the `:enrich` memory-recall payload.
+
+## 5. Migration phases
 
 ### Phase 1 — engine + schema
 
@@ -214,7 +244,6 @@ What this buys over the current code:
 - [ ] `(chain/terminate ctx)` skips all remaining `:enter`s; already-entered interceptors still get `:leave`
 - [ ] Exception in `:enter` of `b`: `c` never enters; `:error` walked `b → a`; if `a`'s `:error` returns ctx without `::error`, `a`'s `:leave` does NOT re-run (Pedestal semantics) and execution completes
 - [ ] Unhandled `::error` at end of stack → `execute` rethrows (ex-info wrapping original, with `:chain/stage` and `:interceptor/name` in ex-data)
-- [ ] With `:chain/instrument? true`, an interceptor returning a ctx violating `Ctx` throws with the offending interceptor name; with flag off, zero Malli calls (verify via `with-redefs` counter)
 - [ ] Engine namespace ≤ ~150 lines, no new entries in `deps.edn`
 - [ ] `clojure -M:test` green; no existing test touched
 
@@ -239,68 +268,20 @@ What this buys over the current code:
 - [ ] `dispatch` covered for all four branches: pending tool calls, depth exhausted, blank response, normal finalize
 - [ ] Existing test suite still green — `loop.clj` public behavior byte-identical (no call sites changed)
 
-### Phase 3 — parity harness
+### Phases 3–5 — future work (not implemented / not scheduled)
 
-**Codepaths**
+The parity harness, v1 loop cutover, and full pluginization described in the original plan were not implemented as written. The v2 codebase instead:
 
-| Path | Change |
-|---|---|
-| `test/kschltz/agent/parity_test.clj` | NEW — runs each scripted scenario through BOTH `loop/llm-turn` and `chain/execute` with the new chain |
-| `test/kschltz/agent/fixtures/scripted_llm.clj` | NEW — `LlmClient` fake returning a pre-scripted response sequence; records calls |
+- Wrote a clean-slate `kschltz.agent.chain` engine.
+- Built `kschltz.agent.plugin`, `kschltz.agent.plugins.base`, and `kschltz.agent.plugins.memory` directly, without first preserving v1 `loop.clj` behavior.
+- Kept the tool registry and dispatch separate from the interceptor chain; tools are not yet interceptorized.
 
-**Scenario corpus** (each one asserts on `{:response :transcript}` equality AND the ordered `:on-thought`/`:on-response`/`:on-error` event sequence):
-1. text-only response
-2. single tool call → text
-3. multi-step tool chain (3 iterations)
-4. tool throwing → corrective retry path (`tool-error-retry`)
-5. API error → context-trim retry → success (`api-error-retry`, exercises `context/truncate-chat-message` trimming rules)
-6. API error → retries exhausted → terminal error text
-7. empty/blank response → retry → success
-8. depth exhaustion → `wrap-up` prompt → final text
-9. tool call with Malli-invalid args (`tools/validate-args` rejection surfaced to model)
+The detailed Phase 3–5 acceptance criteria are retained for historical context only. Do not schedule them as-is.
 
-**Acceptance criteria**
-- [ ] All 9 scenarios: old path and new chain produce equal `:response`, equal `:transcript` (ordered), equal callback event sequences
-- [ ] Scripted client asserts the *requests* sent to the LLM are identical between paths (message lists after compose/trim) — catches silent context drift
-- [ ] Memory side effects compared against an in-memory Datalevin (`memory/datalevin.clj` supports tmp-dir conns): same facts/messages stored, same order
-- [ ] Parity suite tagged `^:parity`, runs in default `clojure -M:test`
-
-### Phase 4 — cutover
-
-**Codepaths**
-
-| Path | Change |
-|---|---|
-| `src/kschltz/agent/loop.clj` | `process-messages` builds initial ctx and calls `chain/execute`; `llm-turn` becomes a thin adapter over the chain (kept, deprecated); `agent-loop`, `drain-queue!`, `queue-wait` untouched |
-| `src/kschltz/agent/core.clj` | `make-agent` stores assembled default chain in state under `:agent/chain` |
-
-**Acceptance criteria**
-- [ ] Full existing test suite green, including the `test-sessions-*` integration tags, with the chain as the live path
-- [ ] Phase 3 parity suite now redundant by construction (old path delegates to chain) but still green
-- [ ] Concurrency invariant: chain never `send`s to the agent except via `notify`; all state mutation flows through `:agent/state-delta` merged by `agent-loop` — verified by a test running `send-message!` concurrently with an in-flight exchange and asserting no queued message is lost (regression guard for the `a30f2e8` queue race)
-- [ ] `:on-thought` event ordering unchanged in an end-to-end run against the scripted client
-- [ ] No reflection warnings introduced (`clojure -M:test` with `*warn-on-reflection*`)
-
-### Phase 5 — pluginization
-
-**Codepaths**
-
-| Path | Change |
-|---|---|
-| `src/kschltz/agent/plugin.clj` | NEW — `Plugin` Malli schema, `assemble-chain` (pure fold of plugins into slot template) |
-| `src/kschltz/agent/plugins/{memory,remember,repl,clj_edit,web,portal,safety}.clj` | NEW — plugin constructors; bodies delegate to existing `tools/*` and `safety/pre_filter.clj` (`check-input` → `:guard` slot) and memory recall (`:enrich`) / `store-exchange` (`:persist`) |
-| `src/kschltz/agent/core.clj` | `make-agent` accepts `:plugins`; `default-agent-tools` + the 8 `add-*-tool!`/`register-tool!` installers reimplemented as plugin registration, kept as deprecated aliases |
-| `README.md`, `CHANGELOG.md` | Plugin authoring section; migration notes |
-
-**Acceptance criteria**
-- [ ] `assemble-chain` is pure: same plugins → same chain (test with `=` on interceptor `:name` sequence); slot order fixed as documented in §3, within-slot order = declaration order
-- [ ] Invalid plugin map (bad slot name, non-interceptor entry) fails fast at `make-agent` with a Malli explanation, not at first exchange
-- [ ] Each converted plugin has a test proving equivalence with its old installer: agent built via `add-web-search-tool!` and via `:plugins [(plugins.web/plugin)]` expose identical tool defs and produce identical results against the scripted client
-- [ ] `safety` plugin: an injection-flagged input (per `pre_filter/check-input`) terminates the chain in `:guard` — no LLM call recorded by the scripted client; `:on-error`/refusal delivery still fires via `:leave` unwind
-- [ ] Memory plugin off (`:plugins` without it) → no Datalevin conn opened (verify via fake conn factory)
-- [ ] Deprecated aliases log a single deprecation warning and pass all pre-existing tests unmodified
-- [ ] `core.clj` contains no direct requires of `tools/*` or `safety/*` namespaces (grep gate)
-- [ ] README documents: writing a plugin, slot table, ordering rules; CHANGELOG entry
+**Not implemented:**
+- Phase 3 — parity harness against legacy `loop/llm-turn`.
+- Phase 4 — cutover from legacy loop to new chain.
+- Phase 5 — pluginization of v1 tools (`remember`, `repl`, `clj-edit`, `web`, `portal`, `safety`).
 
 ## Risks and mitigations
 

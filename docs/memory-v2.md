@@ -1,14 +1,12 @@
-# Memory v2 — Protocol Sketch
+# Memory v2
 
 Fresh-start session storage for lateralus-v2. **No read/migration of v1 sessions.** **No Datalevin in MVP** — the `MemoryBackend` protocol is the contract. Three implementations ship:
 
 - **`noop`** — test default; stores nothing, recalls `[]`.
-- **`proximum`** — runtime default; pure-JVM HNSW vector store + message metadata.
+- **`proximum`** — JVM runtime default; pure-JVM HNSW vector store + message metadata.
 - **`kg-bm25`** — embedding-free, file-backed BM25 + knowledge-graph hybrid recall. Pure Clojure, no incubator flags, native-image-friendly.
 
-A non-Proximum backend (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up that slots in as another implementation of the same protocol; no consumer changes required. Embedding-free options (BM25/keyword, knowledge-graph, episodic/procedural) are catalogued in `docs/memory-embedding-free-alternatives.md`.
-
-Conceptual reference: `docs/memory-system-mvi.md` (v1). v2 uses a new attribute namespace to avoid accidental v1 reads.
+A non-Proximum backend (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up that slots in as another implementation of the same protocol; no consumer changes required. Embedding-free options (BM25/keyword, knowledge-graph, episodic/procedural) are catalogued in [`docs/memory-embedding-free-alternatives.md`](memory-embedding-free-alternatives.md).
 
 ## Runtime default
 
@@ -52,7 +50,9 @@ The default embedder is `kschltz.agent.memory.langchain4j-embedding` (`:method :
                               :store {:backend :file
                                       :path "sessions/kg-bm25"}
                               :top-y 5
-                              :last-n 10}}
+                              :last-n 10
+                              :rrf-k 60
+                              :extract-fn my-custom-extractor}}
   ```
 
 - **Native-image**: safe; no ONNX, no Panama Vector API, no native libraries.
@@ -69,7 +69,7 @@ transcript.
 
 ## Storage layout
 
-Proximum keeps its index under the configured `:store-config`. KG + BM25 stores one directory per session:
+Proximum keeps its index under the configured `:store`. KG + BM25 stores one directory per session:
 
 ```
 sessions/kg-bm25/<session-id>/
@@ -79,9 +79,41 @@ sessions/kg-bm25/<session-id>/
 
 Default sessions root: `./sessions/` (override via env/CLI in v2). The noop backend does not read or write this directory.
 
-## Datalevin-style schema (sketch for a future Datalevin backend; not used)
+## Native-image configuration
+
+The `resources/lateralus/native.edn` config is used by the GraalVM native-image binary. It avoids the JVM-only Proximum HNSW index and LangChain4j in-process ONNX embedder by wiring the KG + BM25 backend with an in-memory store and a noop embedder:
 
 ```clojure
+{:lateralus/llm-client     {:impl :stub}
+ :lateralus/llm-config     {}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/base-plugin    {}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/plugins        {:plugins [#ig/ref :lateralus/memory-plugin]}
+ :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
+                            :llm-client     #ig/ref :lateralus/llm-client
+                            :llm-config     #ig/ref :lateralus/llm-config
+                            :embedder       #ig/ref :lateralus/embedder
+                            :memory-backend #ig/ref :lateralus/memory-backend}}
+```
+
+To enable dense embeddings in native-image, replace the noop embedder with the HTTP embedder:
+
+```clojure
+{:lateralus/embedder {:method :http
+                      :base-url "http://localhost:11434/v1"
+                      :model "nomic-embed-text"
+                      :dimensions 768}}
+```
+
+## Datalevin-style schema (future-only sketch; not used)
+
+> **Future backend only.** The current codebase does not use Datalevin. This schema is retained as a sketch in case a Datalevin backend lands later.
 {:v2/session-id   {:db/valueType :db.type/string :db/unique :db.unique/identity}
  :v2/model        {:db/valueType :db.type/string}
  :v2/emb-method   {:db/valueType :db.type/string}  ;; "http" | "onnx" (JVM only)
@@ -133,10 +165,21 @@ The LangChain4j model weights are bundled in the jar, so no runtime network call
 - **Memory plugin slots**: `:enrich` (recall injection) and `:persist` (exchange persistence) are wired in the plugin. With the noop backend they are no-ops; with Proximum + LangChain4j they store and recall real session history.
 - **No** `remember` tool facts in MVP (`:v2/kind` reserved for post-MVP).
 
+## Backend comparison
+
+| Backend | Persistence | Embeddings | Native-image | Default config file | Test namespace |
+|---------|-------------|------------|--------------|---------------------|----------------|
+| `noop` | none | none | yes | in-memory test default | `kschltz.agent.memory.noop-backend-test` |
+| `proximum` | in-memory or file-backed HNSW | dense (LangChain4j ONNX, 384-dim) | no | `resources/lateralus/config.edn` | `kschltz.agent.memory.proximum-backend-test` |
+| `kg-bm25` | in-memory or file-backed EDN | none (BM25 + small KG) | yes | `resources/lateralus/native.edn` | `kschltz.agent.memory.kg-bm25-backend-test` |
+
 ## Verification
 
+- `kschltz.agent.memory.protocol-test` verifies the `MemoryBackend` and `Embedder` protocol contracts.
+- `kschltz.agent.memory.noop-backend-test` covers the noop backend.
 - `kschltz.agent.memory.langchain4j-embedding-test` verifies the in-process ONNX embedder.
 - `kschltz.agent.memory.proximum-backend-test` covers store/recall/session isolation/close.
+- `kschltz.agent.memory.kg-bm25-backend-test` covers the embedding-free backend.
 - `kschltz.agent.memory-integration-test` verifies the memory plugin wiring through the Integrant system and runtime.
 - `kschltz.agent.e2e-memory-test` (run separately with `clojure -M:e2e`) exercises a real HTTP LLM + LangChain4j + Proximum end-to-end, defaulting to local Ollama `glm5.1:cloud`.
 - See `goals/lateralus-v2-rewrite/plan.md` Step 6 for the original protocol/plugin acceptance criteria.

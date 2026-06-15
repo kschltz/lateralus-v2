@@ -42,6 +42,25 @@
 (def ^:private default-exchange-chain
   (plugin/assemble-chain [(plugins.base/base-plugin)]))
 
+;; ---- State merge ----
+;; Deep-merge nested maps; scalar values are last-write-wins.
+
+(defn- deep-merge [a b]
+  (cond
+    (and (map? a) (map? b))
+    (merge-with deep-merge a b)
+
+    (and (vector? a) (vector? b))
+    (into a b)
+
+    :else b))
+
+(defn- merge-state
+  "Merge `delta` into `base-state`. Nested maps are merged recursively;
+   scalars are last-write-wins."
+  [base-state delta]
+  (deep-merge base-state (or delta {})))
+
 ;; ---- Runtime protocol ----
 ;; The runtime is the thin outer-loop layer between the caller
 ;; (CLI, test, web server) and the chain. It generates per-exchange
@@ -60,7 +79,7 @@
   "The agent outer-loop runtime contract.
 
    send-message runs ONE exchange synchronously. It returns the
-   final ctx. The runtime's state atom is updated by merging
+   final ctx. The runtime's state atom is updated by deep-merging
    :agent/state-delta from the final ctx.
 
    stop returns the current merged state. It does not terminate
@@ -81,23 +100,16 @@
                             :exchange/assistant-msg-id assistant-msg-id
                             :exchange/user-text        user-text
                             :agent/state               base-state
-                            ;; Forward the agent-map's LlmClient +
-                            ;; any other refs the bind-llm-client
-                            ;; stage will look up. We only forward
-                            ;; the namespaced keys that the chain
-                            ;; expects; the agent-map is otherwise
-                            ;; a lifecycle concern (Integrant owns
-                            ;; the resources).
-                            :agent/llm-client         (:agent/llm-client agent-map)}
+                            ;; Pre-wire dependencies from the agent-map
+                            ;; so interceptors read them directly from ctx
+                            ;; instead of copying them in the chain.
+                            :llm/client               (:agent/llm-client agent-map)
+                            :memory/backend           (:memory-backend agent-map)
+                            :embedder                 (:embedder agent-map)}
           chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
-          ;; Plain merge: state-delta is a flat key-set update; last
-          ;; write wins per key. If a stage needs deep-merge semantics
-          ;; for a particular key, it should emit the new value
-          ;; already-merged (the stage is closer to the data than the
-          ;; runtime is).
-          merged           (merge base-state (or delta {}))]
+          merged           (merge-state base-state delta)]
       (reset! (:state this) merged)
       result))
   (stop [_]

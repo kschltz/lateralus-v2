@@ -1,16 +1,14 @@
 # Embedding-Free Agentic Memory Alternatives for `lateralus-v2`
 
-This document catalogs **concrete, open-source agentic memory systems that do not rely on vector embeddings** and maps them to the existing `MemoryBackend` protocol. It is a companion to [`memory-backend-research.md`](./memory-backend-research.md), which focuses on vector/embedding-based stores.
+This document catalogs **concrete, open-source agentic memory systems that do not rely on vector embeddings** and maps them to the existing `MemoryBackend` protocol. It is a companion to [`memory-backend-research.md`](./memory-backend-research.md), which focuses on broader backend research and decision history.
 
-## Why this matters for lateralus-v2
+## Current state
 
-The current runtime default uses **Proximum + LangChain4j ONNX embeddings** for session memory. That stack is powerful but carries:
+A production-ready, embedding-free backend already exists: **`kschltz.agent.memory.kg-bm25-backend`** (`:impl :kg-bm25`). It is the **native-image default** in `resources/lateralus/native.edn`. The **JVM runtime default** remains **Proximum + LangChain4j in-process ONNX embeddings** (`resources/lateralus/config.edn`).
 
-- a Java 22+ requirement and incubator-vector JVM flags,
-- an in-process ONNX model (problematic for GraalVM native-image),
-- a hard dependency on floating-point embeddings.
-
-For deployments that need a smaller native-image footprint, simpler dependencies, or symbolic/interpretable recall, we want backends that can satisfy the same `MemoryBackend` protocol without ever producing an embedding vector.
+- `kg-bm25` uses BM25 keyword scoring plus a small knowledge graph for the top-Y channel and last-N timestamp recall.
+- It requires no ONNX, no Panama Vector API, no incubator JVM flags, and no native libraries.
+- It is therefore the correct default for the GraalVM native-image build.
 
 ## Mapping `-recall-hybrid` to a non-embedding world
 
@@ -33,9 +31,7 @@ In an embedding-free backend we **replace the semantic-Y channel** with a symbol
 | LLM reranking | Generate a candidate set with any method above, then ask the LLM to pick the best `top-y` |
 | Episodic summary matching | Match against pre-written summaries, failures, or skill descriptions |
 
-The `last-N` channel is unchanged: filter by `:session-id`, sort by `:timestamp`, take the tail.
-
-Because the protocol explicitly allows backends to ignore `:query-embedding`, an embedding-free backend can operate entirely from `:query-text`.
+The `last-N` channel is unchanged: filter by `:session-id`, sort by `:timestamp`, take the tail. Because the protocol explicitly allows backends to ignore `:query-embedding`, an embedding-free backend can operate entirely from `:query-text`.
 
 ---
 
@@ -81,7 +77,7 @@ These systems build a symbolic graph (entities, relations, claims, evidence) and
 - **Mapping to `MemoryBackend`**:
   - `-store-message` → store raw message; optionally extract claims and link them to evidence (the message).
   - `-recall-hybrid` → run BM25 over message text and RRF with any KG-derived scores; return top-y messages.
-- **Clojure/native fit**: Excellent. SQLite + a Clojure inverted index + RRF is a small, pure-JVM backend. This is the closest architectural blueprint to a native-image-friendly `lateralus-v2` memory backend.
+- **Clojure/native fit**: Excellent. SQLite + a Clojure inverted index + RRF is a small, pure-JVM backend. This is the closest architectural blueprint to the existing `:kg-bm25` implementation.
 
 ### LangChain `ConversationKGMemory`
 
@@ -166,6 +162,7 @@ These systems change **how** context is assembled, not just how storage is searc
 
 | System | Category | Embedding-free? | Drop-in `MemoryBackend`? | Main Clojure building blocks | Native-image risk |
 |--------|----------|-----------------|--------------------------|-------------------------------|-------------------|
+| **Existing `kg-bm25`** | BM25 + session KG | Yes | Yes (already wired) | `kg_bm25_backend.clj` | None |
 | **AriGraph** | KG world model | Yes | Pattern only | Asami / custom graph | Low |
 | **HippoRAG** | KG + PageRank | Yes | Pattern only | Custom graph + PPR | Low |
 | **`compiled-memory`** | KG + BM25 + RRF | Yes | **Strong blueprint** | SQLite + inverted index + RRF | Low |
@@ -180,16 +177,20 @@ These systems change **how** context is assembled, not just how storage is searc
 
 ## Recommendations
 
-### Immediate: implement a `:bm25-text` `MemoryBackend`
+### Immediate: stabilize the existing `:kg-bm25` backend
 
-The lowest-risk embedding-free backend is a **sparse-text backend** that stores messages in SQLite (or an EDN/JSONL file per session) and runs BM25/keyword ranking for the top-y channel.
+Rather than starting a new `:bm25-text` spike, the current priority is to harden the backend that already ships:
 
-- Satisfies the existing protocol with zero consumer changes.
-- No JVM flag or Java-version requirement.
-- Pure Clojure (custom inverted index) or pure Java (Apache Lucene).
-- Native-image-friendly, especially if SQLite is avoided in favor of plain files.
+- Refactor `src/kschltz/agent/memory/kg_bm25_backend.clj` into focused namespaces (tracked by kanban card **"Refactor KG-BM25 backend into focused namespaces"**).
+- Add tests that mirror `kschltz.agent.memory.proximum-backend-test` for store/recall/session isolation/close.
+- Improve recall quality by tuning `:top-y`, `:last-n`, `:rrf-k`, and the default `:extract-fn`.
+- Consider optional graph-weighting improvements inspired by HippoRAG / `compiled-memory`.
 
-Suggested default design:
+The `:kg-bm25` backend already satisfies the `MemoryBackend` protocol with zero consumer changes, requires no JVM flags or Java-version requirements, and is native-image-friendly.
+
+### Exploratory: a `:bm25-text` backend
+
+A stripped-down BM25-only backend (no knowledge graph) remains a valid future option if `:kg-bm25` proves too heavy or too slow to maintain:
 
 ```clojure
 {:lateralus/memory-backend
@@ -198,17 +199,7 @@ Suggested default design:
   :top-y 5 :last-n 10}}
 ```
 
-`-store-message` appends to the session file/index. `-recall-hybrid` runs BM25 over `query-text`, takes top-y, merges with last-n by timestamp, dedupes by `:msg-id`.
-
-### Medium-term: implement a `:kg-bm25` backend
-
-Add a small **session knowledge graph** on top of the text store:
-
-1. On store, optionally extract `(entity, relation, entity)` triples (via LLM or rules).
-2. Index messages in BM25; link triples to messages.
-3. On recall, seed graph traversal from query entities and RRF the graph scores with BM25 scores.
-
-This captures the essence of `compiled-memory`, HippoRAG, and AriGraph without pulling in Python. It is still pure JVM and fits the protocol.
+This is exploratory and not scheduled. If it ever lands, it should reuse the same file/index storage primitives as `:kg-bm25` rather than introduce a second storage layer.
 
 ### Orthogonal: reflective & procedural memory as plugins
 
@@ -223,15 +214,13 @@ This captures the essence of `compiled-memory`, HippoRAG, and AriGraph without p
 
 ---
 
-## Suggested next step
+## Code links
 
-Spike a **`:bm25-text` backend** behind the existing `MemoryBackend` protocol:
-
-1. Add `src/kschltz/agent/memory/bm25_text_backend.clj`.
-2. Store messages per session in an EDN/JSONL file or SQLite table.
-3. Build a small in-memory inverted index on load and update it on store.
-4. Implement `-recall-hybrid` as `BM25(query-text, top-y) ∪ last-n`, deduped and sorted.
-5. Wire it into `resources/lateralus/config.edn` as an optional `:impl :bm25-text`.
-6. Add a test namespace that mirrors `kschltz.agent.memory.proximum-backend-test`.
-
-That gives lateralus-v2 a fully embedding-free memory backend that is portable, native-image-friendly, and interchangeable with the Proximum backend.
+- Protocol: `src/kschltz/agent/memory/protocol.clj`
+- KG-BM25 backend: `src/kschltz/agent/memory/kg_bm25_backend.clj`
+- Noop backend: `src/kschltz/agent/memory/noop_backend.clj`
+- HTTP embedder: `src/kschltz/agent/memory/http_embedding.clj`
+- Native-image config: `resources/lateralus/native.edn`
+- JVM runtime config: `resources/lateralus/config.edn`
+- Memory subsystem design: `docs/memory-v2.md`
+- Decision log: `docs/memory-backend-research.md`
