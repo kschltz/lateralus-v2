@@ -1,37 +1,16 @@
 (ns kschltz.agent.memory.kg-bm25
-  "Public backend wiring for the KG + BM25 MemoryBackend.
+  "Public KG + BM25 MemoryBackend wiring.
 
-   Delegates BM25 scoring to `kschltz.agent.memory.bm25`, knowledge-graph
-   scoring to `kschltz.agent.memory.knowledge-graph`, and file I/O to
-   `kschltz.agent.memory.store.file`.
-
-   Options:
-     :store      -- {:backend :file :path ...} or {:backend :memory}
-     :top-y      -- default top-y recall count (default 3)
-     :last-n     -- default last-n recall count (default 5)
-     :rrf-k      -- RRF constant (default 60)
-     :extract-fn -- (fn [content] #{entity ...}), defaults to tokenize"
+   Delegates to focused namespaces for scoring (`bm25`), graph scoring
+   (`knowledge-graph`), and file persistence (`store.file`). Satisfies
+   `MemoryBackend` and ignores :query-embedding entirely."
   (:require [clojure.java.io :as io]
             [kschltz.agent.memory.bm25 :as bm25]
             [kschltz.agent.memory.knowledge-graph :as kg]
             [kschltz.agent.memory.protocol :as mem]
-            [kschltz.agent.memory.store.file :as store.file]))
+            [kschltz.agent.memory.store.file :as store]))
 
-(defn- compute-index
-  "Recompute derived index structures from a full message list."
-  [messages]
-  (let [inverted (bm25/build-inverted-index messages)
-        graph (kg/build-graph messages)
-        doc-count (count messages)
-        idfs (bm25/compute-idf doc-count (into {} (map (fn [[term postings]]
-                                                         [term (count postings)]))
-                                              inverted))
-        stats (bm25/corpus-stats messages inverted)]
-    {:inverted inverted
-     :graph graph
-     :doc-count doc-count
-     :idfs idfs
-     :stats stats}))
+;; ---- RRF fusion ----
 
 (defn- rrf-score
   "Reciprocal Rank Fusion score for a 1-based rank."
@@ -54,33 +33,30 @@
          (map key)
          (take top-n))))
 
-(defn- merge-recalls
-  "Merge recent and top-y messages, dedupe by msg-id, sort by timestamp."
-  [recent top-y]
-  (->> (concat recent top-y)
-       (reduce (fn [acc msg]
-                 (if (contains? acc (:msg-id msg))
-                   acc
-                   (assoc acc (:msg-id msg) msg)))
-               {})
-       vals
-       (sort-by :timestamp)
-       vec))
+;; ---- State management ----
 
-(defn- parse-store-config
-  "Resolve the root directory or in-memory marker from the store config."
-  [{:keys [backend path]}]
-  (case (or backend :file)
-    :memory {:type :memory :root nil}
-    :file   {:type :file :root (io/file (or path "sessions/kg-bm25"))}
-    (throw (ex-info "Unsupported kg-bm25 store backend" {:backend backend}))))
+(defn- compute-index
+  "Recompute derived index structures from a full message list."
+  [messages]
+  (let [inverted (bm25/build-inverted-index messages)
+        graph (kg/build-graph messages)
+        doc-count (count messages)
+        idfs (bm25/compute-idf doc-count (into {} (map (fn [[term postings]]
+                                                         [term (count postings)]))
+                                              inverted))
+        stats (bm25/corpus-stats messages inverted)]
+    {:inverted inverted
+     :graph graph
+     :doc-count doc-count
+     :idfs idfs
+     :stats stats}))
 
 (defn- load-session!
   "Load messages and index from disk into the in-memory session cache."
   [state session-id]
-  (let [dir (store.file/session-dir (:root @state) session-id)
-        msgs (store.file/read-lines (store.file/messages-file dir))
-        idx  (store.file/read-index dir)]
+  (let [dir (store/session-dir (:root @state) session-id)
+        msgs (store/read-lines (store/messages-file dir))
+        idx  (store/read-index dir)]
     (swap! state assoc-in [:sessions session-id]
            {:messages msgs
             :index    (merge {:inverted {} :graph {} :doc-count 0} idx)})))
@@ -89,6 +65,28 @@
   [state session-id]
   (when-not (get-in @state [:sessions session-id])
     (load-session! state session-id)))
+
+(defn- persist-message!
+  "Append a message to disk and update the in-memory index."
+  [state session-id msg entities]
+  (let [dir (store/session-dir (:root @state) session-id)
+        mid (:msg-id msg)
+        msgs-path (store/messages-file dir)]
+    (store/append-line! msgs-path msg)
+    (swap! state
+           (fn [s]
+             (let [session (or (get-in s [:sessions session-id])
+                               {:messages [] :index {:inverted {} :graph {} :doc-count 0}})
+                   msgs    (conj (:messages session) msg)
+                   idx     (compute-index msgs)
+                   idx'    (assoc idx :entities {mid entities})]
+               (assoc-in s [:sessions session-id]
+                         {:messages msgs
+                          :index idx'}))))
+    (let [session (get-in @state [:sessions session-id])]
+      (store/write-index! dir (select-keys (:index session) [:inverted :graph :doc-count :idfs :stats :entities])))))
+
+;; ---- Recall helpers ----
 
 (defn- recent-messages
   "Return the last-n messages for a session."
@@ -132,26 +130,28 @@
            (map first))
       [])))
 
-(defn- persist-message!
-  "Append a message to disk and update in-memory index."
-  [state session-id msg entities]
-  (let [dir (store.file/session-dir (:root @state) session-id)
-        mid (:msg-id msg)
-        msgs-path (store.file/messages-file dir)]
-    (store.file/append-line! msgs-path msg)
-    (swap! state
-           (fn [s]
-             (let [session (or (get-in s [:sessions session-id])
-                               {:messages [] :index {:inverted {} :graph {} :doc-count 0}})
-                   msgs    (conj (:messages session) msg)
-                   idx     (compute-index msgs)
-                   idx'    (assoc idx :entities {mid entities})]
-               (assoc-in s [:sessions session-id]
-                         {:messages msgs
-                          :index idx'}))))
-    (let [session (get-in @state [:sessions session-id])]
-      (store.file/write-index! dir (select-keys (:index session)
-                                                [:inverted :graph :doc-count :idfs :stats :entities])))))
+(defn- merge-recalls
+  "Merge recent and top-y messages, dedupe by msg-id, sort by timestamp."
+  [recent top-y]
+  (->> (concat recent top-y)
+       (reduce (fn [acc msg]
+                 (if (contains? acc (:msg-id msg))
+                   acc
+                   (assoc acc (:msg-id msg) msg)))
+               {})
+       vals
+       (sort-by :timestamp)
+       vec))
+
+;; ---- Backend ----
+
+(defn- parse-store-config
+  "Resolve the root directory or in-memory marker from the store config."
+  [{:keys [backend path]}]
+  (case (or backend :file)
+    :memory {:type :memory :root nil}
+    :file   {:type :file :root (io/file (or path "sessions/kg-bm25"))}
+    (throw (ex-info "Unsupported kg-bm25 store backend" {:backend backend}))))
 
 (defn backend
   "Construct a file-backed KG + BM25 MemoryBackend.
@@ -206,6 +206,3 @@
         (locking lock
           (reset! state (merge store-config {:sessions {}})))
         nil))))
-
-;; Deprecated alias kept for backward compatibility.
-(def ^:deprecated kg-bm25-backend backend)
