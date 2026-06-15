@@ -188,6 +188,40 @@
       (finally
         (halt-fn)))))
 
+(defn- read-line-or-nil
+  "Read one line from a BufferedReader. Returns the line, or nil at EOF."
+  [^java.io.BufferedReader rdr]
+  (.readLine rdr))
+
+(defn- interactive-runner-fn
+  "Production interactive runner. Builds one runtime, then reads lines
+   from stdin, sends each to the runtime, and prints responses until
+   EOF or the user types `/quit` or `/exit`."
+  [{:keys [agent-map session-id halt-fn out]}]
+  (let [runtime (runtime/start agent-map session-id)
+        rdr    (java.io.BufferedReader. (io/reader *in*))]
+    (try
+      (.println out "lateralus-v2 interactive mode (type /quit to exit)")
+      (loop []
+        (.print out "lateralus> ")
+        (.flush out)
+        (if-let [line (read-line-or-nil rdr)]
+          (let [trimmed (str/trim line)]
+            (cond
+              (#{"/quit" "/exit"} trimmed)
+              (.println out "Goodbye.")
+
+              (seq trimmed)
+              (let [result (runtime/send-message runtime trimmed)]
+                (print-response out result)
+                (recur))
+
+              :else
+              (recur)))
+          (.println out "\nEOF")))
+      (finally
+        (halt-fn)))))
+
 (defn- read-prompt
   "Read the prompt for one-shot mode. If the parsed :prompt is
    non-nil, use it. Otherwise read stdin."
@@ -241,8 +275,12 @@
              0)
 
            :interactive
-           (do (.println o "interactive mode not yet implemented (Step 8 MVP: one-shot only)")
-               0))]
+           (let [[agent-map session-id halt-fn] (system-fn opts)]
+             (interactive-runner-fn {:agent-map  agent-map
+                                     :session-id session-id
+                                     :halt-fn    halt-fn
+                                     :out        o})
+             0))]
      (exit code)
      code)))
 

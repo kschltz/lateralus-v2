@@ -251,3 +251,31 @@
           :runner-fn (fn [_] {:exchange/response "ok"})}))
       (is (= config-path (:config @seen-opts))
           "the config path is passed through to the system-fn"))))
+
+(deftest run-cli-interactive-echoes-until-quit
+  (testing "interactive mode reads lines, sends each to the runner, prints responses, and stops on /quit"
+    (let [halted  (atom false)
+          system-fn (fn [_]
+                      [{:exchange-chain [{:name ::echo
+                                           :enter (fn [ctx]
+                                                    (assoc ctx :exchange/response
+                                                           (str "echo: " (:exchange/user-text ctx))))}]}
+                       "demo-session"
+                       (fn [] (reset! halted true))])
+          captured (atom nil)]
+      (with-in-str "hello\nworld\n/quit\n"
+        (let [[rv out] (capture-out
+                        #(cli/run-cli
+                          {:action :interactive}
+                          {:in        *in*
+                           :out       *out*
+                           :exit      (silent-exit captured)
+                           :system-fn system-fn}))]
+          (is (= 0 rv))
+          (is (= 0 @captured))
+          (is @halted "halt-fn was called when the loop finished")
+          (is (str/includes? out "lateralus-v2 interactive mode"))
+          (is (str/includes? out "lateralus>"))
+          (is (str/includes? out "echo: hello"))
+          (is (str/includes? out "echo: world"))
+          (is (str/includes? out "Goodbye.")))))))
