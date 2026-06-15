@@ -160,12 +160,11 @@
   "Print the assistant response from the final ctx. For MVP, the
    response is at :exchange/response; future agents may put it
    elsewhere (e.g. a streaming buffer)."
-  [out result]
+  [^java.io.PrintWriter out result]
   (let [text (or (:exchange/response result)
                  (str "lateralus: no response (chain returned: "
                       (pr-str result) ")"))]
-    (binding [*out* out]
-      (println text))))
+    (.println out text)))
 
 (defn- default-system-fn
   "Production :system-fn. Builds and starts an Integrant system
@@ -197,7 +196,7 @@
   "Production interactive runner. Builds one runtime, then reads lines
    from stdin, sends each to the runtime, and prints responses until
    EOF or the user types `/quit` or `/exit`."
-  [{:keys [agent-map session-id halt-fn out]}]
+  [{:keys [agent-map session-id halt-fn]} ^java.io.PrintWriter out]
   (let [runtime (runtime/start agent-map session-id)
         rdr    (java.io.BufferedReader. (io/reader *in*))]
     (try
@@ -248,7 +247,7 @@
                  exit     (fn [n] (System/exit n))
                  system-fn default-system-fn
                  runner-fn default-runner-fn}}]
-   (let [o   (java.io.PrintWriter. (io/writer out :append true) true)
+   (let [^java.io.PrintWriter o   (java.io.PrintWriter. (io/writer out :append true) true)
          act (:action opts)
          code
          (case act
@@ -278,8 +277,8 @@
            (let [[agent-map session-id halt-fn] (system-fn opts)]
              (interactive-runner-fn {:agent-map  agent-map
                                      :session-id session-id
-                                     :halt-fn    halt-fn
-                                     :out        o})
+                                     :halt-fn    halt-fn}
+                                    o)
              0))]
      (exit code)
      code)))
