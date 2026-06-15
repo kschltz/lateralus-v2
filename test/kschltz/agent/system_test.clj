@@ -131,3 +131,53 @@
                         :dir (System/getProperty "user.dir"))]
       (is (= 0 (:exit result)) (str "native load failed: " (:err result)))
       (is (str/includes? (:out result) ":system-loaded")))))
+
+(defn- init-throws?
+  "Init `config` and return the thrown exception's diagnostic ex-data if
+   it fails. Integrant wraps assert-key failures in an ExceptionInfo with
+   `:reason :integrant.core/build-failed-spec`; the original Malli
+   problems live in the cause's ex-data. Returns nil when no exception
+   is thrown."
+  [config]
+  (try
+    (ig/init config)
+    nil
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (if (= :integrant.core/build-failed-spec (:reason data))
+          (ex-data (ex-cause e))
+          data)))
+    (catch Throwable t
+      (ex-data (ex-info (.getMessage t) {} t)))))
+
+(deftest invalid-llm-client-fails-fast
+  (testing "http client without :base-url and :model is rejected before any resources are allocated"
+    (let [data (init-throws? {:lateralus/llm-client {:impl :http}})]
+      (is (some? data) "init throws")
+      (is (= :lateralus/llm-client (:key data)) "error names the failing key")
+      (is (seq (:problems data)) "ex-data contains Malli problems")
+      (is (some #(= :base-url (last (:path %))) (:problems data))
+          "error mentions missing :base-url")
+      (is (some #(= :model (last (:path %))) (:problems data))
+          "error mentions missing :model"))))
+
+(deftest invalid-embedder-fails-fast
+  (testing "http embedder without required keys is rejected before any HTTP resources are allocated"
+    (let [data (init-throws? {:lateralus/embedder {:method :http}})]
+      (is (some? data) "init throws")
+      (is (= :lateralus/embedder (:key data)) "error names the failing key")
+      (is (seq (:problems data)) "ex-data contains Malli problems")
+      (is (some #(= :base-url (last (:path %))) (:problems data))
+          "error mentions missing :base-url")
+      (is (some #(= :dimensions (last (:path %))) (:problems data))
+          "error mentions missing :dimensions"))))
+
+(deftest invalid-memory-backend-fails-fast
+  (testing "kg-bm25 backend with invalid :store shape is rejected before touching disk"
+    (let [data (init-throws? {:lateralus/memory-backend {:impl :kg-bm25
+                                                         :store "not-a-map"}})]
+      (is (some? data) "init throws")
+      (is (= :lateralus/memory-backend (:key data)) "error names the failing key")
+      (is (seq (:problems data)) "ex-data contains Malli problems")
+      (is (some #(= :store (last (:path %))) (:problems data))
+          "error mentions the invalid :store key"))))
