@@ -122,18 +122,18 @@
       (-store-message [_ session-id msg]
         (let [embedding (float-array (embedding/-embed embedder (:content msg "")))
               metadata  (msg->metadata session-id msg)
-              ;; Perform the blocking async sync BEFORE acquiring the lock so
-              ;; no `a/<!!` runs inside the monitor. When sync-on-write? is
-              ;; false this is a no-op.
-              sync-idx  (fn [idx] (if sync-on-write?
-                                    (a/<!! (prox/sync! idx))
-                                    idx))]
-          (locking idx-atom
-            (let [idx  @idx-atom
-                  idx2 (prox/insert idx embedding (:msg-id msg) metadata)]
-              ;; Hold the lock across the synchronous insert and the atom swap
-              ;; to preserve ordering of mutations.
-              (reset! idx-atom (sync-idx idx2)))))
+              new-idx   (locking idx-atom
+                          (let [idx  @idx-atom
+                                idx2 (prox/insert idx embedding (:msg-id msg) metadata)]
+                            ;; Hold the lock across the synchronous insert and
+                            ;; the atom swap to preserve ordering of mutations.
+                            (reset! idx-atom idx2)
+                            idx2))]
+          ;; Perform the blocking async sync AFTER releasing the lock so no
+          ;; `a/<!!` runs inside the monitor. When sync-on-write? is false
+          ;; this is a no-op.
+          (when sync-on-write?
+            (a/<!! (prox/sync! new-idx))))
         nil)
 
       (-recall-hybrid [_ session-id {:keys [top-y last-n query-embedding query-text]}]
