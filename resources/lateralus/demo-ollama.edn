@@ -1,0 +1,21 @@
+;; Interactive demo config for local Ollama.
+;; Uses HTTP LLM + noop embedder + in-memory KG-BM25 memory.
+{:lateralus/llm-client     {:impl :http
+                            :base-url "http://localhost:11434/v1"
+                            :model    "deepseek-v4-flash:cloud"}
+ :lateralus/llm-config     {:base-url "http://localhost:11434/v1"
+                          :model    "deepseek-v4-flash:cloud"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/base-plugin    {}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/plugins        {:plugins [#ig/ref :lateralus/memory-plugin]}
+ :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
+                            :llm-client     #ig/ref :lateralus/llm-client
+                            :llm-config     #ig/ref :lateralus/llm-config
+                            :embedder       #ig/ref :lateralus/embedder
+                            :memory-backend #ig/ref :lateralus/memory-backend}}
