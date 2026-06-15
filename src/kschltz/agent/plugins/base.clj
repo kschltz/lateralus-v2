@@ -15,17 +15,16 @@
      :observe  — deliver-responses
      :notify   — notify
 
-   `exchange/default-exchange-chain` in `kschltz.agent.exchange` is
-   kept as a hardcoded var for direct use by tests and callers that
-   do not go through the Integrant plugin assembly path. The two
-   definitions must stay aligned."
+   This plugin is the single source of truth for the default
+   exchange chain. Callers and tests can build the same chain with
+   `(plugin/assemble-chain [(base-plugin)])`."
   (:require [kschltz.agent.interceptors :as ix]
             [kschltz.agent.plugin :as plugin]))
 
 (defn base-plugin
   "Return the default base plugin map. With no additional plugins,
    `(plugin/assemble-chain [(base-plugin)])` produces a chain that
-   is functionally equivalent to `exchange/default-exchange-chain`."
+   is the single source of truth for the default stage order."
   []
   {:plugin/name :base
    :plugin/slots

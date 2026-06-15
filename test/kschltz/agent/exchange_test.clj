@@ -14,11 +14,12 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [kschltz.agent.chain :as chain]
-            [kschltz.agent.exchange :as exchange]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.llm.client :as lcm-client]
+            [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.plugins.base :as plugins.base]
             [malli.core :as m]))
 
 ;; ---- Fake LLM that returns tool calls ----
@@ -35,6 +36,11 @@
        :model "fake/v0"
        :stub? true})))
 
+;; ---- Helpers ----
+
+(defn- default-exchange-chain []
+  (plugin/assemble-chain [(plugins.base/base-plugin)]))
+
 ;; ---- Schema / order tests ----
 
 (deftest chain-loads-in-correct-order
@@ -48,14 +54,14 @@
             ::ix/store-exchange
             ::ix/deliver-responses
             ::ix/notify]
-           (mapv :name exchange/default-exchange-chain)))))
+           (mapv #(or (:plugin/original-name %) (:name %)) (default-exchange-chain))))))
 
 (deftest every-stage-validates-against-interceptor-schema
   (is (= :ok (ix/check-stages))))
 
 (deftest default-chain-first-element-validates
   (is (not (m/explain schema/Interceptor
-                      (first exchange/default-exchange-chain)))))
+                      (first (default-exchange-chain))))))
 
 ;; ---- End-to-end through chain/execute (with stub LLM) ----
 
@@ -70,7 +76,7 @@
      :llm/client         llm
      :exchange/session-id :test-session
      :exchange/user-msg-id (str (random-uuid))}
-    exchange/default-exchange-chain)))
+    (default-exchange-chain))))
 
 (deftest full-exchange-returns-stub-response
   (let [out (run-exchange "hello world")]
@@ -220,7 +226,7 @@
                      :embedder          :placeholder
                      :memory-backend    :placeholder
                      :assembled         []
-                     :exchange-chain    exchange/default-exchange-chain}
+                     :exchange-chain    (default-exchange-chain)}
           out       (chain/execute
                      {:agent/state        {:base-url "stub" :api-key nil :model "stub/v0"
                                            :agent/system-message "sys"}

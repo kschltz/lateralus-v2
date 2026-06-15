@@ -227,7 +227,7 @@
 
 (def all-stages
   "All defined stages. Order is not significant here; assembly
-   happens in `kschltz.agent.exchange/default-exchange-chain`."
+   happens through the base plugin in `kschltz.agent.plugins.base`."
   [error-boundary bind-llm-client compose-context llm-call
    parse-response dispatch store-exchange deliver-responses notify])
 
