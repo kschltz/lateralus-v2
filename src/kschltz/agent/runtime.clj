@@ -32,7 +32,15 @@
 
    LOC target: < 150 (per plan)."
   (:require [kschltz.agent.chain :as chain]
-            [kschltz.agent.exchange :as exchange]))
+            [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.plugins.base :as plugins.base]))
+
+;; ---- Default chain ----
+;; The default exchange chain is the base plugin assembled once. It
+;; is the single source of truth for the standard stage order.
+
+(def ^:private default-exchange-chain
+  (plugin/assemble-chain [(plugins.base/base-plugin)]))
 
 ;; ---- Runtime protocol ----
 ;; The runtime is the thin outer-loop layer between the caller
@@ -81,8 +89,7 @@
                             ;; a lifecycle concern (Integrant owns
                             ;; the resources).
                             :agent/llm-client         (:agent/llm-client agent-map)}
-          chain-to-run     (get-in agent-map [:exchange-chain]
-                                   exchange/default-exchange-chain)
+          chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
           ;; Plain merge: state-delta is a flat key-set update; last

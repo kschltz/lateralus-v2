@@ -28,7 +28,6 @@
    Integrant skips keys with no `halt-key!` defined, which is the
    correct behavior — defining a no-op halt is misleading."
   (:require [integrant.core :as ig]
-            [kschltz.agent.exchange :as exchange]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
@@ -109,10 +108,9 @@
      :embedder          embedder
      :memory-backend    memory-backend
      :assembled         assembled
-     ;; If plugins assembled an empty chain, fall back to the legacy
-     ;; hardcoded default exchange chain (e.g. a test config with
-     ;; `:plugins []`). Otherwise the assembled chain is the live chain.
-     :exchange-chain    (if (seq assembled) assembled exchange/default-exchange-chain)
+     ;; The base plugin is always present, so `assembled` is never empty.
+     ;; It is the single source of truth for the default exchange chain.
+     :exchange-chain    assembled
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
                                (select-keys llm-config
                                             [:base-url :api-key :model]))}))

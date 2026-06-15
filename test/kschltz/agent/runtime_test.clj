@@ -16,12 +16,16 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.chain :as chain]
-            [kschltz.agent.exchange :as exchange]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.interceptors.schema :as schema]
+            [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.runtime :as runtime]))
 
 ;; ---- Helpers ----
+
+(defn- default-exchange-chain []
+  (plugin/assemble-chain [(plugins.base/base-plugin)]))
 
 (defn- noop-chain
   "A trivial chain that records the ctx on an atom and returns it.
@@ -74,7 +78,7 @@
 
 (deftest start-creates-runtime
   (testing "start with just an agent-map creates a runtime"
-    (let [r (runtime/start {:exchange-chain exchange/default-exchange-chain})]
+    (let [r (runtime/start {:exchange-chain (default-exchange-chain)})]
       (is (some? r) "runtime is created")
       (is (satisfies? runtime/AgentRuntime r) "runtime satisfies the AgentRuntime protocol"))))
 
@@ -93,7 +97,7 @@
 (deftest start-with-explicit-session-id
   (testing "3-arity start honors an explicit session-id"
     (let [sid "test-session-42"
-          r   (runtime/start {:exchange-chain exchange/default-exchange-chain}
+          r   (runtime/start {:exchange-chain (default-exchange-chain)}
                              sid)]
       (is (= sid (runtime/session-id r))
           "session-id is stored on the runtime"))))
