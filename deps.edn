@@ -34,12 +34,16 @@
              :jvm-opts ["--add-modules=jdk.incubator.vector"
                         "--enable-native-access=ALL-UNNAMED"]}
   :native {:replace-deps {org.clojure/clojure {:mvn/version "1.12.5"}
+                          org.clojure/tools.cli {:mvn/version "1.1.230"}
                           integrant/integrant {:mvn/version "0.13.1"}
                           metosin/malli {:mvn/version "0.16.4"}
                           hato/hato {:mvn/version "1.0.0"}
                           cheshire/cheshire {:mvn/version "6.2.0"}
                           io.github.clojure/tools.build {:mvn/version "0.10.13"}
                           com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
+           ;; Direct-linking improves native-image size and startup.
+           ;; The build task also enables *warn-on-reflection* during compilation.
+           :jvm-opts ["-Dclojure.compiler.direct-linking=true"]
            :ns-default build}
   :test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

@@ -1,0 +1,29 @@
+;; Native-image runtime config for lateralus-v2.
+;;
+;; This config avoids the JVM-only Proximum HNSW index and the LangChain4j
+;; in-process ONNX embedder, both of which are excluded from the native
+;; classpath. It uses the pure-Clojure KG + BM25 memory backend and the
+;; built-in stub LLM client (or an HTTP LLM when --model/--base-url are
+;; supplied).
+;;
+;; Build and run:
+;;   export GRAALVM_HOME=/path/to/graalvm
+;;   clojure -T:native native
+;;   ./target/lateralus-v2-native --config resources/lateralus/native.edn "hello"
+
+{:lateralus/llm-client     {:impl :stub}
+ :lateralus/llm-config     {}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/base-plugin    {}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/plugins        {:plugins [#ig/ref :lateralus/memory-plugin]}
+ :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
+                            :llm-client     #ig/ref :lateralus/llm-client
+                            :llm-config     #ig/ref :lateralus/llm-config
+                            :embedder       #ig/ref :lateralus/embedder
+                            :memory-backend #ig/ref :lateralus/memory-backend}}

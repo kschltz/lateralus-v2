@@ -149,36 +149,50 @@ LATERALUS_E2E_FAKE=true clojure -M:e2e
 The default `clojure -M:test` and `clojure -T:build test` exclude these
 slow integration tests.
 
-### GraalVM native-image (stretch, Step 9)
+### GraalVM native-image
 
-Not yet implemented. We attempted a native-image build with GraalVM 25 on
-macOS arm64 and hit two classes of blockers:
+The `:native` alias builds a self-contained executable that excludes the
+JVM-only Proximum HNSW backend and the LangChain4j in-process ONNX embedder.
+Instead it uses the pure-Clojure **KG + BM25 memory backend** and the bundled
+**stub LLM** (or an HTTP LLM when `--model`/`--base-url` are supplied).
 
-1. **ONNX / native tokenizer libraries** from the default LangChain4j in-process
-   embedder (`dev.langchain4j/langchain4j-embeddings-all-minilm-l6-v2`) use JNI
-   and extract native `.dylib` files at runtime. These cannot be compiled into
-   a native-image. The fix is to implement and configure an **HTTP embedder**
-   (`:method :http`) that calls an OpenAI-compatible `/v1/embeddings` endpoint.
+Requirements:
+- [GraalVM JDK](https://www.graalvm.org/downloads/) installed locally
+- `GRAALVM_HOME` exported
 
-2. **Proximum transitive Timbre logging** (via `org.replikativ/konserve`) places
-   mutable logger state (`taoensso.timbre.*config*`, appender closures) into the
-   image heap, which `native-image` rejects under `--strict-image-heap`.
-   Resolving this requires either:
-   - replacing Timbre in the konserve/proximum dependency tree,
-   - providing custom class-initialization metadata for all offending classes,
-   - or using a non-Proximum memory backend in native-image mode.
+Build:
 
-The `build.clj` exposes a `native` target that documents the blocker and
-defers to the JVM path. The JVM uberjar/launcher remains the supported MVP
-distributable.
+```bash
+export GRAALVM_HOME=/path/to/graalvm
+clojure -T:native native
+```
 
-Next steps to unblock Step 9:
-1. Implement an HTTP `Embedder` (`:method :http`) and make it the native-image
-   default.
-2. Switch the native-image config to `:lateralus/memory-backend {:impl :noop}`
-   or replace Proximum with a native-image-friendly store.
-3. Add `clj-easy/graal-build-time`, `reachability-metadata.json`, and the
-   required incubator-module/FFM flags to `native-image`.
+The binary is written to `target/lateralus-v2-native`. Run it with the native
+config:
+
+```bash
+./target/lateralus-v2-native --config resources/lateralus/native.edn "hello"
+echo "one-shot via stdin" | ./target/lateralus-v2-native --config resources/lateralus/native.edn
+```
+
+What the build does:
+- Creates `target/lateralus-v2-native.jar` from a filtered classpath that omits
+  `src/kschltz/agent/memory/proximum_backend.clj` and
+  `src/kschltz/agent/memory/langchain4j_embedding.clj`.
+- Compiles Clojure with `-Dclojure.compiler.direct-linking=true` and
+  `*warn-on-reflection*` enabled.
+- Invokes `native-image` with `--features=clj_easy.graal_build_time.InitClojureClasses`
+  so Clojure classes are initialized at build time correctly.
+
+Notes and limitations:
+- The default `resources/lateralus/config.edn` still selects Proximum +
+  LangChain4j for the normal JVM run. Native-image users must pass
+  `--config resources/lateralus/native.edn`.
+- The native config uses a **noop embedder**; memory recall is keyword-based
+  (BM25 + small KG). If you need dense embeddings in native-image, configure
+  an HTTP embedder (`:method :http`) in a custom config.
+- The binary has not been exercised on CI in this repository yet; manual
+  verification on a host with GraalVM is required.
 
 ## Project structure
 

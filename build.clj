@@ -1,7 +1,6 @@
 (ns build
   (:refer-clojure :exclude [test])
-  (:require [clojure.string :as str]
-            [clojure.tools.build.api :as b]))
+  (:require [clojure.tools.build.api :as b]))
 
 (def lib 'net.clojars.kschltz/lateralus-v2)
 (def version "0.1.0-SNAPSHOT")
@@ -58,14 +57,16 @@
   (b/uber opts)
   (write-launcher! (:uber-file opts) launcher-file))
 
-(defn- native-uber-opts [opts]
+(defn native-uber-opts [opts]
   (assoc opts
          :lib lib :main main
          :uber-file "target/lateralus-v2-native.jar"
          :class-dir class-dir
          :basis (b/create-basis {:aliases [:native]})
          :src-dirs ["resources" "src"]
-         :ns-compile [main 'kschltz.agent.llm.http 'kschltz.agent.memory.http-embedding]))
+         :ns-compile [main 'kschltz.agent.llm.http 'kschltz.agent.memory.http-embedding]
+         ;; Direct-linking improves native-image size, startup, and correctness.
+         :java-opts ["-Dclojure.compiler.direct-linking=true"]))
 
 (defn- build-native-uber!
   "Copy source files to class-dir, excluding JVM-only namespaces that
@@ -84,24 +85,36 @@
         (when-not (exclude? (str src-dir "/" rel))
           (.mkdirs (.getParentFile dest))
           (b/copy-file {:src (.getPath f) :target (.getPath dest)})))))
+  ;; Catch reflective calls that native-image may not be able to resolve.
+  (set! *warn-on-reflection* true)
   (b/compile-clj (native-uber-opts opts))
   (b/uber (native-uber-opts opts)))
 
+(defn- graalvm-home
+  "Return GRAALVM_HOME from the environment, or throw a clear error."
+  []
+  (or (System/getenv "GRAALVM_HOME")
+      (throw (ex-info "GRAALVM_HOME is not set" {:hint "Install GraalVM and export GRAALVM_HOME=/path/to/graalvm"}))))
+
+(defn native-image-args
+  "Return the native-image command-line vector used by the build task.
+   Exposed so tests can assert the required flags are present."
+  []
+  [(str (graalvm-home) "/bin/native-image")
+   "-cp" "target/lateralus-v2-native.jar"
+   "--initialize-at-build-time=com.fasterxml.jackson"
+   "-H:+UnlockExperimentalVMOptions"
+   "-H:Name=target/lateralus-v2-native"
+   "-H:Path=."
+   "-H:Class=kschltz.lateralus"
+   "-H:EnableURLProtocols=http,https"
+   "--features=clj_easy.graal_build_time.InitClojureClasses"
+   "--no-fallback"
+   "-O2"])
+
 (defn native "Build a native executable for the KG + BM25 backend." [opts]
   (build-native-uber! opts)
-  (let [graal-java "/tmp/graalvm/graalvm-jdk-25.0.3+9.1/Contents/Home"
-        native-image (str graal-java "/bin/native-image")]
-    (b/process {:command-args [native-image
-                               "-cp" "target/lateralus-v2-native.jar"
-                               "--initialize-at-build-time=com.fasterxml.jackson"
-                               "-H:+UnlockExperimentalVMOptions"
-                               "-H:Name=target/lateralus-v2-native"
-                               "-H:Path=/Users/schltzk/projects/lateralus-v2"
-                               "-H:Class=kschltz.lateralus"
-                               "-H:EnableURLProtocols=http,https"
-                               "--features=clj_easy.graal_build_time.InitClojureClasses"
-                               "--no-fallback"
-                               "-O2"]}))
+  (b/process {:command-args (native-image-args)})
   opts)
 
 (defn uber "Build the uberjar and launcher script." [opts]
