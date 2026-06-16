@@ -1,24 +1,28 @@
 (ns kschltz.agent.examples.tools.loop-plugin-test
-  "Tests for the tool-calling loop example plugin.
+  "Tests for the tool-calling loop example wiring.
 
    These tests use a fake LlmClient so they run without network or
-   Ollama. They verify the plugin chain assembly, tool execution, and
-   the loop-back behavior."
+   Ollama. They verify the tool-calling loop is now provided by the
+   core base chain and that the example tools execute and loop back
+   correctly."
   (:require [clojure.test :refer [deftest is testing]]
+            [integrant.core :as ig]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.plugin :as plugin]
-            [kschltz.agent.examples.tools.loop-plugin :as loop-plugin]))
+            [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.plugins.tools :as plugins.tools]
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.examples :as tools.examples]))
 
 (defn- fake-tool-calling-llm
   "Fake LlmClient. On the first call it returns one tool call for
    `calculator/eval`; on the second call it returns a final text
-   response. Assumes the request starts with the user prompt that
-   triggered the loop."
+   response."
   []
   (let [counter (atom 0)]
     (reify LlmClient
-      (-call [_client req]
+      (-call [_client _req]
         (swap! counter inc)
         (if (= 1 @counter)
           {:choices [{:message {:role "assistant"
@@ -32,12 +36,13 @@
                                 :content "The sum is 6."}}]
            :model "fake/v0"})))))
 
-(defn- run-plugin-exchange
-  "Execute the plugin chain with the given fake LLM and prompt."
-  ([llm prompt] (run-plugin-exchange llm prompt {}))
-  ([llm prompt opts]
-   (let [plugin (loop-plugin/loop-plugin opts)
-         chain (plugin/assemble-chain [plugin])]
+(defn- run-exchange
+  "Execute the default chain (base plugin + tools plugin) with the given
+   fake LLM, prompt, and optional tool registry."
+  ([llm prompt] (run-exchange llm prompt {}))
+  ([llm prompt registry]
+   (let [chain (plugin/assemble-chain [(plugins.base/base-plugin)
+                                       (plugins.tools/tools-plugin registry)])]
      (chain/execute
       {:agent/state {:base-url "stub" :api-key nil :model "fake/v0"
                      :agent/system-message "You are a helpful assistant with access to tools."}
@@ -48,18 +53,18 @@
        :exchange/assistant-msg-id "assistant-1"}
       chain))))
 
-(deftest plugin-chain-assembles
-  (testing "loop plugin assembles into a non-empty interceptor chain"
-    (let [plugin (loop-plugin/loop-plugin)
-          chain (plugin/assemble-chain [plugin])]
-      (is (vector? chain))
-      (is (pos? (count chain)))
-      (is (every? map? chain))
-      (is (every? #(or (:enter %) (:leave %) (:error %)) chain)))))
+(deftest base-chain-contains-tool-interceptors
+  (testing "base plugin now includes tool-calling interceptors"
+    (let [chain (plugin/assemble-chain [(plugins.base/base-plugin)])]
+      (is (some #(= :kschltz.agent.loop/inject-tools (:name %)) chain))
+      (is (some #(= :kschltz.agent.loop/dispatch-tools (:name %)) chain))
+      (is (some #(= :kschltz.agent.loop/tool-loop (:name %)) chain))
+      (is (some #(= :kschltz.agent.loop/compose-tool-results (:name %)) chain)))))
 
 (deftest loop-executes-tool-and-returns-final-response
-  (testing "plugin executes calculator/eval, loops back, and returns final text"
-    (let [out (run-plugin-exchange (fake-tool-calling-llm) "What is 1 + 2 + 3?")]
+  (testing "core loop executes calculator/eval, loops back, and returns final text"
+    (let [registry (tools.examples/example-registry)
+          out (run-exchange (fake-tool-calling-llm) "What is 1 + 2 + 3?" registry)]
       (is (= "The sum is 6." (:exchange/response out))
           "second LLM call response becomes the final response")
       (is (some? (:agent/all-tool-results out))
@@ -74,7 +79,7 @@
           "loop depth incremented exactly once"))))
 
 (deftest loop-depth-cap-prevents-runaway
-  (testing "plugin stops looping when max depth is reached"
+  (testing "loop stops when max depth is reached"
     (let [always-calls-llm
           (reify LlmClient
             (-call [_client _req]
@@ -85,33 +90,29 @@
                                                   :function {:name "time/now"
                                                              :arguments "{}"}}]}}]
                :model "fake/v0"}))
-          out (run-plugin-exchange always-calls-llm "keep calling tools")]
+          out (run-exchange always-calls-llm "keep calling tools" (tools.examples/example-registry))]
       (is (= 5 (:agent/tool-loop-depth out))
           "loop depth stops at the configured cap")
       (is (= 1 (count (:exchange/notified out)))
           "notify leave stage fires once for the whole exchange"))))
 
-(deftest time-now-handler-returns-string
-  (testing "time/now handler returns an ISO-8601-ish string"
-    (let [result ((get-in loop-plugin/default-tools [:handlers "time/now"]) {})]
+(deftest time-now-tool-returns-string
+  (testing "time/now Tool returns an ISO-8601-ish string"
+    (let [tool (tools.examples/time-now)
+          result (tool/-invoke tool {})]
       (is (string? result))
       (is (re-find #"\d{4}-\d{2}-\d{2}T" result)))))
 
-(deftest trace-mode-assembles-larger-chain
-  (testing "trace? true wraps the chain with trace interceptors"
-    (let [plugin (loop-plugin/loop-plugin {:trace? true})
-          chain (plugin/assemble-chain [plugin])]
-      (is (> (count chain)
-             (count (plugin/assemble-chain [(loop-plugin/loop-plugin)]))))
-      (is (some #(= "tools-loop.trace" (namespace (:name %))) chain)
-          "trace interceptors are present"))))
+(deftest calculator-eval-tool-computes
+  (testing "calculator/eval Tool computes prefix arithmetic"
+    (let [tool (tools.examples/calculator-eval)
+          result (tool/-invoke tool {:expression "(+ 1 2 3)"})]
+      (is (= "6" result)))))
 
-(deftest trace-mode-assembles-larger-chain
-  (testing "trace? true wraps the chain with trace interceptors"
-    (let [plain-count (count (plugin/assemble-chain [(loop-plugin/loop-plugin)]))
-          trace-count (count (plugin/assemble-chain [(loop-plugin/loop-plugin {:trace? true})]))
-          chain (plugin/assemble-chain [(loop-plugin/loop-plugin {:trace? true})])]
-      (is (> trace-count plain-count)
-          "trace chain is larger than plain chain")
-      (is (some #(= "tools-loop.trace" (namespace (:name %))) chain)
-          "trace interceptors are present"))))
+(deftest integrant-tool-components-build
+  (testing "example tools can be built via Integrant"
+    (let [system (ig/init {:lateralus/example-tools {}})]
+      (is (map? (:lateralus/example-tools system)))
+      (is (tool/tool? (get-in system [:lateralus/example-tools "time/now"])))
+      (is (tool/tool? (get-in system [:lateralus/example-tools "calculator/eval"])))
+      (ig/halt! system))))

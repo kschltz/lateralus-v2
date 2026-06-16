@@ -64,7 +64,13 @@
          :class-dir class-dir
          :basis (b/create-basis {:aliases [:native]})
          :src-dirs ["resources" "src"]
-         :ns-compile [main 'kschltz.agent.llm.http 'kschltz.agent.memory.http-embedding]
+         :ns-compile [main
+                      'kschltz.agent.llm.http
+                      'kschltz.agent.memory.http-embedding
+                      'kschltz.agent.tool
+                      'kschltz.agent.loop
+                      'kschltz.agent.plugins.tools
+                      'kschltz.agent.tools.examples]
          ;; Direct-linking improves native-image size, startup, and correctness.
          :java-opts ["-Dclojure.compiler.direct-linking=true"]))
 

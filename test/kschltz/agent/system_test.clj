@@ -13,6 +13,7 @@
             [integrant.core :as ig]
             [kschltz.agent.system :as system]
             [kschltz.agent.plugins.memory :as plugins.memory]
+            [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.protocol :as mem]))
 
@@ -43,7 +44,9 @@
       (is (some? (:lateralus/llm-client s)))
       (is (some? (:lateralus/embedder s)))
       (is (some? (:lateralus/memory-backend s)))
+      (is (map? (:lateralus/tool-registry s)))
       (is (vector? (:lateralus/memory-plugin s)))
+      (is (vector? (:lateralus/tools-plugin s)))
       (is (vector? (:lateralus/plugins s)))
       (is (some? (:lateralus/agent s))))))
 
@@ -61,7 +64,11 @@
       (is (some #(= ::plugins.memory/recall (:name %)) (:assembled agent))
           "memory recall is in the assembled chain")
       (is (some #(= ::plugins.memory/persist (:name %)) (:assembled agent))
-          "memory persist is in the assembled chain"))))
+          "memory persist is in the assembled chain")
+      (is (some #(= :kschltz.agent.loop/inject-tools (:name %)) (:assembled agent))
+          "tool inject is in the assembled chain")
+      (is (some #(= :kschltz.agent.loop/dispatch-tools (:name %)) (:assembled agent))
+          "tool dispatch is in the assembled chain"))))
 
 (deftest complete-plugin-replaces-base-chain
   (testing "a plugin marked :plugin/complete? true is not prepended with base"
@@ -96,14 +103,17 @@
       (is (pos? (count (:assembled agent)))
           "base plugin interceptors are still present")
       (is (not (some #(= :memory (-> % meta :plugin/name)) (:assembled agent)))
-          "memory plugin interceptors are absent when not listed"))))
+          "memory plugin interceptors are absent when not listed")
+      (is (not (some #(= :tools (-> % meta :plugin/name)) (:assembled agent)))
+          "tools plugin interceptors are absent when not listed"))))
 
 (deftest base-plugin-is-first-in-default-plugins
   (testing "the default plugins vector begins with the base plugin"
     (let [s (with-system system/default-config)
           plugins (:lateralus/plugins s)]
       (is (= :base (-> plugins first meta :plugin/name)))
-      (is (= :memory (-> plugins second meta :plugin/name))))))
+      (is (= :memory (-> plugins second meta :plugin/name)))
+      (is (= :tools (-> plugins (nth 2) meta :plugin/name))))))
 
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"
