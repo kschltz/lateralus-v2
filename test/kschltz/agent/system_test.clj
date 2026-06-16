@@ -63,6 +63,29 @@
       (is (some #(= :memory.persist (:name %)) (:assembled agent))
           "memory persist is in the assembled chain"))))
 
+(deftest explicit-exchange-chain-overrides-plugin-assembly
+  (testing ":lateralus/exchange-chain replaces the assembled base chain"
+    (let [custom-chain [{:name ::custom :enter identity}]
+          config (assoc system/default-config
+                        :lateralus/exchange-chain custom-chain
+                        :lateralus/agent {:llm-client     (ig/ref :lateralus/llm-client)
+                                          :llm-config     (ig/ref :lateralus/llm-config)
+                                          :embedder       (ig/ref :lateralus/embedder)
+                                          :memory-backend (ig/ref :lateralus/memory-backend)
+                                          :exchange-chain (ig/ref :lateralus/exchange-chain)})
+          s (with-system config)
+          agent (:lateralus/agent s)]
+      (is (= custom-chain (:exchange-chain agent))
+          "agent uses the explicit exchange chain")
+      (is (= custom-chain (:assembled agent))))))
+
+(deftest exchange-chain-resolves-plugin-chain
+  (testing ":lateralus/exchange-chain resolves a plugin map with :plugin/chain"
+    (let [plugin {:plugin/name :test-chain
+                  :plugin/chain [{:name ::from-plugin :enter identity}]}
+          resolved (ig/init-key :lateralus/exchange-chain plugin)]
+      (is (= [{:name ::from-plugin :enter identity}] resolved)))))
+
 (deftest empty-user-plugins-produce-base-chain-only
   (testing "explicitly empty user plugins still gets the prepended base chain"
     (let [s (with-system (assoc-in system/default-config

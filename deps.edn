@@ -45,7 +45,7 @@
            ;; The build task also enables *warn-on-reflection* during compilation.
            :jvm-opts ["-Dclojure.compiler.direct-linking=true"]
            :ns-default build}
-  :test {:extra-paths ["test"]
+  :test {:extra-paths ["test" "examples/tools/loop/src"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}
                       ;; Test-only HTTP server for LLM end-to-end tests.
@@ -68,4 +68,7 @@
                      ring/ring-jetty-adapter {:mvn/version "1.13.0"}}
         :jvm-opts ["--add-modules=jdk.incubator.vector"
                    "--enable-native-access=ALL-UNNAMED"]
-        :main-opts ["-m" "cognitect.test-runner" "-i" ":e2e"]}}}
+        :main-opts ["-m" "cognitect.test-runner" "-i" ":e2e"]}
+  ;; Examples alias: makes the example plugin source available on the
+  ;; classpath without adding it to the production :paths.
+  :examples {:extra-paths ["examples/tools/loop/src"]}}}
