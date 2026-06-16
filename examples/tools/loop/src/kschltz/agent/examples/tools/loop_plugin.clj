@@ -2,12 +2,13 @@
   "Example plugin that demonstrates lateralus plugin extensibility by
    implementing a complete OpenAI-shaped tool-calling loop.
 
-   The plugin brings its own interceptor chain (via `:plugin/chain`),
-   so the base exchange chain is left untouched. It registers two
-   example tools (`time/now` and `calculator/eval`), injects their
-   definitions into the LLM request, executes the calls the model
-   returns, and loops back to the LLM with the results until the model
-   produces a final text response.
+   The plugin is a complete replacement chain (metadata
+   `{:plugin/complete? true}`), so when it is listed in
+   `:lateralus/plugins` the default base plugin is not prepended. It
+   registers two example tools (`time/now` and `calculator/eval`),
+   injects their definitions into the LLM request, executes the calls the
+   model returns, and loops back to the LLM with the results until the
+   model produces a final text response.
 
    The loop is implemented with `chain/enqueue` inside a single
    exchange, so the runtime's `send-message` contract stays the same:
@@ -149,7 +150,7 @@
               (update-in ctx [:llm/request :messages] into new-msgs)))})
 
 (defn- bump-loop-depth-interceptor
-  "Interceptor that increments `:agent/tool-loop-depth`."
+  "Build an interceptor that increments `:agent/tool-loop-depth`."
   []
   {:name ::bump-loop-depth
    :enter (fn [ctx]
@@ -294,14 +295,17 @@
      :trace?    — when true, print a trace line before/after each
                   interceptor in the plugin chain.
 
-   Returns a plugin map with `:plugin/chain`, so it replaces the entire
-   assembled chain when referenced as `:lateralus/exchange-chain`."
+   Returns a complete plugin vector with metadata
+   `{:plugin/name :tools-loop :plugin/complete? true}`. When this
+   plugin is listed in `:lateralus/plugins`, the default base plugin is
+   not prepended."
   ([] (loop-plugin {}))
   ([{:keys [tools max-depth trace?]
      :or   {tools {}
             max-depth max-loop-depth
             trace? false}}]
    (let [registry (merge-tools tools)]
-     {:plugin/name :tools-loop
-      :plugin/doc "Tool-calling loop example plugin."
-      :plugin/chain (build-chain registry (or max-depth max-loop-depth) trace?)})))
+     (with-meta
+       (build-chain registry (or max-depth max-loop-depth) trace?)
+       {:plugin/name :tools-loop
+        :plugin/complete? true}))))
