@@ -26,7 +26,7 @@
                             :model    "deepseek-v4-flash:cloud"}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :noop}
- :lateralus/tools-loop-plugin {:trace? true}
+ :lateralus/tools-loop-plugin {:trace? false}
  :lateralus/exchange-chain #ig/ref :lateralus/tools-loop-plugin
  :lateralus/agent          {:llm-client     #ig/ref :lateralus/llm-client
                             :llm-config     #ig/ref :lateralus/llm-config
