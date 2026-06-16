@@ -21,7 +21,7 @@ complete OpenAI-shaped tool-calling loop in a self-contained plugin.
 ## Requirements
 
 - Ollama running at `http://localhost:11434/v1`.
-- A model that supports tool calling, such as `qwen2.5:14b`, `llama3.1`, or
+- A model that supports tool calling, such as `deepseek-v4-flash:cloud`, `llama3.1`, or
   `mistral-nemo`.
 
 ## Run
