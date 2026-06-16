@@ -8,9 +8,8 @@
      - sequential tool execution (fact-sequential-tools)
      - compose-context trim stub pin (memory-followup marker)
      - error-boundary handles errors so :leave stages still run
-     - decoupling verification (no agent.loop dependency)
-    - LlmClient boundary (no direct HTTP in interceptors)
-    - Pre-wired dependencies flow into the exchange context"
+     - LlmClient boundary (no direct HTTP in interceptors)
+     - Pre-wired dependencies flow into the exchange context"
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [kschltz.agent.chain :as chain]
@@ -18,8 +17,11 @@
             [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.llm.client :as lcm-client]
+            [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.plugins.tools :as plugins.tools]
+            [kschltz.agent.tools.examples :as tools.examples]
             [malli.core :as m]))
 
 ;; ---- Fake LLM that returns tool calls ----
@@ -39,17 +41,23 @@
 ;; ---- Helpers ----
 
 (defn- default-exchange-chain []
-  (plugin/assemble-chain [(plugins.base/base-plugin)]))
+  (plugin/assemble-chain [(plugins.base/base-plugin)
+                          (plugins.tools/tools-plugin)]))
 
 ;; ---- Schema / order tests ----
 
 (deftest chain-loads-in-correct-order
   (testing "default chain has the locked stage order"
     (is (= [::ix/error-boundary
+            :kschltz.agent.plugins.tools/seed-registry
             ::ix/compose-context
+            ::loop/inject-tools
+            ::loop/llm-call-with-self-heal
             ::ix/llm-call
             ::ix/parse-response
-            ::ix/dispatch
+            ::loop/dispatch-tools
+            ::loop/compose-tool-results
+            ::loop/tool-loop
             ::ix/store-exchange
             ::ix/deliver-responses
             ::ix/notify]
@@ -101,8 +109,8 @@
 ;; ---- End-to-end dispatch with a fake LLM that produces tool calls ----
 
 (deftest dispatch-end-to-end-with-tool-calls
-  (let [calls [{:id "tc1" :name "echo" :args {:msg "hi"}}
-               {:id "tc2" :name "echo" :args {:msg "bye"}}]
+  (let [calls [{:id "tc1" :type "function" :function {:name "echo" :arguments "{\"msg\":\"hi\"}"}}
+               {:id "tc2" :type "function" :function {:name "echo" :arguments "{\"msg\":\"bye\"}"}}]
         out   (run-exchange "ping" (tool-calling-llm calls))]
     (is (= calls (:tool/calls out))
         "parse-response extracted the tool calls from the fake LLM response")
@@ -111,29 +119,30 @@
         "dispatch recorded one result per call through the full chain")
     (is (every? #(= :not-implemented (:result %))
                 (:tool/results out))
-        "MVP stub dispatch returns :not-implemented for every call")
+        "unregistered tools return :not-implemented")
     (is (some? (:memory/last-exchange out))
         "store-exchange leave stage still ran (no errors raised)")
     (is (some? (:exchange/response out))
         "deliver-responses leave stage ran with the final response")))
 
-;; ---- Sequential tool execution (fact-sequential-tools) ----
+(deftest registered-tool-executes-end-to-end
+  (testing "a registered example tool is executed by the default chain"
+    (let [calls [{:id "tc1" :type "function" :function {:name "calculator/eval"
+                                                         :arguments "{\"expression\":\"(+ 1 2 3)\"}"}}]
+          out   (chain/execute
+                 {:agent/state        {:base-url "stub" :api-key nil :model "fake/v0"
+                                       :agent/system-message "you are a test agent"}
+                  :exchange/user-text "compute"
+                  :llm/client         (tool-calling-llm calls)
+                  :exchange/session-id :test-session
+                  :exchange/user-msg-id (str (random-uuid))}
+                 (plugin/assemble-chain [(plugins.base/base-plugin)
+                                         (plugins.tools/tools-plugin (tools.examples/example-registry))]))]
+      (is (= 1 (count (:tool/results out))))
+      (is (= "6" (-> out :tool/results first :result))
+          "calculator/eval Tool returned the correct result"))))
 
-(deftest dispatch-uses-sequential-mapv
-  (testing "dispatch records :tool/results via sequential mapv"
-    (let [enter-fn (:enter ix/dispatch)
-          ctx      {:agent/state {}
-                    :tool/calls [{:id "1" :name "fake"}
-                                 {:id "2" :name "fake"}
-                                 {:id "3" :name "fake"}]}
-          out      (enter-fn ctx)]
-      (is (map? out))
-      (is (vector? (:tool/results out)))
-      (is (= 3 (count (:tool/results out))))
-      (is (= ["1" "2" "3"] (mapv #(get-in % [:call :id]) (:tool/results out)))
-          "result order matches input order (sequential)"))))
-
-;; ---- compose-context stub pin ----
+;; ---- compose-context trim stub pin ----
 
 (deftest compose-context-trim-is-noop
   (testing "compose-context sets :compose/trimmed? to mark the no-op trim path"
@@ -211,19 +220,6 @@
                      (:exchange-chain agent-map))]
       (is (= "MARKER" (:exchange/response out))
           "the response came from the agent's LlmClient, not a fresh stub"))))
-
-;; ---- Decoupling verification (plan Step 3 risk) ----
-
-(deftest interceptors-do-not-depend-on-loop-clj
-  (testing "no alias or refer targets kschltz.agent.loop"
-    (let [ns-symbol (find-ns 'kschltz.agent.interceptors)
-          aliases  (ns-aliases ns-symbol)
-          refs     (ns-refers ns-symbol)
-          all-keys (map (comp str key) (concat aliases refs))
-          bad      (filter #(str/starts-with? % "kschltz.agent.loop")
-                           all-keys)]
-      (is (empty? bad)
-          (str "no alias or refer targets kschltz.agent.loop; found: " (vec bad))))))
 
 ;; ---- LlmClient boundary: no direct HTTP in interceptors ----
 

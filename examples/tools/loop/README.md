@@ -1,16 +1,18 @@
 # Tool-calling loop example
 
-This example demonstrates lateralus plugin extensibility by implementing a
-complete OpenAI-shaped tool-calling loop in a self-contained plugin.
+This example demonstrates how to register custom tools with lateralus'
+core tool-calling loop. The loop itself is now part of the default base
+chain (`kschltz.agent.loop`); this example only wires in the example
+`Tool` implementations (`time/now` and `calculator/eval`).
 
 ## What it shows
 
-- A plugin that brings its own interceptor chain (`:plugin/chain`), leaving
-  the base exchange chain untouched.
-- Tool definitions injected into the LLM request.
-- Tool execution against a local registry.
-- A loop back to the LLM with tool results, capped by a recursion guard.
-- `:lateralus/exchange-chain` used to override the default assembled chain.
+- `:lateralus/tool-registry` maps tool names to `Tool` protocol implementations.
+- `:lateralus/tools-plugin` seeds the registry on the context so the core
+  loop interceptors can see the tools.
+- Tool definitions are injected into the LLM request automatically.
+- Tool calls returned by the model are executed and fed back to the model in
+  a loop, capped by a recursion guard.
 
 ## Tools
 
@@ -26,18 +28,11 @@ complete OpenAI-shaped tool-calling loop in a self-contained plugin.
 
 ## Run
 
-From the repository root (after this example is merged):
+From the repository root:
 
 ```bash
 clojure -M:examples -m kschltz.lateralus --config examples/tools/loop/config.edn -i
 ```
-
-While the example is in a kb worktree, run from the worktree directory
-and point `--config` at `examples/tools/loop/config.edn` inside it.
-
-The example config enables `:trace? true`, so the plugin prints a line
-before and after every interceptor. Disable it by removing `:trace?` from
-`:lateralus/tools-loop-plugin` in the config.
 
 Then try prompts like:
 
@@ -53,29 +48,40 @@ What is (+ 13 29) times 2?
 
 ## Customize tools
 
-Edit the config to pass your own `:tools` map with `:definitions` and
-`:handlers`:
+Add your own `Tool` implementations to the registry. Each tool declares a
+name, description, Malli input/output schemas, and an `invoke` method.
 
 ```clojure
-:lateralus/tools-loop-plugin {:tools
-                               {:definitions [{:type "function"
-                                               :function {:name "my-tool"
-                                                          :description "..."
-                                                          :parameters {:type "object"
-                                                                       :properties {}}}}]
-                                :handlers {"my-tool" (fn [args] "result")}}}
+(ns my.tools
+  (:require [kschltz.agent.tool :as tool]))
+
+(deftype MyTool []
+  tool/Tool
+  (-name [_] "my-tool")
+  (-description [_] "Does something useful.")
+  (-input-schema [_] [:map [:x :string]])
+  (-output-schema [_] :string)
+  (-invoke [_ args] (str "result for " (:x args))))
+
+(defmethod ig/init-key :my.tool/my-tool [_ _]
+  (->MyTool))
 ```
 
-Your tools are merged over the defaults, so you can add new tools or override
-existing ones without redeclaring everything.
+Then reference it in the config:
+
+```clojure
+:lateralus/tool-registry {:my-tool #ig/ref :my.tool/my-tool}
+```
 
 ## How it works
 
-1. The plugin constructs a full chain with base interceptors reused where
-   appropriate (`compose-context`, `llm-call`, `parse-response`, etc.) plus
-   plugin-local interceptors for tool injection, execution, and looping.
-2. `:lateralus/exchange-chain` resolves the plugin to its `:plugin/chain`.
-3. `:lateralus/agent` uses that explicit chain instead of assembling plugins.
-4. Inside the chain, after tools execute, the `tool-loop` interceptor uses
-   `chain/enqueue` to append a mini-chain that sends results back to the model.
-   The loop recurses until the model returns text or a depth cap is hit.
+1. `examples/tools/loop/config.edn` registers the example tools in
+   `:lateralus/tool-registry` and includes `:lateralus/tools-plugin`.
+2. `:lateralus/tools-plugin` seeds `:agent/tool-registry` on the context.
+3. The base plugin's `inject-tools` interceptor reads the registry and injects
+   OpenAI-shaped tool definitions into the LLM request.
+4. After the model returns tool calls, the `dispatch-tools` interceptor executes
+   the matching tools through the `Tool` protocol.
+5. The `tool-loop` interceptor enqueues a follow-up chain that feeds the results
+   back to the model. The loop recurses until the model returns text or a depth
+   cap is hit.

@@ -3,9 +3,12 @@
 
    Verifies that the base plugin contributes the core interceptors
    in the right slots and that assembling it produces the expected
-   default chain order."
+   default chain order. The base plugin is now tool-aware: it includes
+   the loop interceptors from `kschltz.agent.loop`, which are no-ops
+   when no tool registry is seeded on the context."
   (:require [clojure.test :refer [deftest is testing]]
             [kschltz.agent.interceptors :as ix]
+            [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as base]))
 
@@ -18,12 +21,14 @@
       (is (= :base (-> p meta :plugin/name)))
       (is (= [::ix/error-boundary]
              (mapv :name (by-slot p :guard))))
-      (is (= [::ix/compose-context]
+      (is (= [::ix/compose-context ::loop/inject-tools]
              (mapv :name (by-slot p :compose))))
-      (is (= [::ix/llm-call ::ix/parse-response]
+      (is (= [::loop/llm-call-with-self-heal ::ix/llm-call ::ix/parse-response]
              (mapv :name (by-slot p :llm))))
-      (is (= [::ix/dispatch]
-             (mapv :name (by-slot p :dispatch))))
+      (is (= [::loop/dispatch-tools ::loop/compose-tool-results]
+             (mapv :name (by-slot p :tools))))
+      (is (= [::loop/tool-loop]
+             (mapv :name (by-slot p :finalize))))
       (is (= [::ix/store-exchange]
              (mapv :name (by-slot p :history))))
       (is (= [::ix/deliver-responses]
@@ -36,9 +41,13 @@
     (let [chain (plugin/assemble-chain [(base/base-plugin)])]
       (is (= [::ix/error-boundary
               ::ix/compose-context
+              ::loop/inject-tools
+              ::loop/llm-call-with-self-heal
               ::ix/llm-call
               ::ix/parse-response
-              ::ix/dispatch
+              ::loop/dispatch-tools
+              ::loop/compose-tool-results
+              ::loop/tool-loop
               ::ix/store-exchange
               ::ix/deliver-responses
               ::ix/notify]
