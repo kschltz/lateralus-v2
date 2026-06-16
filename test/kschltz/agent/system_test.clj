@@ -12,6 +12,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
             [kschltz.agent.system :as system]
+            [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.protocol :as mem]))
 
@@ -42,8 +43,7 @@
       (is (some? (:lateralus/llm-client s)))
       (is (some? (:lateralus/embedder s)))
       (is (some? (:lateralus/memory-backend s)))
-      (is (some? (:lateralus/base-plugin s)))
-      (is (some? (:lateralus/memory-plugin s)))
+      (is (vector? (:lateralus/memory-plugin s)))
       (is (vector? (:lateralus/plugins s)))
       (is (some? (:lateralus/agent s))))))
 
@@ -58,51 +58,52 @@
       (is (vector? (:assembled agent))
           "assembled chain is a vector of interceptors")
       (is (vector? (:exchange-chain agent)))
-      (is (some #(= :memory.enrich (:name %)) (:assembled agent))
+      (is (some #(= ::plugins.memory/recall (:name %)) (:assembled agent))
           "memory recall is in the assembled chain")
-      (is (some #(= :memory.persist (:name %)) (:assembled agent))
+      (is (some #(= ::plugins.memory/persist (:name %)) (:assembled agent))
           "memory persist is in the assembled chain"))))
 
-(deftest explicit-exchange-chain-overrides-plugin-assembly
-  (testing ":lateralus/exchange-chain replaces the assembled base chain"
+(deftest complete-plugin-replaces-base-chain
+  (testing "a plugin marked :plugin/complete? true is not prepended with base"
     (let [custom-chain [{:name ::custom :enter identity}]
           config (assoc system/default-config
-                        :lateralus/exchange-chain custom-chain
-                        :lateralus/agent {:llm-client     (ig/ref :lateralus/llm-client)
+                        :lateralus/plugins [(with-meta custom-chain
+                                              {:plugin/name :custom
+                                               :plugin/complete? true})]
+                        :lateralus/agent {:plugins        (ig/ref :lateralus/plugins)
+                                          :llm-client     (ig/ref :lateralus/llm-client)
                                           :llm-config     (ig/ref :lateralus/llm-config)
                                           :embedder       (ig/ref :lateralus/embedder)
-                                          :memory-backend (ig/ref :lateralus/memory-backend)
-                                          :exchange-chain (ig/ref :lateralus/exchange-chain)})
+                                          :memory-backend (ig/ref :lateralus/memory-backend)})
           s (with-system config)
           agent (:lateralus/agent s)]
-      (is (= custom-chain (:exchange-chain agent))
-          "agent uses the explicit exchange chain")
-      (is (= custom-chain (:assembled agent))))))
-
-(deftest exchange-chain-resolves-plugin-chain
-  (testing ":lateralus/exchange-chain resolves a plugin map with :plugin/chain"
-    (let [plugin {:plugin/name :test-chain
-                  :plugin/chain [{:name ::from-plugin :enter identity}]}
-          resolved (ig/init-key :lateralus/exchange-chain plugin)]
-      (is (= [{:name ::from-plugin :enter identity}] resolved)))))
+      (is (= (mapv #(select-keys % [:name :enter :leave :error]) custom-chain)
+             (mapv #(select-keys % [:name :enter :leave :error]) (:exchange-chain agent)))
+          "agent uses the custom chain without the base plugin")
+      (is (= (mapv #(select-keys % [:name :enter :leave :error]) custom-chain)
+             (mapv #(select-keys % [:name :enter :leave :error]) (:assembled agent)))))))
 
 (deftest empty-user-plugins-produce-base-chain-only
   (testing "explicitly empty user plugins still gets the prepended base chain"
-    (let [s (with-system (assoc-in system/default-config
-                                   [:lateralus/plugins :plugins]
-                                   []))
+    (let [s (with-system (assoc system/default-config
+                                :lateralus/plugins []
+                                :lateralus/agent {:plugins        (ig/ref :lateralus/plugins)
+                                                  :llm-client     (ig/ref :lateralus/llm-client)
+                                                  :llm-config     (ig/ref :lateralus/llm-config)
+                                                  :embedder       (ig/ref :lateralus/embedder)
+                                                  :memory-backend (ig/ref :lateralus/memory-backend)}))
           agent (:lateralus/agent s)]
       (is (pos? (count (:assembled agent)))
           "base plugin interceptors are still present")
-      (is (not (some #(= :memory (:plugin/name %)) (:assembled agent)))
+      (is (not (some #(= :memory (-> % meta :plugin/name)) (:assembled agent)))
           "memory plugin interceptors are absent when not listed"))))
 
 (deftest base-plugin-is-first-in-default-plugins
   (testing "the default plugins vector begins with the base plugin"
     (let [s (with-system system/default-config)
           plugins (:lateralus/plugins s)]
-      (is (= :base (:plugin/name (first plugins))))
-      (is (= :memory (:plugin/name (second plugins)))))))
+      (is (= :base (-> plugins first meta :plugin/name)))
+      (is (= :memory (-> plugins second meta :plugin/name))))))
 
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"

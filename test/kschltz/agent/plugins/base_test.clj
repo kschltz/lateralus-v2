@@ -9,29 +9,31 @@
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as base]))
 
+(defn- by-slot [plugin slot]
+  (filterv #(= slot (:slot %)) plugin))
+
 (deftest base-plugin-has-correct-slots
   (testing "base plugin contributes core interceptors in expected slots"
     (let [p (base/base-plugin)]
-      (is (= :base (:plugin/name p)))
+      (is (= :base (-> p meta :plugin/name)))
       (is (= [::ix/error-boundary]
-             (mapv :name (get-in p [:plugin/slots :guard]))))
+             (mapv :name (by-slot p :guard))))
       (is (= [::ix/compose-context]
-             (mapv :name (get-in p [:plugin/slots :compose]))))
+             (mapv :name (by-slot p :compose))))
       (is (= [::ix/llm-call ::ix/parse-response]
-             (mapv :name (get-in p [:plugin/slots :llm]))))
+             (mapv :name (by-slot p :llm))))
       (is (= [::ix/dispatch]
-             (mapv :name (get-in p [:plugin/slots :dispatch]))))
+             (mapv :name (by-slot p :dispatch))))
       (is (= [::ix/store-exchange]
-             (mapv :name (get-in p [:plugin/slots :history]))))
+             (mapv :name (by-slot p :history))))
       (is (= [::ix/deliver-responses]
-             (mapv :name (get-in p [:plugin/slots :observe]))))
+             (mapv :name (by-slot p :observe))))
       (is (= [::ix/notify]
-             (mapv :name (get-in p [:plugin/slots :notify])))))))
+             (mapv :name (by-slot p :notify)))))))
 
 (deftest assembled-base-matches-default-exchange-order
   (testing "assembling only the base plugin yields the canonical stage order"
-    (let [chain (plugin/assemble-chain [(base/base-plugin)])
-          original-names (mapv :plugin/original-name chain)]
+    (let [chain (plugin/assemble-chain [(base/base-plugin)])]
       (is (= [::ix/error-boundary
               ::ix/compose-context
               ::ix/llm-call
@@ -40,7 +42,7 @@
               ::ix/store-exchange
               ::ix/deliver-responses
               ::ix/notify]
-             original-names)))))
+             (mapv :name chain))))))
 
 (deftest assembled-base-is-valid
   (testing "the assembled base plugin chain validates as interceptors"

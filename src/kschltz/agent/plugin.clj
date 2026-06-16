@@ -1,27 +1,33 @@
 (ns kschltz.agent.plugin
   "Plugin system for the agent interceptor chain.
 
-   A plugin is a pure data map:
+   A plugin is a vector of interceptor maps:
 
-     {:plugin/name  :my-plugin
-      :plugin/slots {:guard   [<interceptor>]
-                     :enrich  [<interceptor> ...]
-                     ...}
-      :plugin/chain [<interceptor> ...]}    ; optional, replaces slots
+     [{:name  :my.interceptor
+       :slot  :enrich          ; optional stage slot
+       :enter (fn [ctx] ctx')
+       :leave (fn [ctx] ctx')
+       :error (fn [ctx ex] ctx')} ...]
 
-   Named slots (in execution order; see `default-slot-order`):
+   The vector may carry metadata `{:plugin/name :my-plugin}` for
+   diagnostics and tooling.
+
+   Reserved slots (in execution order; see `default-slot-order`):
      :guard    — security / safety checks before compose
      :enrich   — RAG / memory recall before compose
      :compose  — context construction interceptors
      :llm      — interceptors that wrap the LLM call
      :dispatch — tool-loop dispatch interceptors
-     :tools    — tool interceptors (typically no-ops; the dispatcher
-                 routes tool-calls to the registered tool defs)
+     :tools    — tool interceptors
      :finalize — after the loop, before leave
      :history  — leave stage for history updates
      :persist  — leave stage for memory persistence
      :observe  — leave stage for tracing / metrics
      :notify   — leave stage for event callbacks
+
+   Interceptors without a `:slot` are appended after all slotted
+   interceptors, in plugin declaration order. A plugin that is entirely
+   slotless therefore replaces or extends the chain as a plain vector.
 
    `assemble-chain` is a pure fold: same plugins in the same order
    produce the same chain. Within a slot, plugin declaration order
@@ -31,73 +37,27 @@
             [malli.core :as m]))
 
 (def default-slot-order
-  "The default order in which slots are folded into a chain."
+  "The default order in which slot-tagged interceptors are folded into
+   a chain."
   [:guard :enrich :compose :llm :dispatch
    :tools :finalize
    :history :persist :observe :notify])
 
+(def ^:private allowed-slots
+  (set default-slot-order))
+
+(def ^:private slot-rank
+  "Map from slot keyword to its position in `default-slot-order`."
+  (zipmap default-slot-order (range)))
+
 (def Plugin
-  "Shape of a plugin map. Either `:plugin/slots` (contributes to
-   the chain) or `:plugin/chain` (replaces the chain). At least one
-   of the two must be present.
-
-   Open-schema contract: this map is `{:closed false}`. Extra keys
-   are silently ignored by Malli validation. Use `m/explain` directly
-   if you need to assert specific key presence. This is a deliberate
-   design choice: a future plugin field should not break every
-   existing plugin that doesn't know about it. The cost is that
-   removing a plugin key from this schema does not by itself
-   reject legacy plugins that still use it — code that consumes
-   `:plugin/register` etc. must check at runtime, not at validation
-   time."
-  [:map {:closed false}
-   [:plugin/name :keyword]
-   [:plugin/slots {:optional true}
-    [:map-of :keyword [:vector :any]]]
-   [:plugin/chain {:optional true}
-    [:vector :any]]
-   [:plugin/doc {:optional true} :string]])
-
-(defn- build-interceptor
-  "Wrap a plugin's slot interceptor with metadata. Throws
-   ex-info if `ix` provides no stage fn (`:enter`/`:leave`/`:error`
-   all nil) — silent all-nil interceptors are a footgun, since the
-   engine treats them as no-ops and a typo'd or stubbed stage
-   passes validation but does nothing. Also throws if `ix` is not
-   a map — the keyword lookups below would silently return nil for
-   any non-map shape and trigger the all-nil check with confusing
-   ex-data.
-
-   The `:plugin/original-name` key is only emitted when `ix` provides
-   a `:name`; absent names yield an assembled interceptor without
-   the key (rather than with nil)."
-  [plugin-name slot ix]
-  (when-not (map? ix)
-    (throw (ex-info "Plugin slot interceptor must be a map"
-                    {:plugin/name  plugin-name
-                     :plugin/slot  slot
-                     :interceptor ix
-                     :hint         "expected a map with :enter/:leave/:error/:name"})))
-  (when (and (nil? (:enter ix))
-             (nil? (:leave ix))
-             (nil? (:error ix)))
-    (throw (ex-info "Plugin interceptor has no stage fn (silent no-op)"
-                    {:plugin/name    plugin-name
-                     :plugin/slot    slot
-                     :interceptor   ix
-                     :hint           "add at least one of :enter, :leave, :error"})))
-  (cond-> {:name (keyword (str (name plugin-name) "." (name slot)))
-           :enter (:enter ix)
-           :leave (:leave ix)
-           :error (:error ix)
-           :plugin/name plugin-name
-           :plugin/slot slot}
-    (:name ix) (assoc :plugin/original-name (:name ix))))
+  "Shape of a plugin vector: a vector of interceptor maps. Extra keys
+   on each interceptor are allowed by the open `Interceptor` schema."
+  [:vector schema/Interceptor])
 
 (defn- explain-plugins
   "Run Malli on a plugin seq. Returns the Malli error map
-   `{:schema ... :value ... :errors [...]}` or nil when valid.
-   `:errors` is a vector of problem maps (one per failing entry)."
+   `{:schema ... :value ... :errors [...]}` or nil when valid."
   [plugins]
   (m/explain [:sequential Plugin] (vec plugins)))
 
@@ -114,54 +74,94 @@
 
 (defn- explain-errors
   "Return the `:errors` vector from a Malli explain result, or nil
-   when the explain result is nil/empty.
-
-   Returns either nil OR a non-empty vector. Callers that need a
-   vector unconditionally should wrap with `(or (explain-errors …) [])`."
+   when the explain result is nil/empty."
   [explain-result]
   (when-let [errs (and explain-result (:errors explain-result))]
     (when (seq errs) (vec errs))))
 
+(defn- plugin-name
+  "Return the plugin name from vector metadata, if any."
+  [plugin]
+  (-> plugin meta :plugin/name))
+
+(defn- check-interceptor
+  "Ensure `ix` is a map with at least one stage function. Throws ex-info
+   with the plugin name and interceptor index if it is malformed or would
+   be a silent no-op."
+  [plugin-name idx ix]
+  (when-not (map? ix)
+    (throw (ex-info "Plugin interceptor must be a map"
+                    {:plugin/name  plugin-name
+                     :index        idx
+                     :interceptor  ix
+                     :hint         "expected a map with :name and optional :enter/:leave/:error/:slot"})))
+  (when (and (nil? (:enter ix))
+             (nil? (:leave ix))
+             (nil? (:error ix)))
+    (throw (ex-info "Plugin interceptor has no stage fn (silent no-op)"
+                    {:plugin/name  plugin-name
+                     :index        idx
+                     :interceptor  ix
+                     :hint         "add at least one of :enter, :leave, :error"})))
+  ix)
+
+(defn- annotate-interceptor
+  "Attach `:plugin/name` and `:plugin/slot` metadata to an interceptor
+   for diagnostics, then remove the original `:slot` key from the
+   interceptor body so the chain engine sees a normal interceptor map."
+  [plugin-name slot ix]
+  (cond-> (dissoc ix :slot)
+    plugin-name (assoc :plugin/name plugin-name)
+    slot        (assoc :plugin/slot slot)))
+
+(defn- validate-slots
+  "Throw if any interceptor declares an unknown slot."
+  [interceptors]
+  (let [unknown (into #{} (comp (keep :plugin/slot)
+                                (remove allowed-slots))
+                      interceptors)]
+    (when (seq unknown)
+      (throw (ex-info "Unknown plugin slot(s)"
+                      {:slots   (vec unknown)
+                       :allowed default-slot-order})))))
+
 (defn assemble-chain
-  "Fold a seq of plugins into a single chain (vector of interceptors).
+  "Fold a seq of plugin vectors into a single chain (vector of interceptors).
 
-   Reserved slots (per `default-slot-order`): interceptors from each
-   plugin in declaration order, appending to the accumulator.
-
-   A plugin with `:plugin/chain` (no slots) is appended verbatim
-   after the slot-folded interceptors.
+   Interceptors with a `:slot` keyword are grouped by slot and ordered
+   according to `default-slot-order`. Within a slot, plugin declaration
+   order is preserved (Clojure's sort-by is stable). Interceptors without
+   a `:slot` are appended at the end in declaration order.
 
    Throws ex-info with {:problems ..., :plugins ...} when any plugin
-   violates the `Plugin` schema. The `:problems` vector contains
-   Malli's actual failure descriptions; `:plugins` echoes the input
-   for caller diagnostics. Also throws ex-info if any
-   plugin-slot interceptor has all-nil stages (silent no-op
-   footgun — see `build-interceptor`)."
+   violates the `Plugin` schema, or when any interceptor has all-nil
+   stages or declares an unknown slot."
   [plugins]
   (let [plugins-vec (vec plugins)
         explain     (explain-plugins plugins-vec)
         problems    (explain-errors explain)]
     (when (seq problems)
-      (throw (ex-info (str "Invalid plugin map: " (format-problems problems))
+      (throw (ex-info (str "Invalid plugin: " (format-problems problems))
                       {:problems problems
-                       :plugins  plugins-vec}))))
-  (let [acc (atom [])]
-    (doseq [slot default-slot-order]
-      (doseq [plugin plugins
-              ix  (get-in plugin [:plugin/slots slot])]
-        (swap! acc conj (build-interceptor (:plugin/name plugin) slot ix))))
-    (doseq [plugin plugins
-            :when (contains? plugin :plugin/chain)]
-      (swap! acc into (:plugin/chain plugin)))
-    @acc))
+                       :plugins  plugins-vec})))
+    (let [annotated (for [plugin plugins-vec
+                          [idx ix] (map-indexed vector plugin)]
+                      (let [pname (plugin-name plugin)
+                            slot  (:slot ix)
+                            ix*   (check-interceptor pname idx (dissoc ix :slot))]
+                        (annotate-interceptor pname slot ix*)))
+          slotted  (filter :plugin/slot annotated)
+          slotless (remove :plugin/slot annotated)]
+      (validate-slots slotted)
+      (vec (concat (sort-by (comp slot-rank :plugin/slot) slotted)
+                   slotless)))))
 
 (defn validate-plugins
   "Validate a seq of plugins against the `Plugin` schema.
 
    Returns nil on success. On failure returns a map
    `{:problems [...] :message \"...\"}` with the Malli problem
-   vector and a rendered message. Callers may pass either the map
-   to `ex-data` or surface the `:message` directly."
+   vector and a rendered message."
   [plugins]
   (when-let [problems (explain-errors (explain-plugins plugins))]
     {:problems problems

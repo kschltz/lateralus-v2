@@ -14,6 +14,7 @@
             [integrant.core :as ig]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.protocol :as mem]
+            [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.system :as system]))
 
@@ -62,11 +63,11 @@
           agent (:lateralus/agent s)
           chain (:exchange-chain agent)
           names (mapv :name chain)]
-      (is (some #(= :memory.enrich (:name %)) chain)
+      (is (some #(= ::plugins.memory/recall (:name %)) chain)
           "memory recall interceptor is present")
-      (is (some #(= :memory.persist (:name %)) chain)
+      (is (some #(= ::plugins.memory/persist (:name %)) chain)
           "memory persist interceptor is present")
-      (is (= :memory.enrich (nth names 1))
+      (is (= ::plugins.memory/recall (nth names 1))
           "recall runs in the enrich slot, before compose-context"))))
 
 (deftest runtime-uses-memory-plugin

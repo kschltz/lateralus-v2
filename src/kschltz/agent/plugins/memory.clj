@@ -1,7 +1,7 @@
 (ns kschltz.agent.plugins.memory
   "Memory plugin for the v2 interceptor chain.
 
-   Contributes two slot interceptors:
+   Contributes two slot-tagged interceptors:
 
      :enrich  — pre-compose recall. Runs before `compose-context`,
                 reads the configured `MemoryBackend` and sets
@@ -70,7 +70,7 @@
       ctx)))
 
 (defn memory-plugin
-  "Construct a memory plugin map.
+  "Construct a memory plugin vector.
 
    `opts` keys:
      :backend  — required `MemoryBackend` instance
@@ -80,9 +80,11 @@
   [{:keys [backend embedder top-y last-n]
     :or   {top-y 3 last-n 5}}]
   {:pre [(some? backend)]}
-  {:plugin/name :memory
-   :plugin/slots
-   {:enrich  [{:name  ::recall
-               :enter (recall-enter backend embedder top-y last-n)}]
-    :persist [{:name  ::persist
-               :leave (persist-leave backend)}]}})
+  (with-meta
+    [{:name  ::recall
+      :slot  :enrich
+      :enter (recall-enter backend embedder top-y last-n)}
+     {:name  ::persist
+      :slot  :persist
+      :leave (persist-leave backend)}]
+    {:plugin/name :memory}))

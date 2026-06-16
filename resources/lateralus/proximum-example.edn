@@ -31,12 +31,11 @@
                             :distance :euclidean
                             ;; Set true to fsync after every message.
                             :sync-on-write? false}
- :lateralus/base-plugin    {}
  :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/plugins        {:plugins [#ig/ref :lateralus/memory-plugin]}
+ :lateralus/plugins        [#ig/ref :lateralus/memory-plugin]
  :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
                             :llm-client     #ig/ref :lateralus/llm-client
                             :llm-config     #ig/ref :lateralus/llm-config
