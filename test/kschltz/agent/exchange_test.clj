@@ -53,7 +53,7 @@
             ::ix/store-exchange
             ::ix/deliver-responses
             ::ix/notify]
-           (mapv #(or (:plugin/original-name %) (:name %)) (default-exchange-chain))))))
+           (mapv :name (default-exchange-chain))))))
 
 (deftest every-stage-validates-against-interceptor-schema
   (is (= :ok (ix/check-stages))))
