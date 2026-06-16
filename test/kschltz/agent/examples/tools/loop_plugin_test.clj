@@ -34,18 +34,19 @@
 
 (defn- run-plugin-exchange
   "Execute the plugin chain with the given fake LLM and prompt."
-  [llm prompt]
-  (let [plugin (loop-plugin/loop-plugin)
-        chain (plugin/assemble-chain [plugin])]
-    (chain/execute
-     {:agent/state {:base-url "stub" :api-key nil :model "fake/v0"
-                    :agent/system-message "You are a helpful assistant with access to tools."}
-      :llm/client llm
-      :exchange/user-text prompt
-      :exchange/session-id :test-session
-      :exchange/user-msg-id "user-1"
-      :exchange/assistant-msg-id "assistant-1"}
-     chain)))
+  ([llm prompt] (run-plugin-exchange llm prompt {}))
+  ([llm prompt opts]
+   (let [plugin (loop-plugin/loop-plugin opts)
+         chain (plugin/assemble-chain [plugin])]
+     (chain/execute
+      {:agent/state {:base-url "stub" :api-key nil :model "fake/v0"
+                     :agent/system-message "You are a helpful assistant with access to tools."}
+       :llm/client llm
+       :exchange/user-text prompt
+       :exchange/session-id :test-session
+       :exchange/user-msg-id "user-1"
+       :exchange/assistant-msg-id "assistant-1"}
+      chain))))
 
 (deftest plugin-chain-assembles
   (testing "loop plugin assembles into a non-empty interceptor chain"
@@ -95,3 +96,22 @@
     (let [result ((get-in loop-plugin/default-tools [:handlers "time/now"]) {})]
       (is (string? result))
       (is (re-find #"\d{4}-\d{2}-\d{2}T" result)))))
+
+(deftest trace-mode-assembles-larger-chain
+  (testing "trace? true wraps the chain with trace interceptors"
+    (let [plugin (loop-plugin/loop-plugin {:trace? true})
+          chain (plugin/assemble-chain [plugin])]
+      (is (> (count chain)
+             (count (plugin/assemble-chain [(loop-plugin/loop-plugin)]))))
+      (is (some #(= "tools-loop.trace" (namespace (:name %))) chain)
+          "trace interceptors are present"))))
+
+(deftest trace-mode-assembles-larger-chain
+  (testing "trace? true wraps the chain with trace interceptors"
+    (let [plain-count (count (plugin/assemble-chain [(loop-plugin/loop-plugin)]))
+          trace-count (count (plugin/assemble-chain [(loop-plugin/loop-plugin {:trace? true})]))
+          chain (plugin/assemble-chain [(loop-plugin/loop-plugin {:trace? true})])]
+      (is (> trace-count plain-count)
+          "trace chain is larger than plain chain")
+      (is (some #(= "tools-loop.trace" (namespace (:name %))) chain)
+          "trace interceptors are present"))))

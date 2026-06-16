@@ -35,6 +35,10 @@ clojure -M:examples -m kschltz.lateralus --config examples/tools/loop/config.edn
 While the example is in a kb worktree, run from the worktree directory
 and point `--config` at `examples/tools/loop/config.edn` inside it.
 
+The example config enables `:trace? true`, so the plugin prints a line
+before and after every interceptor. Disable it by removing `:trace?` from
+`:lateralus/tools-loop-plugin` in the config.
+
 Then try prompts like:
 
 ```
