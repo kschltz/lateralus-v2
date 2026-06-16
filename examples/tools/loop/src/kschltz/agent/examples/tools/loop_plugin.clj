@@ -14,8 +14,11 @@
    one user prompt in, one final ctx out."
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
+            [malli.core :as m]
+            [malli.error :as me]
             [kschltz.agent.chain :as chain]
-            [kschltz.agent.interceptors :as ix]))
+            [kschltz.agent.interceptors :as ix]
+            [kschltz.agent.llm.schemas :as schemas]))
 
 (def ^:private max-loop-depth
   "Safety cap on the number of back-to-back LLM calls inside one
@@ -139,10 +142,11 @@
    :enter (fn [ctx]
             (let [results (or (:tool/results ctx) [])
                   assistant-msg (assistant-tool-message ctx)
-                  result-msgs (mapv tool-result-message results)]
-              (update-in ctx [:llm/request :messages]
-                         into (cond-> result-msgs
-                               assistant-msg (cons assistant-msg)))))})
+                  result-msgs (mapv tool-result-message results)
+                  new-msgs (if assistant-msg
+                             (cons assistant-msg result-msgs)
+                             result-msgs)]
+              (update-in ctx [:llm/request :messages] into new-msgs)))})
 
 (defn- bump-loop-depth-interceptor
   "Interceptor that increments `:agent/tool-loop-depth`."
@@ -151,7 +155,7 @@
    :enter (fn [ctx]
             (update ctx :agent/tool-loop-depth (fnil inc 0)))})
 
-(declare tool-loop-interceptor)
+(declare tool-loop-interceptor llm-call-with-self-heal)
 
 (defn- tool-loop-interceptor
   "Interceptor that, after dispatch, decides whether to loop back to
@@ -168,6 +172,7 @@
                 (chain/enqueue ctx
                                [(bump-loop-depth-interceptor)
                                 (compose-tool-results-interceptor)
+                                (llm-call-with-self-heal)
                                 ix/llm-call
                                 ix/parse-response
                                 (dispatch-tools-interceptor registry)
@@ -215,12 +220,60 @@
                  [(trace-interceptor (:name ix)) ix])
                chain)))
 
+(def ^:private max-self-heal-attempts
+  "Cap on how many times we retry an LLM call after fixing a Malli
+   validation error in the outgoing request."
+  3)
+
+(defn- humanize-request-errors
+  "Return humanized Malli validation errors for `req` against
+   `schemas/ChatRequest`, or nil when valid."
+  [req]
+  (some-> schemas/ChatRequest (m/explain req) (me/humanize)))
+
+(defn- repair-request-with-error
+  "Append a system message describing the validation error so the
+   LLM can self-correct its next tool call."
+  [ctx explain]
+  (update-in ctx [:llm/request :messages]
+             conj {:role "system"
+                   :content (str "The request built from your last tool response failed schema validation. Fix the tool call format and try again. Errors: "
+                                 (pr-str explain))}))
+
+(defn- llm-call-with-self-heal
+  "Interceptor placed immediately before `ix/llm-call`. Validates the
+   outgoing request; if invalid it appends a system message with the
+   humanized Malli error, terminates the rest of the current queue, and
+   enqueues another validation + LLM call + parse pass. Self-heal
+   attempts are capped by `:agent/self-heal-attempts`."
+  []
+  {:name ::llm-call-with-self-heal
+   :enter (fn [ctx]
+            (let [attempts (get ctx :agent/self-heal-attempts 0)]
+              (if (>= attempts max-self-heal-attempts)
+                ctx
+                (if-some [explain (humanize-request-errors (:llm/request ctx))]
+                  (do
+                    (println (format "[self-heal] attempt %d request invalid: %s"
+                                     (inc attempts) (pr-str explain)))
+                    (println (format "[self-heal] failing request: %s"
+                                     (pr-str (:llm/request ctx))))
+                    (-> ctx
+                        (repair-request-with-error explain)
+                        (update :agent/self-heal-attempts (fnil inc 0))
+                        chain/terminate
+                        (chain/enqueue [(llm-call-with-self-heal)
+                                        ix/llm-call
+                                        ix/parse-response])))
+                  ctx))))})
+
 (defn- build-chain
   "Assemble the full exchange chain for the tool-calling plugin."
   [registry max-depth trace?]
   (cond-> [ix/error-boundary
            ix/compose-context
            (inject-tools-interceptor (:definitions registry))
+           (llm-call-with-self-heal)
            ix/llm-call
            ix/parse-response
            (dispatch-tools-interceptor registry)
