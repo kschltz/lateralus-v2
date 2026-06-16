@@ -9,7 +9,12 @@
                                    LangChain4j in-process ONNX)
      :lateralus/memory-backend   MemoryBackend impl (noop for tests; the
                                    runtime default is Proximum HNSW)
-     :lateralus/plugins          Seq of plugin maps to assemble
+     :lateralus/plugins          Vector of plugin vectors to assemble.
+                                   Each plugin is a vector of interceptor
+                                   maps; interceptors may declare a `:slot`
+                                   keyword for stage ordering. A plugin
+                                   marked `^{:plugin/complete? true}` replaces
+                                   the default base exchange chain.
      :lateralus/agent            Agent entry: assembled chain + clients
                                   resolved at init time
 
@@ -155,11 +160,16 @@
                             (not (contains? opts :embedder))
                             (assoc :embedder (embedding/noop-embedder)))))))
 
-(defmethod ig/init-key :lateralus/plugins [_ {:keys [plugins]}]
-  ;; The base plugin is always prepended so that user plugins are
-  ;; assembled around the default exchange chain. A config that
-  ;; explicitly sets `:plugins []` gets just the base chain.
-  (vec (cons (plugins.base/base-plugin) plugins)))
+(defmethod ig/init-key :lateralus/plugins [_ plugins]
+  ;; The base plugin is prepended automatically so user plugins are
+  ;; assembled around the default exchange chain. A config that lists
+  ;; no plugins gets just the base chain. A plugin marked
+  ;; `^{:plugin/complete? true}` disables the auto-prepended base chain,
+  ;; allowing a complete replacement chain (e.g. the tool-loop example).
+  (let [complete? (some #(-> % meta :plugin/complete? true?) plugins)]
+    (if complete?
+      (vec plugins)
+      (vec (cons (plugins.base/base-plugin) plugins)))))
 
 (defmethod ig/init-key :lateralus/base-plugin [_ _]
   (plugins.base/base-plugin))
@@ -167,42 +177,26 @@
 (defmethod ig/init-key :lateralus/memory-plugin [_ opts]
   (plugins.memory/memory-plugin opts))
 
-;; Resolve a plugin map or explicit chain into the interceptor vector
-;; the runtime will run. Accepts either a plain vector of interceptors
-;; or a plugin map with `:plugin/chain`. Lets example configs replace
-;; the assembled base chain without modifying the base plugin.
-(defmethod ig/init-key :lateralus/exchange-chain [_ value]
-  (cond
-    (vector? value) value
-    (and (map? value) (contains? value :plugin/chain)) (:plugin/chain value)
-    :else (throw (ex-info ":lateralus/exchange-chain must be a vector of interceptors or a plugin map with :plugin/chain"
-                           {:value value}))))
-
 (defmethod ig/init-key :lateralus/tools-loop-plugin [_ opts]
   (require 'kschltz.agent.examples.tools.loop-plugin)
   (let [ctor (resolve 'kschltz.agent.examples.tools.loop-plugin/loop-plugin)]
     (ctor opts)))
 
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins exchange-chain llm-client embedder memory-backend llm-config]}]
+  [_ {:keys [plugins llm-client embedder memory-backend llm-config]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
   ;; seeds the runtime's state atom so compose-context sees the
   ;; LLM config (:base-url / :api-key / :model) and any other
   ;; persistent context. The state atom is the only place chain
   ;; stages should read persistent context from.
   ;;
-  ;; An explicit `:exchange-chain` overrides plugin assembly entirely.
-  ;; This lets examples and advanced users supply a complete chain
-  ;; (e.g., a tool-calling loop plugin) without modifying the base
-  ;; plugin. When absent, the chain is assembled from `:plugins` as
-  ;; usual.
+  ;; The exchange chain is assembled from `:plugins`.
   (let [llm-config (or llm-config {})
-        assembled (or exchange-chain (plugin/assemble-chain (or plugins [])))]
+        assembled (plugin/assemble-chain (or plugins []))]
     {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
      :embedder          embedder
      :memory-backend    memory-backend
      :assembled         assembled
-     ;; `assembled` is either the explicit chain or the plugin-assembled chain.
      :exchange-chain    assembled
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
                                (select-keys llm-config
@@ -234,12 +228,11 @@
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop
                               :embedder (ig/ref :lateralus/embedder)}
-   :lateralus/base-plugin    {}
    :lateralus/memory-plugin  {:backend  (ig/ref :lateralus/memory-backend)
                               :embedder (ig/ref :lateralus/embedder)
                               :top-y    3
                               :last-n   5}
-   :lateralus/plugins        {:plugins [(ig/ref :lateralus/memory-plugin)]}
+   :lateralus/plugins        [(ig/ref :lateralus/memory-plugin)]
    :lateralus/agent          {:plugins        (ig/ref :lateralus/plugins)
                               :llm-client     (ig/ref :lateralus/llm-client)
                               :llm-config     (ig/ref :lateralus/llm-config)

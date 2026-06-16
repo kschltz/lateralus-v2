@@ -38,15 +38,18 @@
       (vec (repeat dims 0.0)))
     (-dimensions [_] dims)))
 
+(defn- by-slot [plugin slot]
+  (first (filter #(= slot (:slot %)) plugin)))
+
 ;; ---- Unit tests for the plugin constructor ----
 
 (deftest memory-plugin-construction
-  (testing "the plugin has the expected name and slots"
+  (testing "the plugin has the expected name and two slot-tagged interceptors"
     (let [b (recording-backend (atom []) [])
           p (plugins.memory/memory-plugin {:backend b})]
-      (is (= :memory (:plugin/name p)))
-      (is (= 1 (count (get-in p [:plugin/slots :enrich]))))
-      (is (= 1 (count (get-in p [:plugin/slots :persist])))))))
+      (is (= :memory (-> p meta :plugin/name)))
+      (is (some? (by-slot p :enrich)))
+      (is (some? (by-slot p :persist))))))
 
 (deftest memory-plugin-default-recall-opts
   (testing "defaults are top-y 3 and last-n 5"
@@ -58,7 +61,7 @@
                     [])
                   (-close [_] nil))
           p     (plugins.memory/memory-plugin {:backend b})
-          ix    (first (get-in p [:plugin/slots :enrich]))
+          ix    (by-slot p :enrich)
           _     ((:enter ix) {:exchange/session-id :s
                               :exchange/user-text  "hi"})]
       (is (= [{:top-y 3 :last-n 5 :query-text "hi" :query-embedding nil}]
@@ -75,7 +78,7 @@
                   (-close [_] nil))
           e     (fake-embedder 4)
           p     (plugins.memory/memory-plugin {:backend b :embedder e})
-          ix    (first (get-in p [:plugin/slots :enrich]))
+          ix    (by-slot p :enrich)
           _     ((:enter ix) {:exchange/session-id :s
                               :exchange/user-text  "hello"})]
       (is (= 1 (count @calls)))

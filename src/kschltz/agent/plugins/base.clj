@@ -1,6 +1,6 @@
 (ns kschltz.agent.plugins.base
   "Default base plugin. It contributes the core interceptors that
-   make up the standard exchange chain, expressed as plugin slots so
+   make up the standard exchange chain, expressed as a flat vector so
    that additional plugins (memory, safety, etc.) can be assembled
    around them in a fixed, predictable order.
 
@@ -22,17 +22,17 @@
             [kschltz.agent.plugin :as plugin]))
 
 (defn base-plugin
-  "Return the default base plugin map. With no additional plugins,
+  "Return the default base plugin vector. With no additional plugins,
    `(plugin/assemble-chain [(base-plugin)])` produces a chain that
    is the single source of truth for the default stage order."
   []
-  {:plugin/name :base
-   :plugin/slots
-   {:guard    [ix/error-boundary]
-    :compose  [ix/compose-context]
-    :llm      [ix/llm-call
-               ix/parse-response]
-    :dispatch [ix/dispatch]
-    :history  [ix/store-exchange]
-    :observe  [ix/deliver-responses]
-    :notify   [ix/notify]}})
+  (with-meta
+    [(assoc ix/error-boundary :slot :guard)
+     (assoc ix/compose-context :slot :compose)
+     (assoc ix/llm-call :slot :llm)
+     (assoc ix/parse-response :slot :llm)
+     (assoc ix/dispatch :slot :dispatch)
+     (assoc ix/store-exchange :slot :history)
+     (assoc ix/deliver-responses :slot :observe)
+     (assoc ix/notify :slot :notify)]
+    {:plugin/name :base}))

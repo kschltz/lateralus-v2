@@ -26,6 +26,7 @@
    Absent stages are permitted as `nil` (treated as no-op)."
   [:map {:closed false}
    [:name :keyword]
+   [:slot {:optional true} :keyword]
    [:enter {:optional true} [:maybe fn?]]
    [:leave {:optional true} [:maybe fn?]]
    [:error {:optional true} [:maybe fn?]]])
