@@ -67,7 +67,10 @@
           "memory recall interceptor is present")
       (is (some #(= ::plugins.memory/persist (:name %)) chain)
           "memory persist interceptor is present")
-      (is (= ::plugins.memory/recall (nth names 1))
+      (is (= :enrich (->> chain
+                          (filter #(= ::plugins.memory/recall (:name %)))
+                          first
+                          :plugin/slot))
           "recall runs in the enrich slot, before compose-context"))))
 
 (deftest runtime-uses-memory-plugin

@@ -4,7 +4,7 @@
                             :base-url "http://localhost:11434/v1"
                             :model    "deepseek-v4-flash:cloud"}
  :lateralus/llm-config     {:base-url "http://localhost:11434/v1"
-                          :model    "deepseek-v4-flash:cloud"}
+                            :model    "deepseek-v4-flash:cloud"}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :kg-bm25
                             :store {:backend :memory}}
@@ -12,7 +12,10 @@
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/plugins        [#ig/ref :lateralus/memory-plugin]
+ :lateralus/tool-registry  {}
+ :lateralus/tools-plugin   {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins        [#ig/ref :lateralus/memory-plugin
+                            #ig/ref :lateralus/tools-plugin]
  :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
                             :llm-client     #ig/ref :lateralus/llm-client
                             :llm-config     #ig/ref :lateralus/llm-config

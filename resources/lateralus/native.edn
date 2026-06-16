@@ -2,18 +2,18 @@
 ;;
 ;; This config avoids the JVM-only Proximum HNSW index and the LangChain4j
 ;; in-process ONNX embedder, both of which are excluded from the native
-;; classpath. It uses the pure-Clojure KG + BM25 memory backend and an HTTP
-;; LLM client pointed at a local Ollama cloud-compatible endpoint.
+;; classpath. It uses the stub LLM, the noop embedder, and the pure-Clojure
+;; KG + BM25 memory backend.
+;;
+;; For a live Ollama demo with the native binary, override the LLM client via
+;; --config resources/lateralus/demo-ollama.edn or a custom config.
 ;;
 ;; Build and run:
 ;;   export GRAALVM_HOME=/path/to/graalvm
 ;;   clojure -T:native native
-;;   ./target/lateralus-v2-native --config resources/lateralus/native.edn -i
-{:lateralus/llm-client     {:impl :http
-                             :base-url "http://localhost:11434/v1"
-                             :model    "deepseek-v4-flash:cloud"}
- :lateralus/llm-config     {:base-url "http://localhost:11434/v1"
-                            :model    "deepseek-v4-flash:cloud"}
+;;   ./target/lateralus-v2-native --config resources/lateralus/native.edn "hello"
+{:lateralus/llm-client     {:impl :stub}
+ :lateralus/llm-config     {}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :kg-bm25
                             :store {:backend :memory}}
@@ -21,7 +21,10 @@
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/plugins        [#ig/ref :lateralus/memory-plugin]
+ :lateralus/tool-registry  {}
+ :lateralus/tools-plugin   {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins        [#ig/ref :lateralus/memory-plugin
+                            #ig/ref :lateralus/tools-plugin]
  :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
                             :llm-client     #ig/ref :lateralus/llm-client
                             :llm-config     #ig/ref :lateralus/llm-config

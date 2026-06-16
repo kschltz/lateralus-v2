@@ -18,7 +18,8 @@
 ;;                               :store-config {:backend :file
 ;;                                              :path "sessions/proximum"
 ;;                                              :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}
-;;   :lateralus/plugins          [#ig/ref :lateralus/memory-plugin]
+;;   :lateralus/plugins          [#ig/ref :lateralus/memory-plugin
+;;                                #ig/ref :lateralus/tools-plugin]
 
 {:lateralus/llm-client     {:impl :stub}
  :lateralus/llm-config     {}
@@ -30,7 +31,10 @@
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/plugins        [#ig/ref :lateralus/memory-plugin]
+ :lateralus/tool-registry  {}
+ :lateralus/tools-plugin   {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins        [#ig/ref :lateralus/memory-plugin
+                            #ig/ref :lateralus/tools-plugin]
  :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
                             :llm-client     #ig/ref :lateralus/llm-client
                             :llm-config     #ig/ref :lateralus/llm-config
