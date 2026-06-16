@@ -139,20 +139,6 @@
                      :exchange/response (response-text resp)
                      :tool/calls        (response-tool-calls resp))))})
 
-(def dispatch
-  "Records `:tool/results` for the calls in `:tool/calls`. MVP
-   implementation: every tool returns `:not-implemented` (no real
-   tools ship in MVP). Sequential by default — `mapv`, never `pmap`
-   (fact-sequential-tools). The earlier dead `:agent/parallel-tools?`
-   knob was removed: there is no parallel opt-in in MVP, and
-   shipping a knob that does nothing is worse than shipping none."
-  {:name ::dispatch
-   :enter (fn [ctx]
-            (let [calls   (or (:tool/calls ctx) [])
-                  results (mapv (fn [c] {:call c :result :not-implemented})
-                                calls)]
-              (assoc ctx :tool/results results)))})
-
 (def store-exchange
   "Leave stage. A future memory plugin's persist interceptor (or a
    real backend) will replace this with proper persistence. For
@@ -193,7 +179,7 @@
   "All defined stages. Order is not significant here; assembly
    happens through the base plugin in `kschltz.agent.plugins.base`."
   [error-boundary compose-context llm-call
-   parse-response dispatch store-exchange deliver-responses notify])
+   parse-response store-exchange deliver-responses notify])
 
 ;; ---- Schema self-check ----
 

@@ -37,6 +37,8 @@
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
+            [kschltz.agent.plugins.tools :as plugins.tools]
+            [kschltz.agent.tools.examples :as tools.examples]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -177,10 +179,21 @@
 (defmethod ig/init-key :lateralus/memory-plugin [_ opts]
   (plugins.memory/memory-plugin opts))
 
-(defmethod ig/init-key :lateralus/tools-loop-plugin [_ opts]
-  (require 'kschltz.agent.examples.tools.loop-plugin)
-  (let [ctor (resolve 'kschltz.agent.examples.tools.loop-plugin/loop-plugin)]
-    (ctor opts)))
+(defmethod ig/init-key :lateralus/tool-registry [_ tools]
+  "Integrant component that simply holds the map of tool name -> Tool.
+   The map is consumed by `:lateralus/tools-plugin`, which seeds it on
+   the context at chain execution time."
+  tools)
+
+(defmethod ig/init-key :lateralus/example-tools [_ _]
+  "Convenience Integrant component that returns the example tool registry
+   (`time/now` and `calculator/eval`). Used by the tool-loop example
+   config; not part of the default config so production agents start
+   with an empty tool registry."
+  (tools.examples/example-registry))
+
+(defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
+  (plugins.tools/tools-plugin registry))
 
 (defmethod ig/init-key :lateralus/agent
   [_ {:keys [plugins llm-client embedder memory-backend llm-config]}]
@@ -223,7 +236,7 @@
    In-memory default (tests): stub LLM + noop embedder + noop memory.
    The runtime default in `resources/lateralus/config.edn` uses
    Proximum + LangChain4j in-process ONNX embedding."
-  {:lateralus/llm-client     {:impl :stub}
+   {:lateralus/llm-client     {:impl :stub}
    :lateralus/llm-config     {}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop
@@ -232,7 +245,10 @@
                               :embedder (ig/ref :lateralus/embedder)
                               :top-y    3
                               :last-n   5}
-   :lateralus/plugins        [(ig/ref :lateralus/memory-plugin)]
+   :lateralus/tool-registry  {}
+   :lateralus/tools-plugin   {:registry (ig/ref :lateralus/tool-registry)}
+   :lateralus/plugins        [(ig/ref :lateralus/memory-plugin)
+                              (ig/ref :lateralus/tools-plugin)]
    :lateralus/agent          {:plugins        (ig/ref :lateralus/plugins)
                               :llm-client     (ig/ref :lateralus/llm-client)
                               :llm-config     (ig/ref :lateralus/llm-config)
