@@ -183,19 +183,52 @@
             (let [req (:llm/request ctx)]
               (assoc ctx :llm/request (assoc req :tools tool-definitions))))})
 
+(defn- trace-interceptor
+  "Build an interceptor that prints a trace line before and after the
+   named interceptor `ix` runs. Useful for diagnosing chain behavior."
+  [name]
+  (let [trace-name (keyword "tools-loop.trace" (str name))
+        trace-fn (fn [stage ctx]
+                   (let [resp (:exchange/response ctx)]
+                     (println (format "[trace] %s %s | loop-depth=%s tool-calls=%s tool-results=%s response=%s"
+                                      (pr-str name)
+                                      stage
+                                      (get ctx :agent/tool-loop-depth 0)
+                                      (count (:tool/calls ctx))
+                                      (count (:tool/results ctx))
+                                      (pr-str (if (seq resp)
+                                                (subs (str resp) 0 (min 40 (count (str resp))))
+                                                ""))))))]
+    {:name trace-name
+     :enter (fn [ctx] (trace-fn :enter ctx) ctx)
+     :leave (fn [ctx] (trace-fn :leave ctx) ctx)
+     :error (fn [ctx ex]
+              (println (format "[trace] %s error | %s" (pr-str name) (ex-message ex)))
+              ctx)}))
+
+(defn- trace-chain
+  "Interleave trace interceptors between every interceptor in `chain`.
+   The first interceptor still runs first, but a trace interceptor runs
+   immediately before and after each original interceptor."
+  [chain]
+  (vec (mapcat (fn [ix]
+                 [(trace-interceptor (:name ix)) ix])
+               chain)))
+
 (defn- build-chain
   "Assemble the full exchange chain for the tool-calling plugin."
-  [registry max-depth]
-  [ix/error-boundary
-   ix/compose-context
-   (inject-tools-interceptor (:definitions registry))
-   ix/llm-call
-   ix/parse-response
-   (dispatch-tools-interceptor registry)
-   (tool-loop-interceptor registry max-depth)
-   ix/store-exchange
-   ix/deliver-responses
-   ix/notify])
+  [registry max-depth trace?]
+  (cond-> [ix/error-boundary
+           ix/compose-context
+           (inject-tools-interceptor (:definitions registry))
+           ix/llm-call
+           ix/parse-response
+           (dispatch-tools-interceptor registry)
+           (tool-loop-interceptor registry max-depth)
+           ix/store-exchange
+           ix/deliver-responses
+           ix/notify]
+    trace? trace-chain))
 
 (defn loop-plugin
   "Construct the tool-calling loop plugin.
@@ -205,14 +238,17 @@
                   Tool maps) and `:handlers` (map of name -> fn).
                   Merged over `default-tools`.
      :max-depth — cap on follow-up LLM calls (default 5).
+     :trace?    — when true, print a trace line before/after each
+                  interceptor in the plugin chain.
 
    Returns a plugin map with `:plugin/chain`, so it replaces the entire
    assembled chain when referenced as `:lateralus/exchange-chain`."
   ([] (loop-plugin {}))
-  ([{:keys [tools max-depth]
+  ([{:keys [tools max-depth trace?]
      :or   {tools {}
-            max-depth max-loop-depth}}]
+            max-depth max-loop-depth
+            trace? false}}]
    (let [registry (merge-tools tools)]
      {:plugin/name :tools-loop
       :plugin/doc "Tool-calling loop example plugin."
-      :plugin/chain (build-chain registry (or max-depth max-loop-depth))})))
+      :plugin/chain (build-chain registry (or max-depth max-loop-depth) trace?)})))
