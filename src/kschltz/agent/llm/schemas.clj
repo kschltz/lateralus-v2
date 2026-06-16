@@ -18,24 +18,51 @@
    - Ollama chat:            https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion"
   (:require [malli.core :as m]))
 
+(def ToolCall
+  "A single tool call that the assistant asks us to execute."
+  [:map
+   [:id   :string]
+   [:type [:= "function"]]
+   [:function [:map
+               [:name :string]
+               [:arguments :string]]]])
+
+(def Tool
+  "OpenAI function tool definition. Sent in `:tools` so the model
+   can decide to call a registered function."
+  [:map
+   [:type [:= "function"]]
+   [:function [:map
+               [:name :string]
+               [:description {:optional true} :string]
+               [:parameters {:optional true} :map]]]])
+
 (def ChatMessage
-  "One message in a chat conversation. MVP subset: role + content."
+  "One message in a chat conversation. MVP subset: role + content.
+   Tool-result messages also carry `:tool_call_id` to match the
+   assistant tool call. Assistant messages may carry `:tool_calls`
+   when they requested tool execution."
   [:map
    [:role    [:enum "system" "user" "assistant" "tool"]]
-   [:content :string]])
+   [:content :string]
+   [:tool_call_id {:optional true} :string]
+   [:name {:optional true} :string]
+   [:tool_calls {:optional true} [:vector ToolCall]]])
 
 (def ChatRequest
   "Request body for POST /v1/chat/completions.
 
-   MVP subset: model, messages, temperature, max_tokens. Streaming
-   is not implemented in MVP and is rejected at the schema
+   MVP subset: model, messages, temperature, max_tokens, tools.
+   Streaming is not implemented in MVP and is rejected at the schema
    level (the `:stream` field is absent). Add it back when
    streaming lands."
   [:map
    [:model    :string]
    [:messages [:vector ChatMessage]]
    [:temperature {:optional true} [:maybe :double]]
-   [:max_tokens   {:optional true} [:maybe :int]]])
+   [:max_tokens   {:optional true} [:maybe :int]]
+   [:tools       {:optional true} [:vector Tool]]
+   [:tool_choice {:optional true} :any]])
 
 (def Choice
   "One assistant message returned by the model. `:content` is

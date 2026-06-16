@@ -167,21 +167,42 @@
 (defmethod ig/init-key :lateralus/memory-plugin [_ opts]
   (plugins.memory/memory-plugin opts))
 
+;; Resolve a plugin map or explicit chain into the interceptor vector
+;; the runtime will run. Accepts either a plain vector of interceptors
+;; or a plugin map with `:plugin/chain`. Lets example configs replace
+;; the assembled base chain without modifying the base plugin.
+(defmethod ig/init-key :lateralus/exchange-chain [_ value]
+  (cond
+    (vector? value) value
+    (and (map? value) (contains? value :plugin/chain)) (:plugin/chain value)
+    :else (throw (ex-info ":lateralus/exchange-chain must be a vector of interceptors or a plugin map with :plugin/chain"
+                           {:value value}))))
+
+(defmethod ig/init-key :lateralus/tools-loop-plugin [_ opts]
+  (require 'kschltz.agent.examples.tools.loop-plugin)
+  (let [ctor (resolve 'kschltz.agent.examples.tools.loop-plugin/loop-plugin)]
+    (ctor opts)))
+
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins llm-client embedder memory-backend llm-config]}]
+  [_ {:keys [plugins exchange-chain llm-client embedder memory-backend llm-config]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
   ;; seeds the runtime's state atom so compose-context sees the
   ;; LLM config (:base-url / :api-key / :model) and any other
   ;; persistent context. The state atom is the only place chain
   ;; stages should read persistent context from.
+  ;;
+  ;; An explicit `:exchange-chain` overrides plugin assembly entirely.
+  ;; This lets examples and advanced users supply a complete chain
+  ;; (e.g., a tool-calling loop plugin) without modifying the base
+  ;; plugin. When absent, the chain is assembled from `:plugins` as
+  ;; usual.
   (let [llm-config (or llm-config {})
-        assembled (plugin/assemble-chain (or plugins []))]
+        assembled (or exchange-chain (plugin/assemble-chain (or plugins [])))]
     {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
      :embedder          embedder
      :memory-backend    memory-backend
      :assembled         assembled
-     ;; The base plugin is always present, so `assembled` is never empty.
-     ;; It is the single source of truth for the default exchange chain.
+     ;; `assembled` is either the explicit chain or the plugin-assembled chain.
      :exchange-chain    assembled
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
                                (select-keys llm-config

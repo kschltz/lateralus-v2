@@ -1,0 +1,35 @@
+;; Tool-calling loop example for lateralus-v2.
+;;
+;; This config uses the :lateralus/exchange-chain key to replace the
+;; default base exchange chain with the example tool-calling loop plugin.
+;; The base plugin is not modified or referenced.
+;;
+;; Requirements:
+;;   - Ollama running and accessible at the base URL below.
+;;   - A model that supports tool calling (e.g. qwen2.5:14b,
+;;     llama3.1, mistral-nemo, etc.).
+;;
+;; Run (from the repo root after this example is merged):
+;;   clojure -M:examples -m kschltz.lateralus --config examples/tools/loop/config.edn -i
+;;
+;; While working in the kb worktree, run from .kanban/worktrees/011
+;; and use that path as the config argument.
+;;
+;; The example registers two tools:
+;;   - time/now        — returns current UTC ISO-8601 time
+;;   - calculator/eval — evaluates simple prefix arithmetic, e.g. "(+ 1 2 3)"
+
+{:lateralus/llm-client     {:impl :http
+                            :base-url "http://localhost:11434/v1"
+                            :model    "qwen2.5:14b"}
+ :lateralus/llm-config     {:base-url "http://localhost:11434/v1"
+                            :model    "qwen2.5:14b"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :noop}
+ :lateralus/tools-loop-plugin {}
+ :lateralus/exchange-chain #ig/ref :lateralus/tools-loop-plugin
+ :lateralus/agent          {:llm-client     #ig/ref :lateralus/llm-client
+                            :llm-config     #ig/ref :lateralus/llm-config
+                            :embedder       #ig/ref :lateralus/embedder
+                            :memory-backend #ig/ref :lateralus/memory-backend
+                            :exchange-chain #ig/ref :lateralus/exchange-chain}}

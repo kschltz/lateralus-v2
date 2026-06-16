@@ -67,15 +67,17 @@
 (defn- post-chat
   "POST a chat-completions request to the given base URL. Returns
    the parsed JSON body. Throws ex-info on transport / HTTP errors."
-  [{:keys [base-url api-key model messages temperature max-tokens
-           connect-timeout-ms request-timeout-ms]
+  [{:keys [base-url api-key model messages temperature max-tokens tools
+           tool-choice connect-timeout-ms request-timeout-ms]
     :or   {connect-timeout-ms default-connect-timeout-ms
            request-timeout-ms  default-request-timeout-ms}}]
   (let [url      (chat-completions-url base-url)
         body     (cond-> {:model    model
                           :messages (vec messages)}
                    temperature (assoc :temperature temperature)
-                   max-tokens  (assoc :max-tokens max-tokens))
+                   max-tokens  (assoc :max-tokens max-tokens)
+                   tools       (assoc :tools tools)
+                   tool-choice (assoc :tool_choice tool-choice))
         request  {:method              :post
                   :url                url
                   :headers            (->headers api-key)
