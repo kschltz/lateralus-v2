@@ -18,14 +18,23 @@ clojure -M:test
 clojure -M:e2e
 LATERALUS_E2E_FAKE=true clojure -M:e2e
 
-# One-shot from stdin (uses Proximum in-memory memory + LangChain4j ONNX embedder by default)
+# One-shot from stdin (default LLM is the stub, so override --model/--base-url for a real response;
+# default memory is Proximum in-memory + LangChain4j ONNX embedder)
 echo "What is the capital of France?" | clojure -M:run
+
+# Note: `clojure -M:run` needs the same JVM flags the uberjar launcher provides:
+#   -J--add-modules=jdk.incubator.vector -J--enable-native-access=ALL-UNNAMED
 
 # One-shot from a positional argument
 clojure -M:run "Explain recursion"
 
 # Help
 clojure -M:run -h
+
+# Note: the default runtime config loads Proximum + LangChain4j, which need
+#   --add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED
+# The uberjar launcher already includes these flags; pass them manually with
+#   clojure -J--add-modules=jdk.incubator.vector -J--enable-native-access=ALL-UNNAMED -M:run ...
 ```
 
 ## CLI
@@ -38,7 +47,7 @@ Flags:
   --version                show version and exit
   -i, --interactive        read prompts from stdin, line-by-line
   --no-interactive         force one-shot mode (default)
-  -s, --session ID       session id (default: random-uuid)
+  -s, --session ID         session id (default: random-uuid)
   --config PATH            Integrant EDN config (default: built-in)
   --model NAME             LLM model name (overrides config)
   --base-url URL           LLM base URL (overrides config)
@@ -206,6 +215,7 @@ Notes and limitations:
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
+| [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |
 | [`src/kschltz/agent/runtime.clj`](src/kschltz/agent/runtime.clj) | Outer loop: ctx creation + chain call + state merge |
 | [`src/kschltz/agent/system.clj`](src/kschltz/agent/system.clj) | Integrant component definitions, default config, Malli `ig/assert-key` validation |
 | [`src/kschltz/agent/chain.clj`](src/kschltz/agent/chain.clj) | Interceptor engine |

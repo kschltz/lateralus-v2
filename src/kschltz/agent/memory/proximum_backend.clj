@@ -20,7 +20,7 @@
        filter by session-id, take top Y.
      - Results are merged, deduped by msg-id, and sorted by timestamp.
 
-   Persistence is controlled by `:store-config`:
+   Persistence is controlled by `:store`:
      - `{:backend :memory :id #uuid \" ... \"}` — in-memory, data lost on close.
      - `{:backend :file :path \" sessions/proximum \" :id #uuid \" ... \"}` —
        durable across JVM restarts.
@@ -89,7 +89,7 @@
                  and, if no `:query-embedding` is supplied, the query).
 
    Optional opts:
-     :store-config      — Proximum store config; defaults to in-memory.
+     :store              — Proximum store config; defaults to in-memory.
      :dim               — vector dimension; defaults to embedder dimensions.
      :capacity          — HNSW capacity; default 10000.
      :M                 — HNSW M; default 16.
@@ -98,7 +98,7 @@
      :distance          — :euclidean (default) or :cosine; use :cosine only
                           when the embedder returns normalized vectors.
      :sync-on-write?    — call `sync!` after every store; default false."
-  [{:keys [embedder store-config dim capacity M ef-construction ef-search distance sync-on-write?]
+  [{:keys [embedder store dim capacity M ef-construction ef-search distance sync-on-write?]
     :or   {capacity        10000
            M               16
            ef-construction 200
@@ -107,7 +107,7 @@
            sync-on-write?  false}}]
   {:pre [(some? embedder)]}
   (let [dim       (or dim (embedding/-dimensions embedder))
-        store-config (-> (or store-config {:backend :memory})
+        store-config (-> (or store {:backend :memory})
                          (update :id #(or % (random-uuid))))
         idx-atom  (atom (prox/create-index
                          {:type              :hnsw

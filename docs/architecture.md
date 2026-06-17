@@ -25,13 +25,12 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/llm-config     ──▶  raw opts (base-url / api-key / model)│
 │  :lateralus/embedder      ──▶  Embedder protocol (noop / http / langchain4j)│
 │  :lateralus/memory-backend ──▶ MemoryBackend protocol (noop / proximum / kg-bm25)│
-│  :lateralus/base-plugin   ──▶  default exchange chain slots       │
 │  :lateralus/memory-plugin ──▶  memory recall + persist slots    │
 │  :lateralus/file-tools    ──▶  convenience filesystem tool registry│
 │  :lateralus/tool-registry  ──▶  map of tool name -> Tool impl      │
 │  :lateralus/tools-plugin  ──▶  seeds `:agent/tool-registry`        │
-│  :lateralus/plugins       ──▶  assembled plugin maps             │
-│  :lateralus/agent         ──▶  agent-map + exchange-chain        │
+│  :lateralus/plugins       ──▶  assembled plugin maps (base plugin auto-prepended) │
+│  :lateralus/agent         ──▶  agent-map + exchange-chain + pre-wired deps │
 └──────────────────────────────────┬──────────────────────────────┘
                                      │
                                      ▼
@@ -56,9 +55,9 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :guard    → error-boundary                                      │
 │  :enrich   → memory recall (when memory plugin present)          │
 │  :compose  → compose-context, inject-tools                       │
-│  :llm      → llm-call, parse-response                            │
-│  :tools    → dispatch-tools, compose-tool-results                │
-│  :finalize → tool-loop                                           │
+│  :llm      → llm-call-with-self-heal, llm-call, parse-response    │
+│  :tools    → dispatch-tools-interceptor, compose-tool-results-interceptor │
+│  :finalize → tool-loop-interceptor                                │
 │  :history  → store-exchange                                      │
 │  :persist  → memory persist (when memory plugin present)         │
 │  :observe  → deliver-responses                                   │
@@ -81,10 +80,10 @@ Slots are declared in `kschltz.agent.plugin/default-slot-order` and folded by `p
 | `:guard` | enter | safety / safety checks before compose | base plugin (`error-boundary`) |
 | `:enrich` | enter | RAG / memory recall before compose | memory plugin |
 | `:compose` | enter | build `:llm/request` from state + recall + user text | base plugin (`compose-context`) |
-| `:llm` | enter | call the LLM, parse response | base plugin (`llm-call`, `parse-response`) |
-| `:dispatch` | enter | unused slot (kept for ordering) | — |
-| `:tools` | enter | dispatch and run registered tools | base plugin (`dispatch-tools`, `compose-tool-results`) |
-| `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop`) |
+| `:llm` | enter | call the LLM, parse response | base plugin (`llm-call-with-self-heal`, `llm-call`, `parse-response`) |
+| `:dispatch` | enter | reserved slot (no interceptor wired) | — |
+| `:tools` | enter | dispatch and run registered tools | base plugin (`dispatch-tools-interceptor`, `compose-tool-results-interceptor`) |
+| `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop-interceptor`) |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |
 | `:persist` | leave | memory / state persistence | memory plugin |
 | `:observe` | leave | tracing / metrics / outgoing queue | base plugin (`deliver-responses`) |
@@ -103,14 +102,18 @@ The context is an open map. Engine state (`::chain/queue`, `::chain/stack`, `::c
 | `:exchange/assistant-msg-id` | runtime | all stages | UUID for the assistant response |
 | `:exchange/user-text` | runtime | compose-context, memory plugin | the user's prompt |
 | `:agent/state` | runtime | compose-context | persistent state (LLM config, system message, history) |
-| `:agent/llm-client` | agent-map | llm-call | Integrant-configured LlmClient |
-| `:agent/embedder` | agent-map | memory plugin, compose-context | Integrant-configured Embedder |
-| `:agent/memory-backend` | agent-map | memory plugin | Integrant-configured MemoryBackend |
+| `:llm/client` | runtime | llm-call | Integrant-configured LlmClient (pre-wired from agent-map) |
+| `:embedder` | runtime | (available to interceptors) | Integrant-configured Embedder (pre-wired from agent-map) |
+| `:memory/backend` | runtime | (available to interceptors) | Integrant-configured MemoryBackend (pre-wired from agent-map) |
 | `:llm/request` | compose-context | llm-call | OpenAI-shaped request body |
 | `:llm/response` | llm-call | parse-response | raw provider response |
 | `:exchange/response` | parse-response | deliver-responses, memory plugin | final assistant text |
 | `:memory/recall` | memory plugin | compose-context | recalled messages for context injection |
-| `:agent/state-delta` | any stage | runtime | state changes to merge after the exchange |
+| `:agent/state-delta` | any stage | runtime | reserved for state changes to merge after the exchange |
+| `:agent/tool-registry` | tools-plugin / runtime | compose-context, loop interceptors | map of tool name -> Tool implementation |
+| `:tool/calls` | parse-response / loop | dispatch-tools-interceptor | tool calls parsed from the LLM response |
+| `:tool/results` | dispatch-tools-interceptor | compose-tool-results-interceptor, tool-loop-interceptor | tool execution results |
+| `:agent/all-tool-results` | compose-tool-results-interceptor | compose-context | accumulated tool results for follow-up turns |
 
 The `Ctx` Malli schema in `kschltz.agent.interceptors.schema` is intentionally open: it validates only a few instrumentation and traceability keys, leaving domain keys free for plugins to extend without a schema migration.
 
@@ -122,7 +125,7 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
 - **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
-- **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
+- **New embedder:** implement `kschltz.agent.memory.protocol/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
 - **New chain stage:** add an interceptor to an existing plugin slot or contribute a full `:plugin/chain`.
 
@@ -228,10 +231,11 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/llm/schemas.clj` | Malli schemas for LLM request/response shapes |
 | `src/kschltz/agent/memory/protocol.clj` | `MemoryBackend` + `Embedder` protocols |
 | `src/kschltz/agent/memory/embedding.clj` | noop `Embedder` |
-| `src/kschltz/agent/memory/http-embedding.clj` | OpenAI-compatible HTTP `Embedder` |
+| `src/kschltz/agent/memory/http_embedding.clj` | OpenAI-compatible HTTP `Embedder` |
 | `src/kschltz/agent/memory/langchain4j_embedding.clj` | LangChain4j in-process ONNX `Embedder` |
 | `src/kschltz/agent/memory/proximum_backend.clj` | Proximum HNSW `MemoryBackend` |
 | `src/kschltz/agent/memory/kg_bm25.clj` | KG + BM25 `MemoryBackend` facade |
+| `src/kschltz/agent/cli/spinner.clj` | CLI spinner / progress indicator |
 | `src/kschltz/agent/memory/bm25.clj` | BM25 scoring |
 | `src/kschltz/agent/memory/knowledge_graph.clj` | entity knowledge graph |
 | `src/kschltz/agent/memory/store/file.clj` | file-backed session store |

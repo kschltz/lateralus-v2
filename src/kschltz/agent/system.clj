@@ -108,7 +108,14 @@
    [:proximum [:map
                [:impl [:= :proximum]]
                [:store {:optional true} :map]
-               [:embedder {:optional true} some?]]]
+               [:embedder {:optional true} some?]
+               [:dim {:optional true} :int]
+               [:capacity {:optional true} :int]
+               [:M {:optional true} :int]
+               [:ef-construction {:optional true} :int]
+               [:ef-search {:optional true} :int]
+               [:distance {:optional true} [:enum :euclidean :cosine]]
+               [:sync-on-write? {:optional true} :boolean]]]
    [:kg-bm25 [:map
               [:impl [:= :kg-bm25]]
               [:store :map]
@@ -206,7 +213,7 @@
   ;; The exchange chain is assembled from `:plugins`.
   (let [llm-config (or llm-config {})
         assembled (plugin/assemble-chain (or plugins []))]
-    {:agent/llm-client  llm-client    ; read by `bind-llm-client` stage
+    {:agent/llm-client  llm-client    ; pre-wired into ctx as `:llm/client`
      :embedder          embedder
      :memory-backend    memory-backend
      :assembled         assembled

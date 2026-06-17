@@ -21,9 +21,9 @@
                             :embedder #ig/ref :lateralus/embedder
                             ;; File persistence: keep this id stable across restarts
                             ;; or the store will appear empty next run.
-                            :store-config {:backend :file
-                                           :path "sessions/proximum"
-                                           :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}
+                            :store {:backend :file
+                                    :path "sessions/proximum"
+                                    :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}
                             :capacity 10000
                             :M 16
                             :ef-construction 200
