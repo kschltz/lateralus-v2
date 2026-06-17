@@ -27,6 +27,9 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/memory-backend ──▶ MemoryBackend protocol (noop / proximum / kg-bm25)│
 │  :lateralus/base-plugin   ──▶  default exchange chain slots       │
 │  :lateralus/memory-plugin ──▶  memory recall + persist slots    │
+│  :lateralus/file-tools    ──▶  convenience filesystem tool registry│
+│  :lateralus/tool-registry  ──▶  map of tool name -> Tool impl      │
+│  :lateralus/tools-plugin  ──▶  seeds `:agent/tool-registry`        │
 │  :lateralus/plugins       ──▶  assembled plugin maps             │
 │  :lateralus/agent         ──▶  agent-map + exchange-chain        │
 └──────────────────────────────────┬──────────────────────────────┘
@@ -75,11 +78,11 @@ Slots are declared in `kschltz.agent.plugin/default-slot-order` and folded by `p
 
 | Slot | Phase | Typical use | Wired by |
 |------|-------|-------------|----------|
-| `:guard` | enter | safety / safety checks before compose | base plugin (`error-boundary`, `bind-llm-client`) |
+| `:guard` | enter | safety / safety checks before compose | base plugin (`error-boundary`) |
 | `:enrich` | enter | RAG / memory recall before compose | memory plugin |
 | `:compose` | enter | build `:llm/request` from state + recall + user text | base plugin (`compose-context`) |
 | `:llm` | enter | call the LLM, parse response | base plugin (`llm-call`, `parse-response`) |
-| `:dispatch` | enter | tool-loop dispatch | base plugin (`dispatch`) |
+| `:dispatch` | enter | unused slot (kept for ordering) | — |
 | `:tools` | enter | dispatch and run registered tools | base plugin (`dispatch-tools`, `compose-tool-results`) |
 | `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop`) |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |
@@ -100,8 +103,9 @@ The context is an open map. Engine state (`::chain/queue`, `::chain/stack`, `::c
 | `:exchange/assistant-msg-id` | runtime | all stages | UUID for the assistant response |
 | `:exchange/user-text` | runtime | compose-context, memory plugin | the user's prompt |
 | `:agent/state` | runtime | compose-context | persistent state (LLM config, system message, history) |
-| `:agent/llm-client` | agent-map | bind-llm-client | Integrant-configured LlmClient |
-| `:llm/client` | bind-llm-client | llm-call | the client to invoke |
+| `:agent/llm-client` | agent-map | llm-call | Integrant-configured LlmClient |
+| `:agent/embedder` | agent-map | memory plugin, compose-context | Integrant-configured Embedder |
+| `:agent/memory-backend` | agent-map | memory plugin | Integrant-configured MemoryBackend |
 | `:llm/request` | compose-context | llm-call | OpenAI-shaped request body |
 | `:llm/response` | llm-call | parse-response | raw provider response |
 | `:exchange/response` | parse-response | deliver-responses, memory plugin | final assistant text |
@@ -117,14 +121,14 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
-- **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25-backend`).
+- **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
 - **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
 - **New chain stage:** add an interceptor to an existing plugin slot or contribute a full `:plugin/chain`.
 
 ## KG-BM25 memory backend
 
-`kschltz.agent.memory.kg-bm25-backend` is a pure-Clojure, embedding-free `MemoryBackend` intended as the native-image default. It requires no ONNX, no Panama Vector API, and no incubator JVM flags.
+`kschltz.agent.memory.kg-bm25` is a pure-Clojure, embedding-free `MemoryBackend` intended as the native-image default. It requires no ONNX, no Panama Vector API, and no incubator JVM flags.
 
 Storage layout (one directory per session):
 
@@ -215,6 +219,10 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/plugin.clj` | plugin assembly (`assemble-chain`, `default-slot-order`, `Plugin` schema) |
 | `src/kschltz/agent/plugins/base.clj` | default base plugin with core chain slots |
 | `src/kschltz/agent/plugins/memory.clj` | memory plugin (`:enrich` recall, `:persist` store) |
+| `src/kschltz/agent/plugins/tools.clj` | tool plugin: seeds `:agent/tool-registry` |
+| `src/kschltz/agent/loop.clj` | ReAct tool-calling loop interceptors |
+| `src/kschltz/agent/tool.clj` | `Tool` protocol and registry helpers |
+| `src/kschltz/agent/tools/filesystem.clj` | read-only filesystem `Tool` implementations |
 | `src/kschltz/agent/llm/client.clj` | `LlmClient` protocol + stub + HTTP wrapper |
 | `src/kschltz/agent/llm/http.clj` | real OpenAI-shaped HTTP client |
 | `src/kschltz/agent/llm/schemas.clj` | Malli schemas for LLM request/response shapes |
@@ -223,10 +231,13 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/memory/http-embedding.clj` | OpenAI-compatible HTTP `Embedder` |
 | `src/kschltz/agent/memory/langchain4j_embedding.clj` | LangChain4j in-process ONNX `Embedder` |
 | `src/kschltz/agent/memory/proximum_backend.clj` | Proximum HNSW `MemoryBackend` |
-| `src/kschltz/agent/memory/kg-bm25-backend.clj` | embedding-free KG + BM25 `MemoryBackend` |
+| `src/kschltz/agent/memory/kg_bm25.clj` | KG + BM25 `MemoryBackend` facade |
+| `src/kschltz/agent/memory/bm25.clj` | BM25 scoring |
+| `src/kschltz/agent/memory/knowledge_graph.clj` | entity knowledge graph |
+| `src/kschltz/agent/memory/store/file.clj` | file-backed session store |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` |
-| `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j) |
-| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder) |
+| `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file-tools) |
+| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file-tools) |
 
 ## End-to-end memory tests
 
