@@ -92,12 +92,11 @@ The `resources/lateralus/native.edn` config is used by the GraalVM native-image 
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :kg-bm25
                             :store {:backend :memory}}
- :lateralus/base-plugin    {}
  :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/plugins        {:plugins [#ig/ref :lateralus/memory-plugin]}
+ :lateralus/plugins        [#ig/ref :lateralus/memory-plugin]
  :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
                             :llm-client     #ig/ref :lateralus/llm-client
                             :llm-config     #ig/ref :lateralus/llm-config
@@ -113,31 +112,6 @@ To enable dense embeddings in native-image, replace the noop embedder with the H
                       :model "nomic-embed-text"
                       :dimensions 768}}
 ```
-
-## Datalevin-style schema (future-only sketch; not used)
-
-> **Future backend only.** The current codebase does not use Datalevin. This schema is retained as a sketch in case a Datalevin backend lands later.
-
-```clojure
-{:v2/session-id   {:db/valueType :db.type/string :db/unique :db.unique/identity}
- :v2/model        {:db/valueType :db.type/string}
- :v2/emb-method   {:db/valueType :db.type/string}  ;; "http" | "onnx" (JVM only)
- :v2/emb-model    {:db/valueType :db.type/string}
- :v2/msg-id       {:db/valueType :db.type/string :db/unique :db.unique/identity}
- :v2/session      {:db/valueType :db.type/string}
- :v2/role         {:db/valueType :db.type/string}   ;; "user" | "assistant" | "tool"
- :v2/text         {:db/valueType :db.type/string}
- :v2/timestamp    {:db/valueType :db.type/long}
- :v2/indexed      {:db/valueType :db.type/boolean}  ;; false until vector write succeeds
- :v2/tool-name    {:db/valueType :db.type/string}
- :v2/tool-result  {:db/valueType :db.type/string}
- :v2/tool-calls   {:db/valueType :db.type/string}   ;; JSON
- :v2/tool-call-id {:db/valueType :db.type/string}}
-```
-
-Vectors keyed by `:v2/msg-id` in a separate LMDB store (when a Datalevin backend lands).
-
-`:v2/indexed` — `false` at entity commit, `true` after successful vector index write. Startup `reindex-pending!` retries orphaned messages.
 
 ## Traceability
 
@@ -157,7 +131,7 @@ Implemented behind the `Embedder` protocol.
 |--------|-----------|-------|------------|-------|
 | `:noop` | `kschltz.agent.memory.embedding` | none | 1 | Test default; all vectors are `[0.0]` |
 | `:langchain4j` | `kschltz.agent.memory.langchain4j-embedding` | all-MiniLM-L6-v2 (ONNX) | 384 | Runtime default; JVM only |
-| `:http` (follow-up) | — | OpenAI-compatible `/v1/embeddings` | configurable | Required for GraalVM native-image |
+| `:http` | `kschltz.agent.memory.http-embedding` | OpenAI-compatible `/v1/embeddings` | configurable | Required for GraalVM native-image |
 
 The LangChain4j model weights are bundled in the jar, so no runtime network calls are needed. The first init extracts a native tokenizer library and loads the ONNX session.
 
