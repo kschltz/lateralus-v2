@@ -1,14 +1,15 @@
 (ns kschltz.agent.memory.protocol
   "Memory backend protocol.
 
-   MVP ships the no-op impl (`kschltz.agent.memory.noop-backend`).
-   A real persistent store — Datalevin, SQLite, LMDB, flat files,
-   Proximum, etc. — is a follow-up that satisfies this same protocol;
-   no consumer changes required when it lands.
+   Implementations ship in this namespace tree:
+     - `kschltz.agent.memory.noop-backend`   — test default; returns []
+     - `kschltz.agent.memory.proximum-backend` — JVM HNSW vector store
+     - `kschltz.agent.memory.kg-bm25`        — pure-Clojure BM25 + KG
 
-   The protocol is intentionally narrow: storage and recall are the
-   only two operations MVP needs (no search-time mutation)."
-  (:require [kschltz.agent.memory.embedding :as embedding]))
+   A new backend satisfies this protocol and plugs into
+   `:lateralus/memory-backend` without consumer changes.
+
+   The protocol is intentionally narrow: storage, recall, and close.")
 
 (defprotocol MemoryBackend
   (-store-message [backend session-id msg]
