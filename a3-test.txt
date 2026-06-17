@@ -1,0 +1,101 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+
+Running tests in #{"test"}
+
+Testing kschltz.agent.build-test
+
+Testing kschltz.agent.chain-test
+
+Testing kschltz.agent.cli.spinner-test
+
+Testing kschltz.agent.cli-test
+[main] INFO ai.djl.util.Platform - Found matching platform from: jar:file:/Users/schltzk/.m2/repository/ai/djl/huggingface/tokenizers/0.30.0/tokenizers-0.30.0.jar!/native/lib/tokenizers.properties
+
+Testing kschltz.agent.exchange-test
+
+Testing kschltz.agent.interceptors.schema-test
+
+Testing kschltz.agent.llm.client-test
+
+Testing kschltz.agent.llm.http-test
+[main] INFO org.eclipse.jetty.server.Server - jetty-11.0.24; built: 2024-08-26T18:11:22.448Z; git: 5dfc59a691b748796f922208956bd1f2794bcd16; jvm 26.0.1
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Started o.e.j.s.ServletContextHandler@42f7295b{/,null,AVAILABLE}
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Started ServerConnector@4f8949de{HTTP/1.1, (http/1.1)}{127.0.0.1:58132}
+[main] INFO org.eclipse.jetty.server.Server - Started Server@507db17e{STARTING}[11.0.24,sto=0] @11502ms
+[main] INFO org.eclipse.jetty.server.Server - Stopped Server@507db17e{STOPPING}[11.0.24,sto=0]
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Stopped ServerConnector@4f8949de{HTTP/1.1, (http/1.1)}{127.0.0.1:0}
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Stopped o.e.j.s.ServletContextHandler@42f7295b{/,null,STOPPED}
+[main] INFO org.eclipse.jetty.server.Server - jetty-11.0.24; built: 2024-08-26T18:11:22.448Z; git: 5dfc59a691b748796f922208956bd1f2794bcd16; jvm 26.0.1
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Started o.e.j.s.ServletContextHandler@ff178c3{/,null,AVAILABLE}
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Started ServerConnector@3d63f979{HTTP/1.1, (http/1.1)}{127.0.0.1:58134}
+[main] INFO org.eclipse.jetty.server.Server - Started Server@646f2562{STARTING}[11.0.24,sto=0] @11617ms
+[main] INFO org.eclipse.jetty.server.Server - Stopped Server@646f2562{STOPPING}[11.0.24,sto=0]
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Stopped ServerConnector@3d63f979{HTTP/1.1, (http/1.1)}{127.0.0.1:0}
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Stopped o.e.j.s.ServletContextHandler@ff178c3{/,null,STOPPED}
+[main] INFO org.eclipse.jetty.server.Server - jetty-11.0.24; built: 2024-08-26T18:11:22.448Z; git: 5dfc59a691b748796f922208956bd1f2794bcd16; jvm 26.0.1
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Started o.e.j.s.ServletContextHandler@39d1afb0{/,null,AVAILABLE}
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Started ServerConnector@27db6ce0{HTTP/1.1, (http/1.1)}{127.0.0.1:58136}
+[main] INFO org.eclipse.jetty.server.Server - Started Server@734d77e9{STARTING}[11.0.24,sto=0] @11622ms
+[main] INFO org.eclipse.jetty.server.Server - Stopped Server@734d77e9{STOPPING}[11.0.24,sto=0]
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Stopped ServerConnector@27db6ce0{HTTP/1.1, (http/1.1)}{127.0.0.1:0}
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Stopped o.e.j.s.ServletContextHandler@39d1afb0{/,null,STOPPED}
+[main] INFO org.eclipse.jetty.server.Server - jetty-11.0.24; built: 2024-08-26T18:11:22.448Z; git: 5dfc59a691b748796f922208956bd1f2794bcd16; jvm 26.0.1
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Started o.e.j.s.ServletContextHandler@4ac49050{/,null,AVAILABLE}
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Started ServerConnector@7703abde{HTTP/1.1, (http/1.1)}{127.0.0.1:58138}
+[main] INFO org.eclipse.jetty.server.Server - Started Server@3033fad6{STARTING}[11.0.24,sto=0] @11626ms
+[main] INFO org.eclipse.jetty.server.Server - Stopped Server@3033fad6{STOPPING}[11.0.24,sto=0]
+[main] INFO org.eclipse.jetty.server.AbstractConnector - Stopped ServerConnector@7703abde{HTTP/1.1, (http/1.1)}{127.0.0.1:0}
+[main] INFO org.eclipse.jetty.server.handler.ContextHandler - Stopped o.e.j.s.ServletContextHandler@4ac49050{/,null,STOPPED}
+
+Testing kschltz.agent.llm.schemas-test
+
+Testing kschltz.agent.loop-test
+
+Testing kschltz.agent.memory.bm25-test
+
+Testing kschltz.agent.memory.embedding-test
+
+Testing kschltz.agent.memory.http-embedding-test
+
+Testing kschltz.agent.memory.kg-bm25-backend-test
+
+Testing kschltz.agent.memory.kg-bm25-test
+
+Testing kschltz.agent.memory.knowledge-graph-test
+
+Testing kschltz.agent.memory.langchain4j-embedding-test
+
+Testing kschltz.agent.memory.noop-backend-test
+
+Testing kschltz.agent.memory.protocol-test
+
+Testing kschltz.agent.memory.proximum-backend-test
+
+Testing kschltz.agent.memory.store.file-test
+
+Testing kschltz.agent.memory-integration-test
+
+Testing kschltz.agent.native-config-test
+
+Testing kschltz.agent.plugin-test
+
+Testing kschltz.agent.plugins.base-test
+
+Testing kschltz.agent.plugins.memory-test
+
+Testing kschltz.agent.plugins.tools-test
+
+Testing kschltz.agent.quality-test
+
+Testing kschltz.agent.runtime-test
+
+Testing kschltz.agent.system-test
+
+Testing kschltz.agent.tool-test
+
+Testing kschltz.agent.tools.filesystem-test
+
+Testing kschltz.lateralus-test
+
+Ran 207 tests containing 543 assertions.
+0 failures, 0 errors.
