@@ -15,16 +15,16 @@
 ;; Override examples:
 ;;   :lateralus/llm-client     {:impl :http :base-url "..." :api-key "..." :model "gpt-4"}
 ;;   :lateralus/memory-backend   {:impl :proximum
-;;                               :store-config {:backend :file
-;;                                              :path "sessions/proximum"
-;;                                              :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}
+;;                               :store {:backend :file
+;;                                       :path "sessions/proximum"
+;;                                       :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}
 ;;   :lateralus/plugins          [#ig/ref :lateralus/memory-plugin
 ;;                                #ig/ref :lateralus/tools-plugin]
 
 {:lateralus/llm-client     {:impl :stub}
  :lateralus/llm-config     {}
  :lateralus/embedder       {:method :langchain4j}
- ;; In-memory Proximum backend. Set :store-config for file persistence.
+ ;; In-memory Proximum backend. Set :store for file persistence.
  :lateralus/memory-backend {:impl :proximum
                             :embedder #ig/ref :lateralus/embedder}
  :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
