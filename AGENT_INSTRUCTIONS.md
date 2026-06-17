@@ -26,7 +26,7 @@ Portable v1 seed: `chain.clj`, `plugin.clj`, `interceptors/schema.clj`, `interce
 
 ## MVP Scope
 
-Core loop (empty tool registry, stub-tested dispatch) + session memory (`MemoryBackend` protocol with noop and Proximum implementations; runtime default is Proximum + LangChain4j in-process ONNX embedder) + clean-slate CLI + JVM distributable. GraalVM native-image is stretch (Step 9). No v1 tools in MVP. **No Datalevin in MVP.**
+Core loop (tool-calling loop in base plugin, empty registry by default, filesystem tools in example configs) + session memory (`MemoryBackend` protocol with noop and Proximum implementations; runtime default is Proximum + LangChain4j in-process ONNX embedder) + clean-slate CLI + JVM distributable. GraalVM native-image is implemented (Step 9). No v1 tools in MVP. **No Datalevin in MVP.**
 
 ## Verify
 
