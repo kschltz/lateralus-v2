@@ -36,7 +36,7 @@ Usage: lateralus [flags] [prompt]
 Flags:
   -h, --help               show help and exit
   --version                show version and exit
-  -i, --interactive        read prompts from stdin, line-by-line (placeholder)
+  -i, --interactive        read prompts from stdin, line-by-line
   --no-interactive         force one-shot mode (default)
   -s, --session ID       session id (default: random-uuid)
   --config PATH            Integrant EDN config (default: built-in)
@@ -212,15 +212,26 @@ Notes and limitations:
 | [`src/kschltz/agent/plugin.clj`](src/kschltz/agent/plugin.clj) | Plugin assembly and slot-order contract |
 | [`src/kschltz/agent/plugins/base.clj`](src/kschltz/agent/plugins/base.clj) | Default base plugin with the standard exchange chain |
 | [`src/kschltz/agent/plugins/memory.clj`](src/kschltz/agent/plugins/memory.clj) | Memory plugin: recall (`:enrich`) and persist (`:persist`) |
+| [`src/kschltz/agent/plugins/tools.clj`](src/kschltz/agent/plugins/tools.clj) | Tool plugin: seeds `:agent/tool-registry` |
+| [`src/kschltz/agent/loop.clj`](src/kschltz/agent/loop.clj) | Tool-calling loop interceptors |
+| [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
+| [`src/kschltz/agent/tools/filesystem.clj`](src/kschltz/agent/tools/filesystem.clj) | Read-only filesystem `Tool` implementations |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
 | [`src/kschltz/agent/llm/client.clj`](src/kschltz/agent/llm/client.clj) | `LlmClient` protocol + stub + HTTP wrapper |
 | [`src/kschltz/agent/llm/schemas.clj`](src/kschltz/agent/llm/schemas.clj) | OpenAI-shaped request/response Malli schemas |
-| [`src/kschltz/agent/memory/protocol.clj`](src/kschltz/agent/memory/protocol.clj) | `MemoryBackend` and `Embedder` protocols |
-| [`src/kschltz/agent/memory/kg_bm25_backend.clj`](src/kschltz/agent/memory/kg_bm25_backend.clj) | Embedding-free KG + BM25 backend (native-image default) |
-| [`src/kschltz/agent/memory/http_embedding.clj`](src/kschltz/agent/memory/http_embedding.clj) | OpenAI-compatible HTTP embedder (native-image friendly) |
-| [`resources/lateralus/config.edn`](resources/lateralus/config.edn) | JVM runtime default config (Proximum + LangChain4j) |
-| [`resources/lateralus/native.edn`](resources/lateralus/native.edn) | Native-image runtime config (KG-BM25 + noop HTTP embedder) |
+| [`src/kschltz/agent/memory/protocol.clj`](src/kschltz/agent/memory/protocol.clj) | `MemoryBackend` protocol |
+| [`src/kschltz/agent/memory/embedding.clj`](src/kschltz/agent/memory/embedding.clj) | `Embedder` protocol + noop implementation |
+| [`src/kschltz/agent/memory/http_embedding.clj`](src/kschltz/agent/memory/http_embedding.clj) | OpenAI-compatible HTTP `Embedder` |
+| [`src/kschltz/agent/memory/langchain4j_embedding.clj`](src/kschltz/agent/memory/langchain4j_embedding.clj) | LangChain4j in-process ONNX `Embedder` |
+| [`src/kschltz/agent/memory/proximum_backend.clj`](src/kschltz/agent/memory/proximum_backend.clj) | Proximum HNSW `MemoryBackend` |
+| [`src/kschltz/agent/memory/kg_bm25.clj`](src/kschltz/agent/memory/kg_bm25.clj) | KG + BM25 `MemoryBackend` facade |
+| [`src/kschltz/agent/memory/bm25.clj`](src/kschltz/agent/memory/bm25.clj) | BM25 scoring |
+| [`src/kschltz/agent/memory/knowledge_graph.clj`](src/kschltz/agent/memory/knowledge_graph.clj) | Entity knowledge graph |
+| [`src/kschltz/agent/memory/store/file.clj`](src/kschltz/agent/memory/store/file.clj) | File-backed store for KG-BM25 |
+| [`src/kschltz/agent/memory/noop_backend.clj`](src/kschltz/agent/memory/noop_backend.clj) | noop `MemoryBackend` |
+| [`resources/lateralus/config.edn`](resources/lateralus/config.edn) | JVM runtime default config (Proximum + LangChain4j + file-tools) |
+| [`resources/lateralus/native.edn`](resources/lateralus/native.edn) | Native-image runtime config (KG-BM25 + noop embedder + file-tools) |
 | [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) | Short contributor guide |
 
 ## Status
@@ -233,17 +244,15 @@ Implemented:
 - Step 9: **GraalVM native-image build** with the KG + BM25 backend and a filtered classpath that excludes JVM-only Proximum / LangChain4j sources
 - Step 10: docs, JVM distributable, quality-gate tests
 
-Current work (see `kb status`):
-- [006] Replace shallow state merge with deep or explicit state update
-- [007] Pre-wire dependencies into context instead of bind-llm-client
-- [008] Refactor KG-BM25 backend into focused namespaces
-
 Recently completed:
+- [006] Replace shallow state merge with deep `merge-state`
+- [007] Pre-wire dependencies into context instead of `bind-llm-client`
+- [008] Refactor KG-BM25 backend into focused namespaces
 - [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
+- [011] Promote tool-calling loop into the base plugin + filesystem tools example
 
 Deferred:
 - Async worker thread for the runtime
-- `--interactive` REPL mode
 - Environment-variable support for `LATERALUS_V2_*`
 - Multi-agent communication plugin (`docs/file-backed-comms-plan-consensus.md`)
 

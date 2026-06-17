@@ -33,7 +33,7 @@
                               (let [dot-count (inc (mod i 3))]
                                 (.print out (frame-line message dot-count))
                                 (.flush out)
-                                (Thread/sleep frame-ms)
+                                (Thread/sleep ^long frame-ms)
                                 (recur (inc i)))))))]
     (.setDaemon thread true)
     (.start thread)

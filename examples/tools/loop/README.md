@@ -1,9 +1,9 @@
 # Tool-calling loop example
 
-This example demonstrates how to register custom tools with lateralus'
+This example demonstrates how to register filesystem tools with lateralus'
 core tool-calling loop. The loop itself is now part of the default base
-chain (`kschltz.agent.loop`); this example only wires in the example
-`Tool` implementations (`time/now` and `calculator/eval`).
+chain (`kschltz.agent.loop`); this example only wires in read-only file
+operation `Tool` implementations.
 
 ## What it shows
 
@@ -16,9 +16,10 @@ chain (`kschltz.agent.loop`); this example only wires in the example
 
 ## Tools
 
-- `time/now` — returns the current UTC date and time as an ISO-8601 string.
-- `calculator/eval` — evaluates simple arithmetic written in prefix notation,
-  e.g. `(+ 1 2 3)`, `(* 4 5)`, `(/ 10 2)`. Supported operators: `+ - * / max min`.
+- `file/read` — read the contents of a UTF-8 text file.
+- `file/list` — list files and directories.
+- `file/info` — return path metadata (exists, type, size, last modified).
+- `file/search` — recursively search files for a regex pattern.
 
 ## Requirements
 
@@ -31,19 +32,21 @@ chain (`kschltz.agent.loop`); this example only wires in the example
 From the repository root:
 
 ```bash
-clojure -M:examples -m kschltz.lateralus --config examples/tools/loop/config.edn -i
+clojure -M:run --config examples/tools/loop/config.edn -i
 ```
 
 Then try prompts like:
 
 ```
-What time is it?
+List the files in this project.
 ```
 
-or
+```
+Read the README.md file.
+```
 
 ```
-What is (+ 13 29) times 2?
+Search for the word "interceptors" in the src directory.
 ```
 
 ## Customize tools

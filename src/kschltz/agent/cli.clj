@@ -142,11 +142,17 @@
                                     (ig/read-string (slurp config)))
                resource-config (merge system/default-config resource-config)
                :else           system/default-config)
-        llm  (cond-> (:lateralus/llm-client base)
-               model    (assoc :model model)
-               base-url (assoc :base-url base-url)
-               api-key  (assoc :api-key api-key))]
-    (assoc base :lateralus/llm-client llm)))
+        client-llm  (cond-> (:lateralus/llm-client base)
+                     model    (assoc :model model)
+                     base-url (assoc :base-url base-url)
+                     api-key  (assoc :api-key api-key))
+        config-llm  (cond-> (or (:lateralus/llm-config base) {})
+                     model    (assoc :model model)
+                     base-url (assoc :base-url base-url)
+                     api-key  (assoc :api-key api-key))]
+    (assoc base
+           :lateralus/llm-client client-llm
+           :lateralus/llm-config config-llm)))
 
 (defn- read-stdin
   "Read all of stdin and return it as a string. Strips a trailing

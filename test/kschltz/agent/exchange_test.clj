@@ -21,7 +21,7 @@
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.tools :as plugins.tools]
-            [kschltz.agent.tools.examples :as tools.examples]
+            [kschltz.agent.tools.filesystem :as tools.filesystem]
             [malli.core :as m]))
 
 ;; ---- Fake LLM that returns tool calls ----
@@ -126,21 +126,26 @@
         "deliver-responses leave stage ran with the final response")))
 
 (deftest registered-tool-executes-end-to-end
-  (testing "a registered example tool is executed by the default chain"
-    (let [calls [{:id "tc1" :type "function" :function {:name "calculator/eval"
-                                                         :arguments "{\"expression\":\"(+ 1 2 3)\"}"}}]
-          out   (chain/execute
-                 {:agent/state        {:base-url "stub" :api-key nil :model "fake/v0"
-                                       :agent/system-message "you are a test agent"}
-                  :exchange/user-text "compute"
-                  :llm/client         (tool-calling-llm calls)
-                  :exchange/session-id :test-session
-                  :exchange/user-msg-id (str (random-uuid))}
-                 (plugin/assemble-chain [(plugins.base/base-plugin)
-                                         (plugins.tools/tools-plugin (tools.examples/example-registry))]))]
+  (testing "a registered filesystem tool is executed by the default chain"
+    (let [tmp      (java.io.File/createTempFile "lateralus-test" ".txt")
+          _        (spit tmp "hello from filesystem tool")
+          _        (.deleteOnExit tmp)
+          registry (tools.filesystem/filesystem-registry {:workspace-root (.getParent tmp)})
+          calls    [{:id "tc1" :type "function" :function {:name "file/read"
+                                                           :arguments (format "{\"path\":\"%s\"}"
+                                                                              (.getName tmp))}}]
+          out      (chain/execute
+                    {:agent/state        {:base-url "stub" :api-key nil :model "fake/v0"
+                                          :agent/system-message "you are a test agent"}
+                     :exchange/user-text "read the test file"
+                     :llm/client         (tool-calling-llm calls)
+                     :exchange/session-id :test-session
+                     :exchange/user-msg-id (str (random-uuid))}
+                    (plugin/assemble-chain [(plugins.base/base-plugin)
+                                            (plugins.tools/tools-plugin registry)]))]
       (is (= 1 (count (:tool/results out))))
-      (is (= "6" (-> out :tool/results first :result))
-          "calculator/eval Tool returned the correct result"))))
+      (is (str/includes? (-> out :tool/results first :result) "hello from filesystem tool")
+          "file/read Tool returned the test file content"))))
 
 ;; ---- compose-context trim stub pin ----
 
