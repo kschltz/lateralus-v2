@@ -38,7 +38,7 @@
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.plugins.tools :as plugins.tools]
-            [kschltz.agent.tools.examples :as tools.examples]
+            [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -185,12 +185,12 @@
    the context at chain execution time."
   tools)
 
-(defmethod ig/init-key :lateralus/example-tools [_ _]
-  "Convenience Integrant component that returns the example tool registry
-   (`time/now` and `calculator/eval`). Used by the tool-loop example
-   config; not part of the default config so production agents start
-   with an empty tool registry."
-  (tools.examples/example-registry))
+(defmethod ig/init-key :lateralus/file-tools [_ opts]
+  "Convenience Integrant component that returns the filesystem tool
+   registry (`file/read`, `file/list`, `file/info`, `file/search`).
+   Used by the tool-loop example config; not part of the default config
+   so production agents start with an empty tool registry."
+  (tools.filesystem/filesystem-registry opts))
 
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
   (plugins.tools/tools-plugin registry))
@@ -236,7 +236,7 @@
    In-memory default (tests): stub LLM + noop embedder + noop memory.
    The runtime default in `resources/lateralus/config.edn` uses
    Proximum + LangChain4j in-process ONNX embedding."
-   {:lateralus/llm-client     {:impl :stub}
+  {:lateralus/llm-client     {:impl :stub}
    :lateralus/llm-config     {}
    :lateralus/embedder       {:method :noop}
    :lateralus/memory-backend {:impl :noop

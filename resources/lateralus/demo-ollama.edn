@@ -2,9 +2,9 @@
 ;; Uses HTTP LLM + noop embedder + in-memory KG-BM25 memory.
 {:lateralus/llm-client     {:impl :http
                             :base-url "http://localhost:11434/v1"
-                            :model    "deepseek-v4-flash:cloud"}
+                            :model    "glm-5.2:cloud"}
  :lateralus/llm-config     {:base-url "http://localhost:11434/v1"
-                            :model    "deepseek-v4-flash:cloud"}
+                            :model    "glm-5.2:cloud"}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :kg-bm25
                             :store {:backend :memory}}
@@ -12,7 +12,8 @@
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/tool-registry  {}
+ :lateralus/file-tools     {}
+ :lateralus/tool-registry  #ig/ref :lateralus/file-tools
  :lateralus/tools-plugin   {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins        [#ig/ref :lateralus/memory-plugin
                             #ig/ref :lateralus/tools-plugin]

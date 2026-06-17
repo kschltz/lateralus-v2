@@ -232,6 +232,7 @@
     (let [config (cli/build-system {:config "resources/lateralus/config.edn"
                                     :model "overridden"})]
       (is (= "overridden" (get-in config [:lateralus/llm-client :model])))
+      (is (= "overridden" (get-in config [:lateralus/llm-config :model])))
       (is (ig/reflike? (get-in config [:lateralus/agent :llm-client]))))))
 
 (deftest run-cli-honors-config-path
