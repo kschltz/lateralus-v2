@@ -1,9 +1,7 @@
 (ns kschltz.agent.memory.noop-backend
-  "No-op MemoryBackend. The MVP default for `:lateralus/memory-backend`.
-   The `MemoryBackend` protocol is the contract; a real persistent
-   store (Datalevin, SQLite, LMDB, flat files, etc.) is a follow-up
-   that satisfies the same protocol — no consumer changes required
-   when it lands."
+  "No-op MemoryBackend. The test default for `:lateralus/memory-backend`.
+   Stores nothing and recalls `[]`. The `MemoryBackend` protocol is the
+   contract; new backends plug in without consumer changes."
   (:require [kschltz.agent.memory.protocol :as protocol]))
 
 (defn backend
