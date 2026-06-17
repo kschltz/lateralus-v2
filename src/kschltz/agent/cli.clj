@@ -35,7 +35,8 @@
             [kschltz.agent.llm.http]
             [kschltz.agent.memory.http-embedding]
             [kschltz.agent.runtime :as runtime]
-            [kschltz.agent.system :as system]))
+            [kschltz.agent.system :as system]
+            [kschltz.agent.cli.spinner :as spinner]))
 
 (def ^:const version "lateralus-v2 MVP (Step 8 CLI)")
 
@@ -211,7 +212,11 @@
               (.println out "Goodbye.")
 
               (seq trimmed)
-              (let [result (runtime/send-message runtime trimmed)]
+              (let [spinner (spinner/start! out "thinking")
+                    result  (try
+                              (runtime/send-message runtime trimmed)
+                              (finally
+                                (spinner/stop! spinner)))]
                 (print-response out result)
                 (recur))
 

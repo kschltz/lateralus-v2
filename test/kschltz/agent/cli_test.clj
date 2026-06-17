@@ -279,3 +279,28 @@
           (is (str/includes? out "echo: hello"))
           (is (str/includes? out "echo: world"))
           (is (str/includes? out "Goodbye.")))))))
+
+(deftest run-cli-interactive-shows-thinking-indicator
+  (testing "interactive mode prints a 'thinking...' spinner and clears it before the response"
+    (let [halted  (atom false)
+          system-fn (fn [_]
+                      [{:exchange-chain [{:name ::slow-echo
+                                           :enter (fn [ctx]
+                                                    (Thread/sleep 300)
+                                                    (assoc ctx :exchange/response "done"))}]}
+                       "demo-session"
+                       (fn [] (reset! halted true))])
+          captured (atom nil)]
+      (with-in-str "hello\n/quit\n"
+        (let [[rv out] (capture-out
+                        #(cli/run-cli
+                          {:action :interactive}
+                          {:in        *in*
+                           :out       *out*
+                           :exit      (silent-exit captured)
+                           :system-fn system-fn}))]
+          (is (= 0 rv))
+          (is (str/includes? out "thinking"))
+          (is (str/includes? out "done"))
+          (is (re-find #"\rthinking\.\..*\r" out)
+              "spinner line is cleared before the response is printed"))))))
