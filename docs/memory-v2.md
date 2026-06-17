@@ -41,7 +41,7 @@ The default embedder is `kschltz.agent.memory.langchain4j-embedding` (`:method :
 
 ## Implemented backend: KG + BM25
 
-`kschltz.agent.memory.kg-bm25-backend` is an embedding-free implementation:
+`kschltz.agent.memory.kg-bm25` is an embedding-free implementation:
 
 - **Storage**: per-session `messages.edn` + `index.edn` under the configured `:path`.
 - **Index**: inverted index for BM25 plus an entity-to-message knowledge graph built from tokenized message content.
