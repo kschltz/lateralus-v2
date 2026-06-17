@@ -50,11 +50,12 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  execute(ctx, assembled-chain)                                 │
 │                                                                 │
 │  Assembled from plugin slots (see default-slot-order below):      │
-│  :guard    → error-boundary, bind-llm-client                     │
+│  :guard    → error-boundary                                      │
 │  :enrich   → memory recall (when memory plugin present)          │
-│  :compose  → compose-context                                     │
+│  :compose  → compose-context, inject-tools                       │
 │  :llm      → llm-call, parse-response                            │
-│  :dispatch → dispatch                                            │
+│  :tools    → dispatch-tools, compose-tool-results                │
+│  :finalize → tool-loop                                           │
 │  :history  → store-exchange                                      │
 │  :persist  → memory persist (when memory plugin present)         │
 │  :observe  → deliver-responses                                   │
@@ -79,8 +80,8 @@ Slots are declared in `kschltz.agent.plugin/default-slot-order` and folded by `p
 | `:compose` | enter | build `:llm/request` from state + recall + user text | base plugin (`compose-context`) |
 | `:llm` | enter | call the LLM, parse response | base plugin (`llm-call`, `parse-response`) |
 | `:dispatch` | enter | tool-loop dispatch | base plugin (`dispatch`) |
-| `:tools` | enter | tool interceptors (future extension) | custom plugins |
-| `:finalize` | enter | post-loop, before leave | custom plugins |
+| `:tools` | enter | dispatch and run registered tools | base plugin (`dispatch-tools`, `compose-tool-results`) |
+| `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop`) |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |
 | `:persist` | leave | memory / state persistence | memory plugin |
 | `:observe` | leave | tracing / metrics / outgoing queue | base plugin (`deliver-responses`) |
@@ -111,9 +112,7 @@ The `Ctx` Malli schema in `kschltz.agent.interceptors.schema` is intentionally o
 
 ## State and state-delta
 
-Only the outer runtime loop holds a mutable reference — an atom seeded with `:initial-state` from the agent-map. Interceptors never mutate shared refs; instead they emit `:agent/state-delta`. The runtime merges this delta into the atom with plain `merge` (last-write-wins per key).
-
-**In flux:** the current merge is shallow. Card `[006] Replace shallow state merge with deep or explicit state update` is in progress; when it lands the semantics here will be updated to describe the explicit `merge-state` helper and which keys are deep-merged. Until then, stages that need deep-merge semantics for a particular nested key should compute the new value themselves and emit it already-merged.
+Only the outer runtime loop holds a mutable reference — an atom seeded with `:initial-state` from the agent-map. Interceptors never mutate shared refs; instead they emit `:agent/state-delta`. The runtime merges this delta into the atom using `kschltz.agent.runtime/merge-state`, which performs a deep merge for known nested keys (e.g. `:agent/state`) and last-write-wins for top-level keys.
 
 ## Extension points
 
@@ -177,7 +176,7 @@ Required keys: `:base-url`, `:model`, `:dimensions`. Optional: `:api-key`, `:con
 
 ## Config validation
 
-`kschltz.agent.system` registers `defmethod ig/assert-key` for every `:lateralus/*` key. Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
+`kschltz.agent.system` registers `defmethod ig/assert-key` for the three externally-configurable `:lateralus/*` keys (`:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`). Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
 
 For example:
 
@@ -186,7 +185,7 @@ For example:
   (assert-malli! :lateralus/llm-client LlmClientConfig config))
 ```
 
-See `src/kschltz/agent/system.clj` for the current schemas for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`.
+See `src/kschltz/agent/system.clj` for the current schemas.
 
 ## Single-threaded MVP
 
