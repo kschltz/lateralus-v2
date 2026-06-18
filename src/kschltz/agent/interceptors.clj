@@ -94,23 +94,27 @@
 
 (def compose-context
   "Build `:llm/request` from :agent/state + :exchange/user-text +
-   recall. Trivial recall stub for MVP — a real memory backend
-   (Datalevin, SQLite, etc.) is a follow-up that will supply real
-   recall messages; until then, the recall list is empty."
+   recall + explicit conversation history. Records the assembled
+   message vector under `:agent/last-request-messages` in
+   `:agent/state-delta` so the self/status tool can report the
+   context size of the last completed exchange."
   {:name ::compose-context
    :enter (fn [ctx]
             (let [state     (:agent/state ctx)
                   user-text (or (:exchange/user-text ctx) "")
                   recall    (or (:memory/recall ctx) [])
                   sys-msg   (or (:agent/system-message state) "lateralus-v2 MVP")
+                  history   (or (:agent/history state) [])
+                  recalled  (mapv (fn [m]
+                                    {:role    "system"
+                                     :content (str "[recall] "
+                                                   (if (map? m)
+                                                     (:content m "")
+                                                     m))})
+                                  recall)
                   messages  (cond-> [{:role "system" :content sys-msg}]
-                              (seq recall) (into (mapv (fn [m]
-                                                         {:role    "system"
-                                                          :content (str "[recall] "
-                                                                        (if (map? m)
-                                                                          (:content m "")
-                                                                          m))})
-                                                       recall))
+                              (seq recalled) (into recalled)
+                              (seq history)  (into history)
                               (seq user-text) (conj {:role "user" :content user-text}))
                   ;; TODO memory-followup: replace the trim-history-stub
                   ;; call with the real implementation.
@@ -121,7 +125,10 @@
                       :api-key  (:api-key state)
                       :model    (or (:model state) "stub/v0")
                       :messages trimmed}
-                     :compose/trimmed? true)))})
+                     :compose/trimmed? true
+                     :agent/state-delta
+                     (merge (or (:agent/state-delta ctx) {})
+                            {:agent/last-request-messages trimmed}))))})
 
 (def llm-call
   "Invoke the LlmClient. Wraps `call-llm`. No business logic — only
@@ -140,19 +147,30 @@
                      :tool/calls        (response-tool-calls resp))))})
 
 (def store-exchange
-  "Leave stage. A future memory plugin's persist interceptor (or a
-   real backend) will replace this with proper persistence. For
-   MVP, records the final exchange on ctx as `:memory/last-exchange`
-   for assertion in tests."
+  "Leave stage. Records the final exchange on ctx as
+   `:memory/last-exchange` and appends the current user/assistant
+   turn to `:agent/state-delta :agent/history` so the next exchange
+   can include the full explicit transcript."
   {:name ::store-exchange
    :leave (fn [ctx]
-            (assoc ctx :memory/last-exchange
-                   {:session-id       (:exchange/session-id ctx)
-                    :user-msg-id      (:exchange/user-msg-id ctx)
-                    :assistant-msg-id (:exchange/assistant-msg-id ctx)
-                    :response         (:exchange/response ctx)
-                    :tool-calls       (or (:tool/calls ctx) [])
-                    :tool-results     (or (:tool/results ctx) [])}))})
+            (let [state        (:agent/state ctx)
+                  prev-history (or (:agent/history state) [])
+                  user-text    (:exchange/user-text ctx)
+                  response     (:exchange/response ctx)
+                  history      (cond-> prev-history
+                                  (seq user-text) (conj {:role "user" :content user-text})
+                                  (seq response)  (conj {:role "assistant" :content response}))
+                  delta        (merge (or (:agent/state-delta ctx) {})
+                                        {:agent/history history})]
+              (assoc ctx
+                     :memory/last-exchange
+                     {:session-id       (:exchange/session-id ctx)
+                      :user-msg-id      (:exchange/user-msg-id ctx)
+                      :assistant-msg-id (:exchange/assistant-msg-id ctx)
+                      :response         (:exchange/response ctx)
+                      :tool-calls       (or (:tool/calls ctx) [])
+                      :tool-results     (or (:tool/results ctx) [])}
+                     :agent/state-delta delta)))})
 
 (def deliver-responses
   "Leave stage. Writes the final response to the agent's outgoing
