@@ -4,8 +4,7 @@
    The base plugin already contains the loop interceptors; this plugin
    only has to place the registry on the context before the `:compose`
    stage runs. It is a normal partial plugin (no `:plugin/complete?`
-   metadata) so the default base chain is still prepended automatically."
-  (:require [kschltz.agent.tool :as tool]))
+   metadata) so the default base chain is still prepended automatically.")
 
 (defn- seed-registry-interceptor
   "`:guard` interceptor that attaches `registry` (map of name -> Tool) to

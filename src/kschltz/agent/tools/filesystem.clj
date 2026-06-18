@@ -55,6 +55,12 @@
    [:pattern :string]
    [:max-results {:optional true} :int]])
 
+(def InputSchema:CreateFile
+  "Input schema for `file/create`."
+  [:map
+   [:path :string]
+   [:content {:optional true} [:maybe :string]]])
+
 (def OutputSchema:String
   "All filesystem tools return a JSON or plain string."
   :string)
@@ -68,16 +74,20 @@
     (io/file ".")))
 
 (defn- resolve-path
-  "Resolve a (possibly relative) user path against the workspace root.
-   Returns a `java.nio.file.Path`. No containment check is performed."
+  "Resolve a user path against the workspace root. Absolute paths are
+   preserved; relative paths are resolved under the workspace root. The
+   result is normalized so that parent references collapse."
   [workspace-root user-path]
-  (let [root (workspace-root->file workspace-root)]
-    (.toPath (io/file root user-path))))
+  (let [user-file (io/file user-path)]
+    (.normalize
+     (.toPath (if (.isAbsolute user-file)
+                user-file
+                (io/file (workspace-root->file workspace-root) user-path))))))
 
 (defn- path->str
   "Convert a `Path` to a normalized string."
   [^Path path]
-  (str path))
+  (str (.normalize path)))
 
 (defn- safe-int
   "Coerce a value to a positive integer, returning default if missing or invalid."
@@ -183,7 +193,7 @@
     "Read the contents of a UTF-8 text file. Optionally skip `offset` characters and return at most `limit` characters. Paths are resolved against the configured workspace root. The total file size is capped by the registry's `:max-read-bytes` setting.")
   (-input-schema [_] InputSchema:ReadFile)
   (-output-schema [_] OutputSchema:String)
-  (-invoke [_ args]
+  (-invoke [_ args _ctx]
     (try
       (let [path (resolve-path workspace-root (:path args))
             offset (:offset args)
@@ -203,7 +213,7 @@
     "List the files and directories inside a directory. Returns a JSON object with an `entries` array; each entry has `name` and `type` (`file`, `directory`, or `other`).")
   (-input-schema [_] InputSchema:Path)
   (-output-schema [_] OutputSchema:String)
-  (-invoke [_ args]
+  (-invoke [_ args _ctx]
     (try
       (json/generate-string
        {:entries (do-list-directory (resolve-path workspace-root (:path args)))})
@@ -217,7 +227,7 @@
     "Return metadata for a path: whether it exists, its type (`file`, `directory`, or `other`), size in bytes, and last modified timestamp.")
   (-input-schema [_] InputSchema:Path)
   (-output-schema [_] OutputSchema:String)
-  (-invoke [_ args]
+  (-invoke [_ args _ctx]
     (try
       (json/generate-string
        (do-file-info (resolve-path workspace-root (:path args))))
@@ -231,14 +241,36 @@
     "Recursively search files under a directory for a regex pattern. Returns up to `max-results` matches as JSON objects with `file`, `line`, and `text`. Files larger than the registry's `:max-search-file-bytes` setting are skipped.")
   (-input-schema [_] InputSchema:SearchFiles)
   (-output-schema [_] OutputSchema:String)
-  (-invoke [_ args]
+  (-invoke [_ args _ctx]
     (try
-        (json/generate-string
+      (json/generate-string
        (do-search-files (resolve-path workspace-root (:path args))
                         (:pattern args)
                         (:max-results args)
                         max-search-file-bytes
                         default-max-search-results))
+      (catch Throwable t
+        (error-result t)))))
+
+(defn- do-create-file [^Path path content]
+  (let [file (.toFile path)]
+    (.mkdirs (.getParentFile file))
+    (spit file (or content "") :encoding "UTF-8")
+    {:path (path->str path)
+     :created true
+     :size (.length file)}))
+
+(deftype CreateFileTool [workspace-root]
+  tool/Tool
+  (-name [_] "file/create")
+  (-description [_]
+    "Create a new UTF-8 text file (and any missing parent directories) with the given content. Paths are resolved against the configured workspace root.")
+  (-input-schema [_] InputSchema:CreateFile)
+  (-output-schema [_] OutputSchema:String)
+  (-invoke [_ args _ctx]
+    (try
+      (json/generate-string
+       (do-create-file (resolve-path workspace-root (:path args)) (:content args)))
       (catch Throwable t
         (error-result t)))))
 
@@ -268,6 +300,12 @@
   ([workspace-root max-search-file-bytes default-max-search-results]
    (->SearchFilesTool workspace-root max-search-file-bytes default-max-search-results)))
 
+(defn create-file
+  "Return a new `file/create` Tool instance."
+  ([] (create-file nil))
+  ([workspace-root]
+   (->CreateFileTool workspace-root)))
+
 (defn filesystem-registry
   "Return a map of filesystem tool name -> Tool instance.
 
@@ -286,9 +324,10 @@
             max-read-bytes
             max-search-file-bytes
             max-search-results]}]
-   {"file/read"   (read-file workspace-root (or max-read-bytes default-max-read-bytes))
-    "file/list"   (list-directory workspace-root)
-    "file/info"   (file-info workspace-root)
-    "file/search" (search-files workspace-root
+   {"file/read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
+    "file/list"    (list-directory workspace-root)
+    "file/info"    (file-info workspace-root)
+    "file/create"  (create-file workspace-root)
+    "file/search"  (search-files workspace-root
                                 (or max-search-file-bytes default-max-search-file-bytes)
                                 (or max-search-results default-max-search-results))}))

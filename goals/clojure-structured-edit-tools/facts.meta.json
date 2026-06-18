@@ -1,0 +1,67 @@
+{
+  "facts": [
+    {
+      "id": "fact-1",
+      "text": "The project depends on rewrite-clj/rewrite-clj 1.2.54 (or latest stable) for structured parsing and modification of Clojure/EDN source.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-2",
+      "text": "A new namespace kschltz.agent.tools.clojure implements a group of Clojure file-editing tools behind the Tool protocol.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-3",
+      "text": "The tool group includes clojure/query, clojure/add-require, clojure/remove-def, clojure/rename-symbol, clojure/insert-form, clojure/edit-def, and clojure/format-file.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-4",
+      "text": "Every new tool has a Malli input schema and output schema, and its implementation satisfies the kschltz.agent.tool/Tool protocol.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-5",
+      "text": "All file writes validate that the edited source can be parsed back into the same rewrite-clj AST structure (round-trip validation) before persisting.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-6",
+      "text": "The native-image alias in deps.edn and the build-native script are updated so rewrite-clj and the new namespace are included in the native classpath and compiled.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-7",
+      "text": "The native-image build completes without errors after adding rewrite-clj and the new tools.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-8",
+      "text": "Unit tests cover each tool operation: add-require, remove-def, rename-symbol, insert-form, edit-def, format-file, and query.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    },
+    {
+      "id": "fact-9",
+      "text": "Tests include error cases for malformed source, non-existent symbols, and failed round-trip validation.",
+      "comment": "",
+      "recommendedAutomatedVerification": true,
+      "automatedVerification": true
+    }
+  ]
+}

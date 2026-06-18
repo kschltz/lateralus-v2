@@ -5,6 +5,7 @@
         metosin/malli {:mvn/version "0.16.4"}
         hato/hato {:mvn/version "1.0.0"}
         cheshire/cheshire {:mvn/version "6.2.0"}
+        rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
         ;; Proximum is optional: it is only loaded when
         ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
         ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.
@@ -35,6 +36,7 @@
                           metosin/malli {:mvn/version "0.16.4"}
                           hato/hato {:mvn/version "1.0.0"}
                           cheshire/cheshire {:mvn/version "6.2.0"}
+                          rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
                           io.github.clojure/tools.build {:mvn/version "0.10.13"}
                           com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
            ;; Direct-linking improves native-image size and startup.

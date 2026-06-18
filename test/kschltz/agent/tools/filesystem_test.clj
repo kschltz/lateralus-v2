@@ -34,21 +34,34 @@
     (.deleteOnExit f)
     f))
 
-(deftest filesystem-registry-contains-four-tools
-  (testing "filesystem-registry returns the four read-only tools"
+(def ^:private dummy-ctx {})
+
+(deftest filesystem-registry-contains-five-tools
+  (testing "filesystem-registry returns the filesystem tools"
     (let [registry (tools.filesystem/filesystem-registry)]
-      (is (= 4 (count registry)))
+      (is (= 5 (count registry)))
       (is (contains? registry "file/read"))
       (is (contains? registry "file/list"))
       (is (contains? registry "file/info"))
+      (is (contains? registry "file/create"))
       (is (contains? registry "file/search"))
       (is (every? tool/tool? (vals registry))))))
+
+(deftest file-create-writes-content-and-parents
+  (testing "file/create writes content and creates parent directories"
+    (let [reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/create")
+                                  {:path "nested/dir/test.txt" :content "created"}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (:created parsed))
+      (is (= "created" (slurp (io/file @tmp-dir "nested/dir/test.txt")))))))
 
 (deftest file-read-returns-content
   (testing "file/read returns the UTF-8 content of a text file"
     (let [f    (temp-file "hello.txt" "hello world")
           reg  (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file/read") {:path "hello.txt"})
+          result (tool/invoke-tool (get reg "file/read") {:path "hello.txt"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (map? parsed))
       (is (= "hello world" (:content parsed)))
@@ -60,14 +73,14 @@
           reg  (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
           result (tool/invoke-tool (get reg "file/read") {:path "abc.txt"
                                                           :offset 2
-                                                          :limit 3})
+                                                          :limit 3} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (= "cde" (:content parsed))))))
 
 (deftest file-read-errors-on-missing-file
   (testing "file/read returns a model-visible error for a missing file"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file/read") {:path "does-not-exist.txt"})]
+          result (tool/invoke-tool (get reg "file/read") {:path "does-not-exist.txt"} dummy-ctx)]
       (is (string? result))
       (is (str/starts-with? result "Filesystem tool error:")))))
 
@@ -78,7 +91,7 @@
       (.mkdirs subdir)
       (.deleteOnExit subdir))
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file/list") {:path "."})
+          result (tool/invoke-tool (get reg "file/list") {:path "."} dummy-ctx)
           parsed (json/parse-string result true)
           entries (:entries parsed)]
       (is (vector? entries))
@@ -90,7 +103,7 @@
   (testing "file/info returns metadata"
     (let [f   (temp-file "info.txt" "content")
           reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file/info") {:path "info.txt"})
+          result (tool/invoke-tool (get reg "file/info") {:path "info.txt"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (true? (:exists parsed)))
       (is (= "file" (:type parsed)))
@@ -100,7 +113,7 @@
 (deftest file-info-reports-missing-file
   (testing "file/info reports a missing path"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file/info") {:path "missing.txt"})
+          result (tool/invoke-tool (get reg "file/info") {:path "missing.txt"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (false? (:exists parsed))))))
 
@@ -110,7 +123,7 @@
     (temp-file "two.txt" "FOO BAZ\n")
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
           result (tool/invoke-tool (get reg "file/search") {:path "."
-                                                            :pattern "baz"})
+                                                            :pattern "baz"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (= 2 (count parsed)))
       (is (every? #(re-find #"(?i)baz" (:text %)) parsed))
@@ -124,7 +137,7 @@
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
           result (tool/invoke-tool (get reg "file/search") {:path "."
                                                             :pattern "hit"
-                                                            :max-results 3})
+                                                            :max-results 3} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (= 3 (count parsed))))))
 
@@ -132,16 +145,16 @@
   (testing "file/search returns an error for an invalid pattern"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
           result (tool/invoke-tool (get reg "file/search") {:path "."
-                                                            :pattern "[invalid"})]
+                                                              :pattern "[invalid"} dummy-ctx)]
       (is (str/starts-with? result "Filesystem tool error:")))))
 
 (deftest custom-max-read-bytes-rejects-large-files
   (testing "a configured :max-read-bytes limit is honored"
     (let [f   (temp-file "big.txt" (apply str (repeat 200 "x")))
           reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)
-                                                      :max-read-bytes 100})]
+                                                    :max-read-bytes 100})]
       (is (str/starts-with?
-           (tool/invoke-tool (get reg "file/read") {:path "big.txt"})
+           (tool/invoke-tool (get reg "file/read") {:path "big.txt"} dummy-ctx)
            "Filesystem tool error:")))))
 
 (deftest custom-max-search-results-caps-default
@@ -149,9 +162,9 @@
     (doseq [i (range 5)]
       (temp-file (str "hit" i ".txt") (str "match " i)))
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)
-                                                      :max-search-results 2})
+                                                    :max-search-results 2})
           result (tool/invoke-tool (get reg "file/search") {:path "."
-                                                            :pattern "match"})
+                                                              :pattern "match"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (= 2 (count parsed))))))
 
@@ -160,9 +173,9 @@
     (temp-file "small.txt" "needle")
     (temp-file "huge.txt" (apply str (repeat 500 "x")))
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)
-                                                      :max-search-file-bytes 100})
+                                                    :max-search-file-bytes 100})
           result (tool/invoke-tool (get reg "file/search") {:path "."
-                                                            :pattern "needle"})
+                                                              :pattern "needle"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (= 1 (count parsed)))
       (is (str/ends-with? (:file (first parsed)) "small.txt")))))

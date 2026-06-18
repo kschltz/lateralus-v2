@@ -70,7 +70,10 @@
                       'kschltz.agent.tool
                       'kschltz.agent.loop
                       'kschltz.agent.plugins.tools
-                      'kschltz.agent.tools.filesystem]
+                      'kschltz.agent.tools.filesystem
+                      'kschltz.agent.tools.self
+                      'kschltz.agent.tools.clojure
+                      'kschltz.agent.tools.clojure-impl]
          ;; Direct-linking improves native-image size, startup, and correctness.
          :java-opts ["-Dclojure.compiler.direct-linking=true"]))
 

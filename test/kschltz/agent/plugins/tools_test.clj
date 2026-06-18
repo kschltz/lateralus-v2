@@ -12,7 +12,7 @@
   (-description [_] "fake tool")
   (-input-schema [_] [:map])
   (-output-schema [_] :string)
-  (-invoke [_ _] "ok"))
+  (-invoke [_ _ _ctx] "ok"))
 
 (deftest tools-plugin-seeds-registry-on-context
   (testing "the tools plugin places the registry on the context at the guard slot"
