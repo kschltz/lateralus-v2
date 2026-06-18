@@ -15,12 +15,11 @@
    (single user, one prompt at a time)."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
-            [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
-            [kschltz.agent.runtime :as runtime]))
+            [kschltz.agent.runtime :as runtime]
+            [kschltz.agent.tool :as tool]))
 
 ;; ---- Helpers ----
 
@@ -73,6 +72,17 @@
     :enter (fn [_ctx] (throw (ex-info "boom" {:boom true})))}
    {:name ::post-leave
     :leave (fn [ctx] (assoc ctx :post-leave-ran? true))}])
+
+(defn- user-state
+  "Return the runtime state with runtime bookkeeping keys removed.
+   Useful for asserting on user-visible state while ignoring the
+   session-id, token usage and request message counters the runtime
+   itself maintains."
+  [runtime]
+  (dissoc (runtime/stop runtime)
+          :agent/session-id
+          :agent/token-usage
+          :agent/last-request-messages))
 
 ;; ---- Tests ----
 
@@ -137,16 +147,16 @@
   (testing "send-message merges :agent/state-delta into the runtime's state,
    threading the base state through correctly"
     (let [runtime (runtime/start {:exchange-chain (counter-chain)})]
-      (is (= {} (runtime/stop runtime))
+      (is (= {} (user-state runtime))
           "fresh runtime has empty state")
       (runtime/send-message runtime "first")
-      (is (= {:n 1} (runtime/stop runtime))
+      (is (= {:n 1} (user-state runtime))
           "after one send, state is {:n 1}")
       (runtime/send-message runtime "second")
-      (is (= {:n 2} (runtime/stop runtime))
+      (is (= {:n 2} (user-state runtime))
           "after two sends, state is {:n 2} (the chain saw the prior state)")
       (runtime/send-message runtime "third")
-      (is (= {:n 3} (runtime/stop runtime))
+      (is (= {:n 3} (user-state runtime))
           "after three sends, state is {:n 3}"))))
 
 (deftest send-message-deep-merges-nested-state-delta
@@ -163,12 +173,12 @@
                                                3 {:extra :three})})))}]
           runtime (runtime/start {:exchange-chain chain})]
       (runtime/send-message runtime "first")
-      (is (= {:n 1 :config {:turn 1 :extra :one}} (runtime/stop runtime)))
+      (is (= {:n 1 :config {:turn 1 :extra :one}} (user-state runtime)))
       (runtime/send-message runtime "second")
-      (is (= {:n 2 :config {:turn 2 :extra :one}} (runtime/stop runtime))
+      (is (= {:n 2 :config {:turn 2 :extra :one}} (user-state runtime))
           "nested config map is merged, preserving sibling :extra from turn 1")
       (runtime/send-message runtime "third")
-      (is (= {:n 3 :config {:turn 2 :extra :three}} (runtime/stop runtime))
+      (is (= {:n 3 :config {:turn 2 :extra :three}} (user-state runtime))
           "scalar :extra is last-write-wins; nested :turn keeps its prior value"))))
 
 (deftest send-message-uses-custom-chain
@@ -185,7 +195,11 @@
     (let [seen-states (atom [])
           chain       [{:name ::spy
                         :leave (fn [ctx]
-                                 (swap! seen-states conj (:agent/state ctx))
+                                 (swap! seen-states conj
+                                        (dissoc (:agent/state ctx)
+                                                :agent/session-id
+                                                :agent/token-usage
+                                                :agent/last-request-messages))
                                  (assoc ctx :agent/state-delta
                                         {:calls (count @seen-states)}))}]
           runtime     (runtime/start {:exchange-chain chain})]
@@ -200,10 +214,10 @@
   (testing "send-message returns the final ctx from chain/execute"
     (let [chain   [{:name ::annotate
                     :leave (fn [ctx] (assoc ctx :marker true))}]
-          runtime (runtime/start {:exchange-chain chain})]
-      (let [result (runtime/send-message runtime "hi")]
-        (is (true? (:marker result))
-            "the result carries the marker the chain put on it")))))
+          runtime (runtime/start {:exchange-chain chain})
+          result  (runtime/send-message runtime "hi")]
+      (is (true? (:marker result))
+          "the result carries the marker the chain put on it"))))
 
 (deftest send-message-handles-chain-error
   (testing "when a chain stage throws and error-boundary is in the chain,
@@ -227,10 +241,10 @@
 (deftest stop-returns-current-state
   (testing "stop returns the current merged state"
     (let [runtime (runtime/start {:exchange-chain (echo-chain)})]
-      (is (= {} (runtime/stop runtime))
+      (is (= {} (user-state runtime))
           "stop on a fresh runtime returns the empty state")
       (runtime/send-message runtime "x")
-      (is (= {:n 1} (runtime/stop runtime))
+      (is (= {:n 1} (user-state runtime))
           "stop after one send returns the merged state"))))
 
 (deftest send-message-prewires-dependencies-in-ctx
@@ -257,6 +271,41 @@
           "the agent-map's memory backend is on ctx as :memory/backend")
       (is (identical? embedder (:embedder @seen-ctx))
           "the agent-map's embedder is on ctx as :embedder"))))
+
+(deftest send-message-accumulates-token-usage
+  (testing "usage from :llm/response is accumulated into :agent/token-usage"
+    (let [responses (atom [{:model "stub/v0"
+                            :choices [{:message {:content "first"}}]
+                            :usage {:prompt_tokens 10 :completion_tokens 5 :total_tokens 15}}
+                           {:model "stub/v0"
+                            :choices [{:message {:content "second"}}]
+                            :usage {:prompt_tokens 3 :completion_tokens 2 :total_tokens 5}}])
+          chain     [{:name ::fake-llm
+                      :enter (fn [ctx]
+                               (let [resp (first @responses)]
+                                 (swap! responses rest)
+                                 (assoc ctx :llm/response resp)))}]
+          runtime   (runtime/start {:exchange-chain chain})]
+      (runtime/send-message runtime "hi")
+      (is (= {:prompt_tokens 10 :completion_tokens 5 :total_tokens 15}
+             (:agent/token-usage (runtime/stop runtime)))
+          "after one exchange, usage equals the first response")
+      (runtime/send-message runtime "again")
+      (is (= {:prompt_tokens 13 :completion_tokens 7 :total_tokens 20}
+             (:agent/token-usage (runtime/stop runtime)))
+          "after two exchanges, usage is cumulative"))))
+
+(deftest send-message-accumulates-token-usage-when-missing
+  (testing "when the LLM response omits :usage, cumulative usage stays at zero"
+    (let [chain   [{:name ::fake-llm
+                    :enter (fn [ctx]
+                             (assoc ctx :llm/response
+                                    {:model "stub/v0"
+                                     :choices [{:message {:content "hi"}}]}))}]
+          runtime (runtime/start {:exchange-chain chain})]
+      (runtime/send-message runtime "hi")
+      (is (= {:prompt_tokens 0 :completion_tokens 0 :total_tokens 0}
+             (:agent/token-usage (runtime/stop runtime)))))))
 
 (deftest runtime-is-small
   (testing "the runtime ns is small (plan verification: < 150 LOC)"
