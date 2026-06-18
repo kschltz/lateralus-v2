@@ -39,6 +39,8 @@
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.tools.filesystem :as tools.filesystem]
+            [kschltz.agent.tools.self :as tools.self]
+            [kschltz.agent.tools.clojure :as tools.clojure]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -161,13 +163,16 @@
   ;; that uses BM25 sparse retrieval plus a small knowledge graph.
   ;; The backend receives the resolved :embedder so it can embed
   ;; message content at store time when needed.
-  (case (or impl :noop)
-    :noop      (noop-memory/backend)
-    :kg-bm25   (kg-bm25-memory/backend (dissoc opts :embedder))
-    :proximum  (let [backend (resolve 'kschltz.agent.memory.proximum-backend/backend)]
-                 (backend (cond-> opts
-                            (not (contains? opts :embedder))
-                            (assoc :embedder (embedding/noop-embedder)))))))
+  (let [method (or impl :noop)]
+    (with-meta
+      (case method
+        :noop      (noop-memory/backend)
+        :kg-bm25   (kg-bm25-memory/backend (dissoc opts :embedder))
+        :proximum  (let [backend (resolve 'kschltz.agent.memory.proximum-backend/backend)]
+                    (backend (cond-> opts
+                               (not (contains? opts :embedder))
+                               (assoc :embedder (embedding/noop-embedder))))))
+      {:memory-backend/impl method})))
 
 (defmethod ig/init-key :lateralus/plugins [_ plugins]
   ;; The base plugin is prepended automatically so user plugins are
@@ -187,10 +192,12 @@
   (plugins.memory/memory-plugin opts))
 
 (defmethod ig/init-key :lateralus/tool-registry [_ tools]
-  "Integrant component that simply holds the map of tool name -> Tool.
-   The map is consumed by `:lateralus/tools-plugin`, which seeds it on
-   the context at chain execution time."
-  tools)
+  "Integrant component that holds the map of tool name -> Tool.
+   Accepts either a single registry map or a vector of registry maps
+   to merge. The merged map is consumed by `:lateralus/tools-plugin`,
+   which seeds it on the context at chain execution time."
+  (let [registries (if (sequential? tools) tools [tools])]
+    (apply merge registries)))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
@@ -198,6 +205,18 @@
    Used by the tool-loop example config; not part of the default config
    so production agents start with an empty tool registry."
   (tools.filesystem/filesystem-registry opts))
+
+(defmethod ig/init-key :lateralus/self-awareness-tools [_ {:keys [workspace-root]}]
+  "Returns the self-awareness tool registry (`self/status`). The tool
+   reads from the interceptor context, so it can be built at system
+   init time like any other tool."
+  (tools.self/self-awareness-registry workspace-root))
+
+(defmethod ig/init-key :lateralus/clojure-tools [_ opts]
+  "Returns the Clojure structured-editing tool registry (clojure/query,
+   clojure/add-require, clojure/remove-def, clojure/rename-symbol,
+   clojure/insert-form, clojure/edit-def, clojure/format-file)."
+  (tools.clojure/clojure-registry opts))
 
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
   (plugins.tools/tools-plugin registry))
@@ -252,12 +271,15 @@
                               :embedder (ig/ref :lateralus/embedder)
                               :top-y    3
                               :last-n   5}
-   :lateralus/tool-registry  {}
-   :lateralus/tools-plugin   {:registry (ig/ref :lateralus/tool-registry)}
-   :lateralus/plugins        [(ig/ref :lateralus/memory-plugin)
-                              (ig/ref :lateralus/tools-plugin)]
-   :lateralus/agent          {:plugins        (ig/ref :lateralus/plugins)
-                              :llm-client     (ig/ref :lateralus/llm-client)
-                              :llm-config     (ig/ref :lateralus/llm-config)
-                              :embedder       (ig/ref :lateralus/embedder)
-                              :memory-backend (ig/ref :lateralus/memory-backend)}})
+   :lateralus/file-tools           {}
+   :lateralus/self-awareness-tools {}
+   :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
+                                    (ig/ref :lateralus/self-awareness-tools)]
+   :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
+   :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
+                                    (ig/ref :lateralus/tools-plugin)]
+   :lateralus/agent                {:plugins        (ig/ref :lateralus/plugins)
+                                    :llm-client     (ig/ref :lateralus/llm-client)
+                                    :llm-config     (ig/ref :lateralus/llm-config)
+                                    :embedder       (ig/ref :lateralus/embedder)
+                                    :memory-backend (ig/ref :lateralus/memory-backend)}})

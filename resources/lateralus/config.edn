@@ -31,13 +31,17 @@
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/file-tools     {}
- :lateralus/tool-registry  #ig/ref :lateralus/file-tools
- :lateralus/tools-plugin   {:registry #ig/ref :lateralus/tool-registry}
- :lateralus/plugins        [#ig/ref :lateralus/memory-plugin
-                            #ig/ref :lateralus/tools-plugin]
- :lateralus/agent          {:plugins        #ig/ref :lateralus/plugins
-                            :llm-client     #ig/ref :lateralus/llm-client
-                            :llm-config     #ig/ref :lateralus/llm-config
-                            :embedder       #ig/ref :lateralus/embedder
-                            :memory-backend #ig/ref :lateralus/memory-backend}}
+ :lateralus/file-tools           {}
+ :lateralus/self-awareness-tools {}
+ :lateralus/clojure-tools        {}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/clojure-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend}}

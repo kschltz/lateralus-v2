@@ -20,7 +20,8 @@
    (`:tool/calls`, `:tool/results`, `:agent/all-tool-results`) and
    converts to OpenAI-shaped messages only when composing the follow-up
    request. Anthropic / other adapters can be layered in later."
-  (:require [kschltz.agent.chain :as chain]
+  (:require [clojure.string :as str]
+            [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.schemas :as schemas]
             [kschltz.agent.tool :as tool]
@@ -52,9 +53,9 @@
 ;; ---- ReAct loop implementation ----
 
 (defn- implemented-result?
-  "True when a tool result is not `:not-implemented`."
+  "True when a tool result is not the unavailable-tool marker."
   [result-map]
-  (not= :not-implemented (:result result-map)))
+  (not (str/starts-with? (str (:result result-map)) "Tool '")))
 
 (defrecord ReActLoop [max-depth]
   Loop
@@ -65,7 +66,7 @@
            (seq results)
            (some implemented-result? results))))
 
-  (-follow-up-chain [this registry]
+  (-follow-up-chain [this _registry]
     [(bump-loop-depth-interceptor)
      (compose-tool-results-interceptor)
      (llm-call-with-self-heal)
@@ -127,7 +128,7 @@
    :enter (fn [ctx]
             (let [calls    (or (:tool/calls ctx) [])
                   registry (or (:agent/tool-registry ctx) {})
-                  results  (tool/execute-tools registry calls)]
+                  results  (tool/execute-tools registry ctx calls)]
               (-> ctx
                   (assoc :tool/results results)
                   (update :agent/all-tool-results (fnil into []) results))))})

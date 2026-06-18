@@ -16,7 +16,7 @@
   (-description [_] "Echoes the message back.")
   (-input-schema [_] [:map [:msg :string]])
   (-output-schema [_] :string)
-  (-invoke [_ args] (:msg args)))
+  (-invoke [_ args _ctx] (:msg args)))
 
 (defn- echo-llm
   "Fake LLM that calls echo once, then returns a final text response."

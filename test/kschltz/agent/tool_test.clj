@@ -11,7 +11,7 @@
               (-description [_] "desc")
               (-input-schema [_] [:map])
               (-output-schema [_] :string)
-              (-invoke [_ _] "ok"))]
+              (-invoke [_ _ _] "ok"))]
       (is (tool/tool? t))
       (is (not (tool/tool? {})))
       (is (not (tool/tool? nil))))))
@@ -23,8 +23,8 @@
               (-description [_] "echoes x")
               (-input-schema [_] [:map [:x :int]])
               (-output-schema [_] :string)
-              (-invoke [_ args] (str (:x args))))]
-      (is (str/includes? (tool/invoke-tool t {:x "not-int"}) "input")
+              (-invoke [_ args _] (str (:x args))))]
+      (is (str/includes? (tool/invoke-tool t {:x "not-int"} {}) "input")
           "invalid input produces a validation error"))))
 
 (deftest invoke-tool-returns-result-when-valid
@@ -34,8 +34,8 @@
               (-description [_] "echoes x")
               (-input-schema [_] [:map [:x :int]])
               (-output-schema [_] :string)
-              (-invoke [_ args] (str (:x args))))]
-      (is (= "7" (tool/invoke-tool t {:x 7}))))))
+              (-invoke [_ args _] (str (:x args))))]
+      (is (= "7" (tool/invoke-tool t {:x 7} {}))))))
 
 (deftest invoke-tool-validates-output
   (testing "invoke-tool returns an error string for non-string output"
@@ -44,8 +44,8 @@
               (-description [_] "returns a number")
               (-input-schema [_] [:map])
               (-output-schema [_] :string)
-              (-invoke [_ _] 42))]
-      (is (str/includes? (tool/invoke-tool t {}) "not a string")
+              (-invoke [_ _ _] 42))]
+      (is (str/includes? (tool/invoke-tool t {} {}) "not a string")
           "non-string result is rejected"))))
 
 (deftest invoke-tool-catches-execution-exceptions
@@ -55,9 +55,9 @@
               (-description [_] "always throws")
               (-input-schema [_] [:map])
               (-output-schema [_] :string)
-              (-invoke [_ _] (throw (ex-info "explosion" {}))))]
-      (is (str/includes? (tool/invoke-tool t {}) "Tool execution error"))
-      (is (str/includes? (tool/invoke-tool t {}) "explosion")))))
+              (-invoke [_ _ _] (throw (ex-info "explosion" {}))))]
+      (is (str/includes? (tool/invoke-tool t {} {}) "Tool execution error"))
+      (is (str/includes? (tool/invoke-tool t {} {}) "explosion")))))
 
 (deftest tool-definition-shape
   (testing "tool-definition produces OpenAI function-tool shape"
@@ -66,7 +66,7 @@
               (-description [_] "adds numbers")
               (-input-schema [_] [:map [:a :int] [:b :int]])
               (-output-schema [_] :string)
-              (-invoke [_ _] ""))
+              (-invoke [_ _ _] ""))
           def (tool/tool-definition t)]
       (is (= "function" (:type def)))
       (is (= "calc/add" (get-in def [:function :name])))
@@ -74,11 +74,12 @@
       (is (map? (get-in def [:function :parameters]))))))
 
 (deftest execute-tools-with-empty-registry
-  (testing "execute-tools returns :not-implemented for unknown tools"
+  (testing "execute-tools returns a human-readable error for unknown tools"
     (let [calls [{:id "1" :type "function" :function {:name "unknown" :arguments "{}"}}]
-          results (tool/execute-tools {} calls)]
+          results (tool/execute-tools {} {} calls)]
       (is (= 1 (count results)))
-      (is (= :not-implemented (-> results first :result))))))
+      (is (str/includes? (-> results first :result) "not available"))
+      (is (str/includes? (-> results first :result) "unknown")))))
 
 (deftest execute-tools-invokes-registered-tool
   (testing "execute-tools runs a registered tool and preserves call id"
@@ -87,9 +88,9 @@
               (-description [_] "echo")
               (-input-schema [_] [:map [:msg :string]])
               (-output-schema [_] :string)
-              (-invoke [_ args] (:msg args)))
+              (-invoke [_ args _] (:msg args)))
           calls [{:id "42" :type "function" :function {:name "echo" :arguments "{\"msg\":\"hi\"}"}}]
-          results (tool/execute-tools {"echo" t} calls)]
+          results (tool/execute-tools {"echo" t} {} calls)]
       (is (= 1 (count results)))
       (is (= "42" (-> results first :call :id)))
       (is (= "hi" (-> results first :result))))))

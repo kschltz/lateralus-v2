@@ -1,0 +1,83 @@
+{
+  "stage": "interview",
+  "title": "Clojure structured editing tools",
+  "goalSlug": "clojure-structured-edit-tools",
+  "questions": [
+    {
+      "id": "library",
+      "prompt": "Which Clojure structured-editing library should we build on?",
+      "description": "The most common choices are rewrite-clj (zipper-based, whitespace-preserving, native-image tested), zprint (formatting-focused, ships native binaries), and cljfmt/cljstyle (formatting). For file modification tools we want parse-then-edit capability.",
+      "answerMode": "single",
+      "required": true,
+      "recommendedAnswer": "rewrite-clj",
+      "recommendedOptionIds": ["rewrite-clj"],
+      "options": [
+        {"id": "rewrite-clj", "label": "rewrite-clj (zipper-based source rewriting)"},
+        {"id": "zprint", "label": "zprint (formatting/pretty-printing library)"},
+        {"id": "cljfmt", "label": "cljfmt (formatting library, harder to use for arbitrary edits)"},
+        {"id": "other", "label": "Other — I have a different library in mind"}
+      ]
+    },
+    {
+      "id": "native-image",
+      "prompt": "Must the new tools work in the GraalVM native-image build?",
+      "description": "lateralus-v2 already ships a native executable. rewrite-clj is actively native-image tested; zprint/cljfmt may need extra reflection config.",
+      "answerMode": "single",
+      "required": true,
+      "recommendedAnswer": "yes",
+      "recommendedOptionIds": ["yes"],
+      "options": [
+        {"id": "yes", "label": "Yes — native-image compatibility is required"},
+        {"id": "no", "label": "No — JVM-only is acceptable for now"}
+      ]
+    },
+    {
+      "id": "scope",
+      "prompt": "What editing operations should the first group of tools support?",
+      "description": "Pick the initial tool set. More operations can be added later; the first PR should land a clean foundation plus a few high-value edits.",
+      "answerMode": "multi-custom",
+      "required": true,
+      "recommendedAnswer": "read-safe edits: add a require, edit a function body, add/remove a def/var, and format the buffer",
+      "recommendedOptionIds": ["edit-def", "add-require", "remove-def", "format"],
+      "options": [
+        {"id": "add-require", "label": "Add/update a namespace require/import"},
+        {"id": "edit-def", "label": "Replace a defn/def body while preserving metadata/docstring"},
+        {"id": "remove-def", "label": "Remove a top-level def/defn"},
+        {"id": "format", "label": "Format/reformat the file (with zprint or rewrite-clj)"},
+        {"id": "rename-symbol", "label": "Rename a local or qualified symbol across the file"},
+        {"id": "insert-form", "label": "Insert a new top-level form at a position"},
+        {"id": "query", "label": "Query the AST: find defs, requires, etc. (read-only)"}
+      ]
+    },
+    {
+      "id": "safety",
+      "prompt": "How should edits be kept safe?",
+      "description": "Structured editing can break code if the model misidentifies a form. Choose the safety model for the first iteration.",
+      "answerMode": "single-custom",
+      "required": true,
+      "recommendedAnswer": "validate the edited tree round-trips as valid Clojure and leave a backup / show a diff before writing",
+      "recommendedOptionIds": ["validate-and-backup"],
+      "options": [
+        {"id": "validate-and-backup", "label": "Validate s-expression round-trip and write only on success"},
+        {"id": "dry-run", "label": "Default to dry-run/diff; apply only when explicitly asked"},
+        {"id": "direct", "label": "Direct write with no guardrails (fast, risky)"},
+        {"id": "other", "label": "Other approach"}
+      ]
+    },
+    {
+      "id": "testing",
+      "prompt": "What is the minimum verification for this first iteration?",
+      "description": "We need automated checks that native-image still builds and the new tools work end-to-end.",
+      "answerMode": "multi-custom",
+      "required": true,
+      "recommendedAnswer": "unit tests for each tool, a native-image build smoke test, and an integration test that edits a sample file",
+      "recommendedOptionIds": ["unit-tests", "native-smoke", "integration"],
+      "options": [
+        {"id": "unit-tests", "label": "Unit tests for each tool operation"},
+        {"id": "integration", "label": "Integration test that edits a sample .clj file end-to-end"},
+        {"id": "native-smoke", "label": "Native-image build smoke test (not necessarily full E2E)"},
+        {"id": "schema-tests", "label": "Malli input/output schema validation tests"}
+      ]
+    }
+  ]
+}
