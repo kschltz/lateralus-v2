@@ -26,9 +26,10 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/embedder      ──▶  Embedder protocol (noop / http / langchain4j)│
 │  :lateralus/memory-backend ──▶ MemoryBackend protocol (noop / proximum / kg-bm25)│
 │  :lateralus/memory-plugin ──▶  memory recall + persist slots    │
-│  :lateralus/file-tools    ──▶  convenience filesystem tool registry│
-│  :lateralus/tool-registry  ──▶  map of tool name -> Tool impl      │
-│  :lateralus/tools-plugin  ──▶  seeds `:agent/tool-registry`        │
+│  :lateralus/file-tools       ──▶  convenience filesystem tool registry│
+│  :lateralus/web-search-tools  ──▶  web search tool registry (DuckDuckGo Lite / SearXNG)│
+│  :lateralus/tool-registry     ──▶  map of tool name -> Tool impl      │
+│  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
 │  :lateralus/plugins       ──▶  assembled plugin maps (base plugin auto-prepended) │
 │  :lateralus/agent         ──▶  agent-map + exchange-chain + pre-wired deps │
 └──────────────────────────────────┬──────────────────────────────┘
@@ -128,6 +129,8 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 - **New embedder:** implement `kschltz.agent.memory.protocol/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
 - **New chain stage:** add an interceptor to an existing plugin slot or contribute a full `:plugin/chain`.
+- **New web search provider:** implement `kschltz.agent.tools.web-search.protocol/WebSearchProvider` and add a case in `kschltz.agent.tools.web-search/select-provider`.
+- **New tool:** implement `kschltz.agent.tool/Tool`, provide a registry helper, add an Integrant key in `kschltz.agent.system`, and reference it from `:lateralus/tool-registry`.
 
 ## KG-BM25 memory backend
 

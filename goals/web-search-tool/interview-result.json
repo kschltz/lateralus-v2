@@ -1,0 +1,33 @@
+{
+  "stage": "interview",
+  "title": "Agentic web search tool with 2026 attack defenses",
+  "goalSlug": "web-search-tool",
+  "submittedAt": "2026-06-18T20:17:00Z",
+  "answers": {
+    "provider": {
+      "questionId": "provider",
+      "answer": "DuckDuckGo Lite (no API key) as the default provider. SearXNG may be added later as an opt-in, self-hosted alternative.",
+      "selectedOptionIds": ["ddg-lite"]
+    },
+    "fetch-pages": {
+      "questionId": "fetch-pages",
+      "answer": "Yes. Keep page fetching optional per tool call via a `fetch?` boolean flag so the agent can choose whether to retrieve and strip raw text from selected result pages.",
+      "selectedOptionIds": ["optional"]
+    },
+    "guard-depth": {
+      "questionId": "guard-depth",
+      "answer": "Aggressive. Include schema validation, URL allow-listing, query length cap, HTML-to-text stripping, result-size cap, timeout, and an opt-in policy model that classifies every result snippet as safe/unsafe before returning it.",
+      "selectedOptionIds": ["aggressive"]
+    },
+    "attack-coverage": {
+      "questionId": "attack-coverage",
+      "answer": "All of: direct/indirect prompt injection markers in queries, SSRF (private IPs, metadata endpoints), recursive self-activation, exfiltration patterns, and overly long queries. Each protection must be individually opt-out-able in configuration.",
+      "selectedOptionIds": ["all"]
+    },
+    "config-path": {
+      "questionId": "config-path",
+      "answer": "Add `:tools/web-search` configuration to every existing Lateralus config file example under `resources/lateralus/` so users see the tool settings by default.",
+      "selectedOptionIds": ["all-configs"]
+    }
+  }
+}

@@ -26,9 +26,11 @@
  :lateralus/file-tools           {:workspace-root "."}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
+ :lateralus/web-search-tools     {:provider :ddg-lite}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
-                                  #ig/ref :lateralus/clojure-tools]
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-search-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
