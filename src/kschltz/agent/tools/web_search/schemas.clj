@@ -3,7 +3,13 @@
 
    The tool is exposed to the LLM, so every input and output is
    strictly validated. Guard schemas are reused by both the tool and
-   the provider implementations so behavior is consistent.")
+   the provider implementations so behavior is consistent.
+
+   Important: the `web_search` input schema is intentionally kept simple
+   (`:type string :minLength 1`) because local/quantized models are easily
+   confused by JSON Schema `allOf` and empty validator objects.  The
+   stricter checks (length, control characters, injection markers) are
+   still enforced by the guard layer in `guards.clj`.")
 
 (def max-query-length
   "Maximum characters the model can pass as a search query.
@@ -28,15 +34,10 @@
   (* 256 1024))
 
 (def QueryString
-  "Sanitized search query. Non-empty, trimmed, with a length cap and
-   no control characters."
-  [:and
-   :string
-   [:re {:error/message "query must be a non-empty string"} #"\S"]
-   [:fn {:error/message (format "query must be <= %d characters" max-query-length)}
-    (fn [s] (<= (count s) max-query-length))]
-   [:fn {:error/message "query must not contain control characters"}
-    (fn [s] (not (some #(<= 0 (int %) 31) s)))]])
+  "Sanitized search query. JSON schema is a plain string with min/max
+   length so small local models interpret it correctly."
+  [:string {:min 1 :max max-query-length
+            :error/message "query must be a non-empty string of 1-400 characters"}])
 
 (def UrlString
   "Any string that the guard layer will later validate as a safe URL.
