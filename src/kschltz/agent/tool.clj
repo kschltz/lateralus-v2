@@ -68,10 +68,11 @@
 (defn tool-definition
   "Build an OpenAI-shaped function-tool definition map for `tool`."
   [tool]
-  {:type "function"
-   :function {:name        (-name tool)
-              :description (-description tool)
-              :parameters  (or (json-schema/transform (-input-schema tool)) {:type "object"})}})
+  (let [params (or (json-schema/transform (-input-schema tool)) {:type "object"})]
+    {:type "function"
+     :function {:name        (-name tool)
+                :description (-description tool)
+                :parameters  params}}))
 
 (defn execute-tools
   "Execute a seq of `calls` against a `registry` (map name -> Tool).

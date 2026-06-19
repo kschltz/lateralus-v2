@@ -82,10 +82,11 @@
   (-description [_]
     (str "Search the public web.\n"
          "Arguments:\n"
-         "  query        - search string (required)\n"
+         "  query        - search string (required), e.g. \"ducks\"\n"
          "  fetch?       - if true, also fetch plain-text page bodies (default false)\n"
          "  result-count - maximum number of results (default 10, max 20)\n"
-         "Returns a JSON string with :provider, :query, and :results."))
+         "Returns a JSON string with :provider, :query, and :results.\n"
+         "Example call: {\"query\":\"ducks\",\"result-count\":5}"))
   (-input-schema [_] InputSchema)
   (-output-schema [_] OutputSchema)
   (-invoke [_ args ctx]

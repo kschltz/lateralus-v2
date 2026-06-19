@@ -16,25 +16,65 @@
   (:import [java.net URLEncoder]))
 
 (def ^:private base-url
-  "https://lite.duckduckgo.com/lite")
+  "https://lite.duckduckgo.com/lite/")
 
-(defn- encode-form [params]
-  (str/join "&"
-            (map (fn [[k v]]
-                   (str (name k) "=" (URLEncoder/encode (str v) "UTF-8")))
-                 params)))
+(def ^:private user-agents
+  "Rotate a few real browser user agents so repeated requests from the
+   tool are less likely to be rate-limited by DuckDuckGo Lite."
+  ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"])
 
-(defn- request [url opts]
-  (http/request (merge {:method           :post
-                        :url              url
-                        :headers          {"Content-Type" "application/x-www-form-urlencoded"
-                                           "Accept"       "text/html,application/xhtml+xml"
-                                           "User-Agent"   "lateralus-web-search/1.0"}
-                        :body             (encode-form {:q (:query opts)
-                                                        :kl (:language opts "en-us")})
+(defn- browser-headers
+  "Return a minimal set of browser-like headers. DDG Lite rejects
+   bare programmatic requests; this combination is enough to pass
+   its bot detection while staying decodable by the JVM HTTP client.
+   We avoid brotli because the JVM client does not auto-decode it."
+  [query]
+  {"User-Agent"      (nth user-agents (mod (hash query) (count user-agents)))
+   "Accept"          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+   "Accept-Language" "en-US,en;q=0.9"
+   "Accept-Encoding" "gzip"
+   "Referer"         "https://duckduckgo.com/"})
+
+(defn- encode-query [q]
+  (URLEncoder/encode (str q) "UTF-8"))
+
+(defn- request-once [url opts user-agent]
+  (http/request (merge {:method            :get
+                        :url              (str url "?q=" (encode-query (:query opts))
+                                               "&kl=" (encode-query (or (:language opts) "en-us")))
+                        :headers          (assoc (browser-headers (:query opts)) "User-Agent" user-agent)
                         :throw-exceptions? false
                         :redirect-policy   :always}
                        (select-keys opts [:timeout-ms]))))
+
+(defn- landing-page? [html]
+  "DuckDuckGo Lite sometimes returns a 202 landing page with no results
+   instead of the result table. Detect that so we can retry."
+  (and (string? html)
+       (not (re-find #"(?i)result-link|class=\"result\"|resultSnippet|result__snippet" html))))
+
+(defn- request [url opts]
+  "Request DuckDuckGo Lite with retry/backoff and rotating user agents.
+   DDG Lite is a free, scraped endpoint and can return a bot-detection
+   landing page when too many requests come from the same IP. We surface
+   that clearly instead of silently returning empty results."
+  (loop [attempt 1
+         delay-ms 500]
+    (let [user-agent (nth user-agents (mod (+ attempt (hash (:query opts "x")))
+                                           (count user-agents)))
+          resp       (request-once url opts user-agent)
+          html       (:body resp)
+          ok?        (and (<= 200 (:status resp) 299)
+                          (not (landing-page? html)))]
+      (if ok?
+        resp
+        (if (>= attempt 3)
+          resp
+          (do
+            (Thread/sleep delay-ms)
+            (recur (inc attempt) (* 2 delay-ms))))))))
 
 (defn- strip-bounce
   "Remove DuckDuckGo's `/l/?...` bounce wrapper if present."
@@ -55,33 +95,61 @@
       (guards/strip-html (subs html start-idx end) 1024)
       "")))
 
-(defn- parse-result-links
-  "Extract candidate result links from DDG Lite HTML.
-   Returns a vector of {:url :title} maps."
+(defn- row-text
+  "Return the visible text inside a <tr>...</tr> fragment, stripping
+   residual HTML tags and collapsing whitespace."
+  [row]
+  (-> row
+      (str/replace #"<script[^>]*>.*?</script>" "")
+      (str/replace #"<style[^>]*>.*?</style>" "")
+      (str/replace #"<[^>]+>" " ")
+      (str/replace #"&nbsp;" " ")
+      (str/trim)
+      (str/replace #"\s+" " ")))
+
+(defn- link-in-row
+  "Return [href title] for the first <a> in a row fragment, with the
+   DuckDuckGo bounce wrapper removed."
+  [row]
+  (when-let [[_ href] (re-find #"<a[^>]*href=\"([^\"]+)\"[^>]*>" row)]
+    (let [url (strip-bounce href)]
+      (when (and (seq url)
+                 (not (str/starts-with? url "#"))
+                 (not (str/starts-with? url "/"))
+                 (not (str/starts-with? url "javascript:"))
+                 (or (str/starts-with? url "http://")
+                     (str/starts-with? url "https://")))
+        [url (tag-text row "a" (+ (str/index-of row "<a") (count (re-find #"<a[^>]*>" row))))]))))
+
+(defn- parse-result-rows
+  "DDG Lite renders each result as three consecutive <tr> rows:
+   1) number + title link, 2) snippet, 3) URL. Group rows into triples
+   and extract title, snippet and URL from each triple."
   [html]
-  (let [link-re #"<a[^>]*href=\"([^\"]+)\"[^>]*>"]
-    (vec (for [[full href] (re-seq link-re html)
-               :let [url (strip-bounce href)]
-               :when (and (seq url)
-                          (not (str/starts-with? url "#"))
-                          (not (str/starts-with? url "/"))
-                          (not (str/starts-with? url "javascript:"))
-                          (or (str/starts-with? url "http://")
-                              (str/starts-with? url "https://")))]
-           {:url url
-            :title (tag-text html "a" (+ (str/index-of html full) (count full)))}))))
+  (let [rows (vec (for [[row] (re-seq #"(?is)<tr[^>]*>(.*?)</tr>" html)]
+                    row))
+        triples (partition 3 3 nil rows)]
+    (vec (for [[title-row snippet-row url-row] triples
+               :let [[url title] (link-in-row title-row)
+                     snippet-text (row-text snippet-row)
+                     url-text (row-text url-row)]
+               :when url]
+           {:url     url
+            :title   title
+            :snippet (if (seq snippet-text) snippet-text title)
+            :display-url url-text}))))
 
 (defn- parse-results
   "Parse DuckDuckGo Lite HTML into search result maps."
   [html]
-  (let [links (parse-result-links html)]
-    (mapv (fn [{:keys [title url]}]
+  (let [results (parse-result-rows html)]
+    (mapv (fn [{:keys [title url snippet]}]
             {:title   title
              :url     url
-             :snippet (if (> (count title) 240)
-                        (subs title 0 240)
-                        title)})
-          links)))
+             :snippet (if (> (count snippet) 480)
+                        (subs snippet 0 480)
+                        snippet)})
+          results)))
 
 (deftype DuckDuckGoLiteProvider [config]
   protocol/WebSearchProvider
