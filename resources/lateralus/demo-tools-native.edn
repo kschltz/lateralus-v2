@@ -24,7 +24,10 @@
                             :top-y    3
                             :last-n   5}
  :lateralus/file-tools     {:workspace-root "."}
- :lateralus/tool-registry  #ig/ref :lateralus/file-tools
+ ;; Native-image excludes Hickory; keep web tools at :none.
+ :lateralus/web-tools      {:provider :none}
+ :lateralus/tool-registry  [#ig/ref :lateralus/file-tools
+                            #ig/ref :lateralus/web-tools]
  :lateralus/tools-plugin   {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins        [#ig/ref :lateralus/memory-plugin
                             #ig/ref :lateralus/tools-plugin]
