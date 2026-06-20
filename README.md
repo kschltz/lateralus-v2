@@ -75,6 +75,21 @@ Lateralus v2 is built on three ideas:
 
 For details, see [`docs/architecture.md`](docs/architecture.md).
 
+## Web tool
+
+The agent now ships `web/search`, `web/fetch`, and `web/extract` tools. The
+default provider is `:none`, so **no API key, no paid service, and no network
+I/O** are required out of the box. `web/extract` still works on raw HTML in
+air-gapped mode. Live web access is opt-in via `:provider :mojeek`.
+
+The `:mojeek` provider parses Mojeek's public HTML result pages with
+`hickory`. It is JVM-only and excluded from the GraalVM native-image classpath;
+`resources/lateralus/native.edn` pins `:provider :none`.
+
+All three ops are guarded against SSRF (private/loopback/metadata IPs,
+`file://`, protocol-relative URLs), prompt-injection markers, recursive
+self-activation, and snippet exfiltration patterns. See [`docs/web.md`](docs/web.md).
+
 ## Memory backend
 
 The runtime Integrant config (`resources/lateralus/config.edn`) now wires a **Proximum** HNSW memory backend and a **LangChain4j** in-process ONNX embedder (`all-MiniLM-L6-v2`, 384 dimensions) by default. Session memory (recent + semantic recall) works out of the box in one-shot mode.
@@ -204,6 +219,7 @@ Notes and limitations:
 | [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
+| [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek` opt-in, guards, native-image story |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/runtime.clj`](src/kschltz/agent/runtime.clj) | Outer loop: ctx creation + chain call + state merge |
@@ -216,6 +232,12 @@ Notes and limitations:
 | [`src/kschltz/agent/loop.clj`](src/kschltz/agent/loop.clj) | Tool-calling loop interceptors |
 | [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
 | [`src/kschltz/agent/tools/filesystem.clj`](src/kschltz/agent/tools/filesystem.clj) | Read-only filesystem `Tool` implementations |
+| [`src/kschltz/agent/tools/web/protocol.clj`](src/kschltz/agent/tools/web/protocol.clj) | `WebProvider` protocol |
+| [`src/kschltz/agent/tools/web/schemas.clj`](src/kschltz/agent/tools/web/schemas.clj) | Web tool Malli schemas |
+| [`src/kschltz/agent/tools/web/guards.clj`](src/kschltz/agent/tools/web/guards.clj) | URL/query/snippet guard pipeline |
+| [`src/kschltz/agent/tools/web/none.clj`](src/kschltz/agent/tools/web/none.clj) | `:none` provider (air-gapped default) |
+| [`src/kschltz/agent/tools/web/mojeek.clj`](src/kschltz/agent/tools/web/mojeek.clj) | `:mojeek` live provider (JVM-only, opt-in) |
+| [`src/kschltz/agent/tools/web/web.clj`](src/kschltz/agent/tools/web/web.clj) | `web/search`, `web/fetch`, `web/extract` Tool implementations |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
 | [`src/kschltz/agent/llm/client.clj`](src/kschltz/agent/llm/client.clj) | `LlmClient` protocol + stub + HTTP wrapper |
@@ -250,6 +272,7 @@ Recently completed:
 - [008] Refactor KG-BM25 backend into focused namespaces
 - [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
 - [011] Promote tool-calling loop into the base plugin + filesystem tools example
+- [web] Revive web tool: `:none` default, `:mojeek` opt-in live provider, full guard pipeline, Integrant wiring, docs
 
 Deferred:
 - Async worker thread for the runtime
