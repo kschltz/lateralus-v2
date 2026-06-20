@@ -264,3 +264,31 @@
       (is (satisfies? tool/Tool (web/->WebSearchTool cfg)))
       (is (satisfies? tool/Tool (web/->WebFetchTool cfg)))
       (is (satisfies? tool/Tool (web/->WebExtractTool cfg))))))
+;; ---------------------------------------------------------------------------
+
+;; ---------------------------------------------------------------------------
+;; Production keyword-path regression
+;;
+;; web-registry must resolve a :provider KEYWORD (:none / :mojeek) into a
+;; WebProvider instance before the tool dispatches. The earlier shipped
+;; bug left :provider as a keyword, so protocol/-search was called on the
+;; keyword and every config-wired web op returned
+;; "No implementation of method: :-search ... for class clojure.lang.Keyword".
+;; ---------------------------------------------------------------------------
+
+(deftest web-registry-resolves-none-keyword-to-provider
+  (testing "web-registry with {:provider :none} dispatches through the provider, not the keyword"
+    (let [reg (web/web-registry {:provider :none})
+          out (json/parse-string
+                 (tool/-invoke (get reg "web/search") {:query "clojure"} nil)
+                 true)]
+      (is (= "none" (:provider out)))
+      (is (= "disabled" (:phase out)))
+      (is (= "web search disabled" (:error out))))))
+
+(deftest web-registry-rejects-unknown-provider-keyword
+  (testing "web-registry throws a typed ex-info for an unknown provider keyword"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Unknown web provider"
+         (web/web-registry {:provider :bogus})))))

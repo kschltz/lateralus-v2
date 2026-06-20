@@ -30,8 +30,26 @@
   (:require [cheshire.core :as json]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.web.guards :as guards]
+            [kschltz.agent.tools.web.none :as none]
             [kschltz.agent.tools.web.protocol :as protocol]
             [kschltz.agent.tools.web.schemas :as schemas]))
+
+;; `:mojeek` is JVM-only (it depends on hickory, which the native-image
+;; build excludes from the classpath). Load it lazily so this namespace
+;; compiles on both JVM and native; resolving `:provider :mojeek` on native
+;; raises a typed ex-info instead of ClassNotFoundException.
+(defonce ^:private mojeek-load-error
+  (try (require 'kschltz.agent.tools.web.mojeek) nil
+       (catch Throwable t t)))
+
+(defn- mojeek-provider
+  "Return the resolved `kschltz.agent.tools.web.mojeek/provider` factory,
+   or throw a clear ex-info if the namespace is unavailable (native-image)."
+  [config]
+  (if-let [f (resolve 'kschltz.agent.tools.web.mojeek/provider)]
+    (f config)
+    (throw (ex-info "web provider :mojeek is JVM-only and is not available — hickory is excluded from the native-image classpath"
+                    {:phase :provider :provider :mojeek}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -188,6 +206,31 @@
 ;; Registry factory
 ;; ---------------------------------------------------------------------------
 
+(defn- resolve-provider
+  "Turn the `:provider` entry of `config` into a `WebProvider` instance.
+   Accepts either a keyword (`:none` / `:mojeek` / `:searxng`) or an
+   already-resolved `WebProvider` record (the test seam passes records
+   directly). Returns `config` with `:provider` set to the instance and
+   `:provider-name` set to the backend keyword for JSON error envelopes."
+  [config]
+  (let [p (:provider config)]
+    (cond
+      (satisfies? protocol/WebProvider p)
+      config
+
+      (= :none p)
+      (assoc config :provider (none/provider config) :provider-name :none)
+
+      (= :mojeek p)
+      (assoc config :provider (mojeek-provider config) :provider-name :mojeek)
+
+      :else
+      (throw (ex-info (str "Unknown web provider: " (pr-str p))
+                      {:phase :provider :provider p})))))
+
+
+;; ---------------------------------------------------------------------------
+
 (defn web-registry
   "Build the 3-tool registry for the web tool suite.
 
@@ -208,6 +251,7 @@
       \"web/fetch\"   WebFetchTool
       \"web/extract\" WebExtractTool}"
   [config]
-  {"web/search"  (->WebSearchTool config)
-   "web/fetch"   (->WebFetchTool config)
-   "web/extract" (->WebExtractTool config)})
+  (let [cfg (resolve-provider config)]
+    {"web/search"  (->WebSearchTool cfg)
+     "web/fetch"   (->WebFetchTool cfg)
+     "web/extract" (->WebExtractTool cfg)}))
