@@ -37,7 +37,7 @@ that chain:
 | memory recall / retrieval injection | `memory-recall` interceptor (enter) — the RAG slot |
 | `llm/call` + retry/trim logic | `llm-call` interceptor delegating to `LlmClient` protocol |
 | tool-call parse/validate/execute inner loop | `dispatch` + per-tool interceptors via re-enqueue |
-| `add-repl-eval-tool!`, `add-web-search-tool!`, … (8 ad-hoc installers) | plugins = interceptor bundles (see below) |
+| `add-repl-eval-tool!`, … (ad-hoc installers) | plugins = interceptor bundles (see below) |
 | `store-exchange` persistence | `store-exchange` interceptor (leave) |
 | history capping + agent-state delta | `update-history` interceptor (leave) |
 | `:on-response`/`:on-error`/`:on-thought` callbacks | `notify` interceptor (leave + error) |
@@ -114,7 +114,6 @@ protocol I/O boundaries, not for the context map itself.
 Per project convention, anything that touches the network stays behind a
 protocol with Malli-instrumented implementation fns:
 - `LlmClient` (wraps today's `llm/call`)
-- `WebSearch` (wraps `tools/web.clj` internals)
 - `Embedder` (wraps the LangChain4j embedding calls used by recall)
 The interceptors hold only protocol references taken from `:agent/state`,
 so every stage is testable with in-memory fakes.
@@ -124,11 +123,11 @@ so every stage is testable with in-memory fakes.
 The unification the previous draft missed. A plugin is data:
 
 ```clojure
-{:plugin/name  :web-search
+{:plugin/name  :example
  :interceptors {:enrich   []                    ; e.g. RAG-style pre-LLM work
-                :tools    [web-search-tool-ix]  ; tool interceptors (see §4)
+                :tools    [example-tool-ix]     ; tool interceptors (see §4)
                 :persist  []                    ; post-response leave work
-                :observe  [search-metrics-ix]}} ; tracing/metrics
+                :observe  [example-metrics-ix]}} ; tracing/metrics
 ```
 
 Named slots in the default chain (in enter order):
@@ -161,10 +160,10 @@ tool-call to it. Tool metadata (OpenAI function def, Malli arg schema)
 lives on the interceptor map:
 
 ```clojure
-{:name        :tool/web-search
+{:name        :tool/example
  :tool/def    {...openai function def...}
- :tool/schema [:map [:query :string]]
- :enter       (fn [ctx] (run-search ctx))}   ; reads :tool/current-call, writes :tool/results
+ :tool/schema [:map [:input :string]]
+ :enter       (fn [ctx] (run-example ctx))}   ; reads :tool/current-call, writes :tool/results
 ```
 
 `dispatch` is the loop brain, replacing `loop/recur` with re-enqueueing:
@@ -254,7 +253,6 @@ Three active kanban cards touch this chain directly:
 | Path | Change |
 |---|---|
 | `src/kschltz/agent/llm.clj` | Add `LlmClient` protocol; default impl wraps existing `provider-dispatch`-based `llm/call`; impl fns Malli-instrumented |
-| `src/kschltz/agent/tools/web.clj` | Already protocol-shaped (`web-search-client`, `default-http-client`) — expose as `WebSearch` protocol, instrument |
 | `src/kschltz/agent/memory/embedding.clj` | Wrap LangChain4j calls in `Embedder` protocol, instrument |
 | `src/kschltz/agent/interceptors.clj` | NEW — interceptor defs delegating to existing helpers: `compose-context` → `context/compose-context` + `sanitize-context-messages`; `llm-call` → `LlmClient`; `parse-response` → `loop/parse-tool-calls-native` (make public or move); `execute-tools` → `loop/execute-tool-calls` + `format-tool-results-native` + `truncate-tool-result`; `store-exchange` → `loop/store-exchange`; `update-history` → `loop/history-entries-for-exchange` + `context/cap-history`; `deliver-responses` → `loop/deliver-response`; `notify` → `loop/fire-on-thought` / `fire-memory-event`; `dispatch`, `api-error-retry`, `tool-error-retry`, `wrap-up`, `error-boundary` |
 | `src/kschltz/agent/loop.clj` | Only visibility changes (`defn-` → `defn` for reused helpers); behavior untouched |
@@ -263,7 +261,7 @@ Three active kanban cards touch this chain directly:
 **Acceptance criteria**
 - [ ] Every interceptor in the §3 inventory exists as a var satisfying the `Interceptor` schema
 - [ ] Each interceptor unit-tested with a synthetic ctx and fake protocols — no network, no Datalevin, no real embedder anywhere in these tests
-- [ ] `LlmClient`/`WebSearch`/`Embedder` impl fns reject schema-invalid input/output when instrumented (one negative test each)
+- [ ] `LlmClient`/`Embedder` impl fns reject schema-invalid input/output when instrumented (one negative test each)
 - [ ] `llm-call` interceptor converts provider exceptions into `:llm/api-error` (never throws); `error-boundary` is the only stage that handles raw throws
 - [ ] `dispatch` covered for all four branches: pending tool calls, depth exhausted, blank response, normal finalize
 - [ ] Existing test suite still green — `loop.clj` public behavior byte-identical (no call sites changed)

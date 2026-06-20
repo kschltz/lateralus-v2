@@ -67,12 +67,7 @@ Evidence-backed fixes from the 2026 architecture audit. Each item cites the flaw
 | fix-021 | leader | Serialize parallel tool execution | `src/kschltz/agent/core.clj` (`execute-tool-calls`) | fix-012 |
 | fix-022 | follower1 | Remove dead `proximum` dep | `deps.edn` | fix-002 |
 
-**Evidence:** `WebSearch` protocol exists but `http-get` is inline; `pmap` in tool runner; proximum unused in `src/`.
-
-**Acceptance fix-020:**
-- `defrecord` implements `WebSearch`; `web-search` uses injected client (default record)
-- Malli on query in, `SearchResponse` out (already partial)
-- `web_test.clj` passes
+**Evidence:** `http-get` is inline; `pmap` in tool runner; proximum unused in `src/`.
 
 **Acceptance fix-021:**
 - Replace `pmap` with sequential `mapv` OR document + gate parallel behind flag (default sequential)

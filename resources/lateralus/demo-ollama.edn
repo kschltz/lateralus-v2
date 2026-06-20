@@ -2,9 +2,9 @@
 ;; Uses HTTP LLM + noop embedder + in-memory KG-BM25 memory.
 {:lateralus/llm-client     {:impl :http
                             :base-url "http://localhost:11434/v1"
-                            :model    "glm-5.2:cloud"}
+                            :model    "gemma4:31b-mlx"}
  :lateralus/llm-config     {:base-url "http://localhost:11434/v1"
-                            :model    "glm-5.2:cloud"}
+                            :model    "gemma4:31b-mlx"}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :kg-bm25
                             :store {:backend :memory}}
@@ -15,11 +15,9 @@
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
- :lateralus/web-search-tools     {:provider :ddg-lite}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
-                                  #ig/ref :lateralus/clojure-tools
-                                  #ig/ref :lateralus/web-search-tools]
+                                  #ig/ref :lateralus/clojure-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]

@@ -84,28 +84,6 @@ Lateralus v2 is built on three ideas:
 
 For details, see [`docs/architecture.md`](docs/architecture.md).
 
-## Web search tool
-
-Lateralus v2 ships with a built-in `web_search` tool that lets the agent search the public web.
-
-- **Default provider:** DuckDuckGo Lite — no API key, no JavaScript.
-- **Alternative provider:** SearXNG — self-hosted, open-source metasearch engine (set `:base-url` to your instance).
-- **On-demand page fetch:** the tool can optionally fetch and strip result pages to plain text.
-- **Agentic defenses:** query length caps, injection-marker filtering, URL allow/block-lists, private/metadata endpoint blocking, HTML stripping, exfiltration-pattern detection, recursive self-activation detection, and an opt-in policy model that classifies snippets via the configured LLM.
-- Every guard is individually toggle-able from config.
-
-Enable in any config by adding `:lateralus/web-search-tools` to `:lateralus/tool-registry`:
-
-```clojure
-{:lateralus/web-search-tools {:provider :ddg-lite}
- :lateralus/tool-registry [#ig/ref :lateralus/file-tools
-                           #ig/ref :lateralus/self-awareness-tools
-                           #ig/ref :lateralus/web-search-tools]
- :lateralus/tools-plugin {:registry #ig/ref :lateralus/tool-registry}}
-```
-
-See `resources/lateralus/config.edn` and other example configs for live settings. For implementation details, see [`docs/web-search.md`](docs/web-search.md).
-
 ## Memory backend
 
 The runtime Integrant config (`resources/lateralus/config.edn`) now wires a **Proximum** HNSW memory backend and a **LangChain4j** in-process ONNX embedder (`all-MiniLM-L6-v2`, 384 dimensions) by default. Session memory (recent + semantic recall) works out of the box in one-shot mode.
@@ -235,7 +213,6 @@ Notes and limitations:
 | [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
-| [`docs/web-search.md`](docs/web-search.md) | Web search tool design, providers, and security guards |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |
@@ -249,12 +226,6 @@ Notes and limitations:
 | [`src/kschltz/agent/loop.clj`](src/kschltz/agent/loop.clj) | Tool-calling loop interceptors |
 | [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
 | [`src/kschltz/agent/tools/filesystem.clj`](src/kschltz/agent/tools/filesystem.clj) | Read-only filesystem `Tool` implementations |
-| [`src/kschltz/agent/tools/web_search.clj`](src/kschltz/agent/tools/web_search.clj) | `web_search` tool and registry helper |
-| [`src/kschltz/agent/tools/web_search/protocol.clj`](src/kschltz/agent/tools/web_search/protocol.clj) | `WebSearchProvider` protocol |
-| [`src/kschltz/agent/tools/web_search/ddg_lite.clj`](src/kschltz/agent/tools/web_search/ddg_lite.clj) | DuckDuckGo Lite provider |
-| [`src/kschltz/agent/tools/web_search/searxng.clj`](src/kschltz/agent/tools/web_search/searxng.clj) | SearXNG provider |
-| [`src/kschltz/agent/tools/web_search/guards.clj`](src/kschltz/agent/tools/web_search/guards.clj) | Query, URL, HTML, and content guards |
-| [`src/kschltz/agent/tools/web_search/policy.clj`](src/kschltz/agent/tools/web_search/policy.clj) | Opt-in LLM-based snippet policy model |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
 | [`src/kschltz/agent/llm/client.clj`](src/kschltz/agent/llm/client.clj) | `LlmClient` protocol + stub + HTTP wrapper |

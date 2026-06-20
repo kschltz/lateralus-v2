@@ -18,7 +18,7 @@ See [`facts.md`](./facts.md) for the 17 accepted facts. Key decisions:
 - **Fresh sessions** — no v1 migration; the v2 memory contract is the `MemoryBackend` protocol, with a noop impl for MVP. Schema sketch in `docs/memory-v2.md` (Step 1) describes a future real store; no Datalevin dependency in MVP.
 - **Clean-slate CLI** — no v1 flag compat
 - **No MVP tools** — empty default registry; dispatch tested via dev stub only
-- **Out of MVP** — web-search, remember, file editing, repl-eval, portal, nREPL, v1 uberjar, **Datalevin**
+- **Out of MVP** — remember, file editing, repl-eval, portal, nREPL, v1 uberjar, **Datalevin**
 - **Out of scope entirely** — paid search, repl sandbox, multi-agent, pi/Cursor SDK, custom TUI, cloud hosting
 
 ## Execution Plan

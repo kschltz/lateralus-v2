@@ -11,7 +11,7 @@
 
 ## The One Rule
 
-All agent behavior flows through an **interceptor chain** on an **immutable context map**. State changes stage in `:agent/state-delta`; only the outer runtime loop merges into the agent ref. External/network I/O uses **protocols + Malli instrumentation**. Extension is **Integrant-managed plugins only** — no `add-*-tool!` functions. New capabilities ship with attack guards where the model consumes untrusted external content (e.g., `web_search`).
+All agent behavior flows through an **interceptor chain** on an **immutable context map**. State changes stage in `:agent/state-delta`; only the outer runtime loop merges into the agent ref. External/network I/O uses **protocols + Malli instrumentation**. Extension is **Integrant-managed plugins only** — no `add-*-tool!` functions. New capabilities ship with attack guards where the model consumes untrusted external content.
 
 ## Architecture (locked)
 

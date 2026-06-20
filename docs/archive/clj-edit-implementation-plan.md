@@ -272,13 +272,12 @@ Similar zipper navigation pattern. `insert-form` uses `z/insert-right`, `remove-
 ### 5. Agent Wiring (`core.clj`)
 
 ```clojure
-;; In default-agent-tools — add alongside repl, web, etc.
+;; In default-agent-tools — add alongside repl, etc.
 (defn- default-agent-tools
   [memory-store session-id memory-backend]
   (vec (remove nil?
                [(repl/repl-eval-tool)
                 (rewrite/clj-edit-tool)          ;; ← NEW
-                (web/web-search-tool)
                 (portal/visualize-tool)
                 (when (and memory-store session-id)
                   (remember/remember-tool ...))])))
@@ -296,7 +295,7 @@ Similar zipper navigation pattern. `insert-form` uses `z/insert-right`, `remove-
 ### 6. CLI Flag
 
 ```clojure
-;; In parse-args (cli.clj), add alongside --visualize, --web-search:
+;; In parse-args (cli.clj), add alongside --visualize:
 "--clj-edit"  (recur next-rem (assoc opts :clj-edit? true))
 
 ;; In run-agent, conditionally add:

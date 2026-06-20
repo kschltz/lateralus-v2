@@ -74,7 +74,7 @@ Facts are injected into the LLM prompt as a system message:
 
 Facts are **not** truncated by `LATERALUS_MEMORY_MAX_CHARS`. They are excluded from normal chat-role messages in context assembly.
 
-Registered by default in `make-agent` when memory is enabled (along with `repl-eval` and `web-search`).
+Registered by default in `make-agent` when memory is enabled (along with `repl-eval`).
 
 ## Embedding Configuration via CLI
 
