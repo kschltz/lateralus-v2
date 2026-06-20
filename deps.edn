@@ -6,11 +6,17 @@
         hato/hato {:mvn/version "1.0.0"}
         cheshire/cheshire {:mvn/version "6.2.0"}
         rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
-        ;; Hickory HTML parser, used by the `:mojeek` live web provider
-        ;; (Step 3 of the keyless web tool revival). JVM-only — kept out
+        ;; Hickory HTML parser, used by the `:mojeek` AND `:ddg` live web
+        ;; providers (both parse result-page HTML). JVM-only — kept out
         ;; of the `:native` `:replace-deps` below so GraalVM builds stay
         ;; air-gapped under the `:none` default.
         org.clj-commons/hickory {:mvn/version "0.7.7"}
+        ;; impersonator (BouncyCastle-bctls + forked OkHttp) spoofs a browser
+        ;; TLS/JA3/JA4 + HTTP/2 fingerprint so DuckDuckGo's HTML endpoint
+        ;; returns real results instead of a degraded/CAPTCHA page. Used by
+        ;; the `:ddg` provider. JVM-only — NOT in `:native :replace-deps`
+        ;; (native builds exclude it like hickory/proximum).
+        com.github.zhkl0228/impersonator-okhttp {:mvn/version "1.0.12"}
         ;; Proximum is optional: it is only loaded when
         ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
         ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.

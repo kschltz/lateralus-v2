@@ -80,12 +80,15 @@
    `false` because it requires an LLM snippet classifier that is not
    shipped by default.
 
-   `:provider` is one of `:none | :mojeek | :searxng`. `:http-fn` is the
+   `:provider` is one of `:none | :mojeek | :ddg | :searxng`. `:http-fn` is the
    test seam — providers call `(http-fn req opts)` instead of calling
    `hato.client/request` directly so every live path is unit-testable
-   offline."
+   offline. `:ddg` reaches DuckDuckGo via impersonator (browser TLS/HTTP2
+   fingerprint); JVM-only, excluded from native-image like `:mojeek`.
+   `:impersonate` selects the ImpersonatorFactory preset (default
+   `:android`, the only preset verified to handshake against DDG)."
   [:map
-   [:provider  [:enum :none :mojeek :searxng]]
+   [:provider  [:enum :none :mojeek :ddg :searxng]]
    [:http-fn {:optional true} :any]
    [:max-query-length {:default 400 :optional true} :int]
    [:max-result-count {:default 20 :optional true} :int]
@@ -94,6 +97,7 @@
    [:timeout-ms       {:default 15000 :optional true} :int]
    [:user-agent       {:optional true} :string]
    [:base-url         {:optional true} :string]
+   [:impersonate      {:optional true} [:enum :android :macChrome :macSafari :macFirefox :ios]]
    [:block-private-ips?         {:default true :optional true} :boolean]
    [:block-loopback?            {:default true :optional true} :boolean]
    [:block-metadata-endpoints?  {:default true :optional true} :boolean]

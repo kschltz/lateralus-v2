@@ -42,6 +42,14 @@
   (try (require 'kschltz.agent.tools.web.mojeek) nil
        (catch Throwable t t)))
 
+;; `:ddg` is also JVM-only — it depends on impersonator-okhttp (browser
+;; TLS/HTTP2 fingerprinting via BouncyCastle-bctls) plus hickory. Same
+;; lazy-load guard as :mojeek; resolving `:provider :ddg` on native raises a
+;; typed ex-info.
+(defonce ^:private ddg-load-error
+  (try (require 'kschltz.agent.tools.web.ddg) nil
+       (catch Throwable t t)))
+
 (defn- mojeek-provider
   "Return the resolved `kschltz.agent.tools.web.mojeek/provider` factory,
    or throw a clear ex-info if the namespace is unavailable (native-image)."
@@ -50,6 +58,16 @@
     (f config)
     (throw (ex-info "web provider :mojeek is JVM-only and is not available — hickory is excluded from the native-image classpath"
                     {:phase :provider :provider :mojeek}))))
+
+(defn- ddg-provider
+  "Return the resolved `kschltz.agent.tools.web.ddg/provider` factory,
+   or throw a clear ex-info if the namespace is unavailable (native-image
+   excludes impersonator + hickory)."
+  [config]
+  (if-let [f (resolve 'kschltz.agent.tools.web.ddg/provider)]
+    (f config)
+    (throw (ex-info "web provider :ddg is JVM-only and is not available — impersonator/hickory are excluded from the native-image classpath"
+                    {:phase :provider :provider :ddg}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -223,6 +241,9 @@
 
       (= :mojeek p)
       (assoc config :provider (mojeek-provider config) :provider-name :mojeek)
+
+      (= :ddg p)
+      (assoc config :provider (ddg-provider config) :provider-name :ddg)
 
       :else
       (throw (ex-info (str "Unknown web provider: " (pr-str p))
