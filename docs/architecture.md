@@ -27,7 +27,10 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/memory-backend ──▶ MemoryBackend protocol (noop / proximum / kg-bm25)│
 │  :lateralus/memory-plugin ──▶  memory recall + persist slots    │
 │  :lateralus/file-tools       ──▶  convenience filesystem tool registry│
-│  :lateralus/tool-registry     ──▶  map of tool name -> Tool impl      │
+│  :lateralus/self-awareness-tools ──▶  self/status tool registry      │
+│  :lateralus/clojure-tools    ──▶  clojure structured-edit tool registry│
+│  :lateralus/web-tools        ──▶  web `Tool` registry (web/search, web/fetch, web/extract)│
+│  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
 │  :lateralus/plugins       ──▶  assembled plugin maps (base plugin auto-prepended) │
 │  :lateralus/agent         ──▶  agent-map + exchange-chain + pre-wired deps │
@@ -124,11 +127,29 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
-- **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
-- **New embedder:** implement `kschltz.agent.memory.protocol/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
+- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure tools (`:lateralus/clojure-tools`), and web tools (`:lateralus/web-tools` with providers `:none` and `:mojeek`).
+- **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25-backend`).
+- **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
 - **New chain stage:** add an interceptor to an existing plugin slot or contribute a full `:plugin/chain`.
 - **New tool:** implement `kschltz.agent.tool/Tool`, provide a registry helper, add an Integrant key in `kschltz.agent.system`, and reference it from `:lateralus/tool-registry`.
+
+## Web tools
+
+`kschltz.agent.tools.web` provides three network-capable `Tool`s:
+
+- `web/search`
+- `web/fetch`
+- `web/extract`
+
+They are exposed to the LLM through `:lateralus/tool-registry`, which is now a
+vector of registry maps merged by `kschltz.agent.tools.web.web/merge-tool-registries`.
+
+The default provider is `:none` (air-gapped). Live search is opt-in via `:provider :mojeek`,
+which parses Mojeek's public HTML result pages with `hickory`. `:mojeek` is
+JVM-only and excluded from the GraalVM native-image classpath; `resources/lateralus/native.edn`
+pins `:provider :none`. See [`docs/web.md`](docs/web.md) for configuration and
+security details.
 
 ## KG-BM25 memory backend
 
@@ -184,7 +205,7 @@ Required keys: `:base-url`, `:model`, `:dimensions`. Optional: `:api-key`, `:con
 
 ## Config validation
 
-`kschltz.agent.system` registers `defmethod ig/assert-key` for the three externally-configurable `:lateralus/*` keys (`:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`). Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
+`kschltz.agent.system` registers `defmethod ig/assert-key` for the externally-configurable `:lateralus/*` keys: `:lateralus/llm-client`, `:lateralus/embedder`, `:lateralus/memory-backend`, and `:lateralus/web-tools`. Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
 
 For example:
 
@@ -221,12 +242,20 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/interceptors.clj` | core interceptor stages |
 | `src/kschltz/agent/interceptors/schema.clj` | Malli schemas for `Interceptor` and open `Ctx` |
 | `src/kschltz/agent/plugin.clj` | plugin assembly (`assemble-chain`, `default-slot-order`, `Plugin` schema) |
+| `src/kschltz/agent/tool.clj` | `Tool` protocol and registry helpers |
 | `src/kschltz/agent/plugins/base.clj` | default base plugin with core chain slots |
 | `src/kschltz/agent/plugins/memory.clj` | memory plugin (`:enrich` recall, `:persist` store) |
 | `src/kschltz/agent/plugins/tools.clj` | tool plugin: seeds `:agent/tool-registry` |
 | `src/kschltz/agent/loop.clj` | ReAct tool-calling loop interceptors |
-| `src/kschltz/agent/tool.clj` | `Tool` protocol and registry helpers |
 | `src/kschltz/agent/tools/filesystem.clj` | read-only filesystem `Tool` implementations |
+| `src/kschltz/agent/tools/self.clj` | self-awareness `Tool` (`self/status`) |
+| `src/kschltz/agent/tools/clojure.clj` | clojure structured-editing `Tool` implementations |
+| `src/kschltz/agent/tools/web/protocol.clj` | `WebProvider` protocol |
+| `src/kschltz/agent/tools/web/schemas.clj` | Web tool Malli schemas |
+| `src/kschltz/agent/tools/web/guards.clj` | URL/query/snippet guard pipeline |
+| `src/kschltz/agent/tools/web/none.clj` | `:none` provider (air-gapped default) |
+| `src/kschltz/agent/tools/web/mojeek.clj` | `:mojeek` live provider (JVM-only, opt-in) |
+| `src/kschltz/agent/tools/web/web.clj` | `web/search`, `web/fetch`, `web/extract` Tool implementations and registry factory |
 | `src/kschltz/agent/llm/client.clj` | `LlmClient` protocol + stub + HTTP wrapper |
 | `src/kschltz/agent/llm/http.clj` | real OpenAI-shaped HTTP client |
 | `src/kschltz/agent/llm/schemas.clj` | Malli schemas for LLM request/response shapes |
@@ -241,8 +270,8 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/memory/knowledge_graph.clj` | entity knowledge graph |
 | `src/kschltz/agent/memory/store/file.clj` | file-backed session store |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` |
-| `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file-tools) |
-| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file-tools) |
+| `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file/self/clojure/web :none tools) |
+| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file/self/clojure/web :none tools) |
 
 ## End-to-end memory tests
 

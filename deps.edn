@@ -6,6 +6,11 @@
         hato/hato {:mvn/version "1.0.0"}
         cheshire/cheshire {:mvn/version "6.2.0"}
         rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
+        ;; Hickory HTML parser, used by the `:mojeek` live web provider
+        ;; (Step 3 of the keyless web tool revival). JVM-only — kept out
+        ;; of the `:native` `:replace-deps` below so GraalVM builds stay
+        ;; air-gapped under the `:none` default.
+        org.clj-commons/hickory {:mvn/version "0.7.7"}
         ;; Proximum is optional: it is only loaded when
         ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
         ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.
