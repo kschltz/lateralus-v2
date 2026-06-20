@@ -41,6 +41,8 @@
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
             [kschltz.agent.tools.clojure :as tools.clojure]
+            [kschltz.agent.tools.web.web :as tools.web]
+            [kschltz.agent.tools.web.schemas :as web.schemas]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -55,6 +57,7 @@
 (try
   (require 'kschltz.agent.memory.langchain4j-embedding)
   (require 'kschltz.agent.memory.proximum-backend)
+  (require 'kschltz.agent.tools.web.mojeek)
   (catch Throwable _))
 
 ;; ---- Component definitions ----
@@ -132,6 +135,13 @@
 (defmethod ig/assert-key :lateralus/embedder [_ config]
   (assert-malli! :lateralus/embedder EmbedderConfig config))
 
+(def ^:private WebToolsConfig
+  "Malli schema for :lateralus/web-tools."
+  web.schemas/WebConfig)
+
+(defmethod ig/assert-key :lateralus/web-tools [_ config]
+  (assert-malli! :lateralus/web-tools WebToolsConfig config))
+
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
 
@@ -155,6 +165,12 @@
     :http         (http-embedding/http-embedder opts)
     :langchain4j  (let [embedder (resolve 'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder)]
                     (embedder))))
+
+(defmethod ig/init-key :lateralus/web-tools [_ opts]
+  "Build the web tool registry from the web-tools config. The default
+   provider is :none, so the registry is always present but performs no
+   network I/O unless the operator opts into :mojeek."
+  (tools.web/web-registry opts))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl _embedder] :as opts}]
   ;; In-memory default: :noop. :proximum is the runtime default and
@@ -194,10 +210,12 @@
 (defmethod ig/init-key :lateralus/tool-registry [_ tools]
   "Integrant component that holds the map of tool name -> Tool.
    Accepts either a single registry map or a vector of registry maps
-   to merge. The merged map is consumed by `:lateralus/tools-plugin`,
-   which seeds it on the context at chain execution time."
-  (let [registries (if (sequential? tools) tools [tools])]
-    (apply merge registries)))
+   to merge left-to-right. The merged map is consumed by
+   `:lateralus/tools-plugin`, which seeds it on the context at chain
+   execution time."
+  (if (map? tools)
+    tools
+    (apply merge {} tools)))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
@@ -273,8 +291,10 @@
                               :last-n   5}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
+   :lateralus/web-tools            {:provider :none}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
-                                    (ig/ref :lateralus/self-awareness-tools)]
+                                    (ig/ref :lateralus/self-awareness-tools)
+                                    (ig/ref :lateralus/web-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)]

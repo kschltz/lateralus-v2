@@ -5,6 +5,7 @@
 - **Active goal:** `goals/lateralus-v2-rewrite/goal.md` → `facts.md` → `plan.md`
 - **Architecture overview:** `docs/architecture.md`
 - **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
+- **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek` opt-in, `:lateralus/web-tools` Integrant key)
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **v1 reference (archive):** sibling repo `../lateralus/` — port seed code only, do not copy `core.clj` or `loop.clj`
 - **Historical goals/plans (archived):** `goals/lateralus-file-editing/`, `docs/archive/arch-remediation-plan.md`, `docs/archive/clj-edit-implementation-plan.md`, `docs/archive/memory-system-mvi.md`
@@ -40,6 +41,8 @@ clojure -T:build uber                           # JVM distributable
 rg 'add-.*-tool!' src/                          # no matches
 rg 'http/completion' src/                       # only in llm/http.clj
 rg 'agent\.loop' src/                            # no loop.clj dependency in interceptors
+rg 'web_search|web-search|ddg|duckduckgo' -- 'README.md' 'docs/' 'AGENT_INSTRUCTIONS.md' 'src/' 'resources/' 'test/'  # only archive references
+rg '\(first\s+url-check\)' src/ test/             # prior URL-guard bug must stay fixed
 ```
 
 When editing `build.clj`, `deps.edn`, or `resources/lateralus/config.edn`, run
@@ -56,4 +59,4 @@ Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without
 
 ## Doc freshness policy
 
-When a Kanban card changes architecture (new Integrant keys, plugin slots, protocol surface, or default config), update `docs/architecture.md` and `README.md` status before advancing the card.
+When a Kanban card changes architecture (new Integrant keys, plugin slots, protocol surface, default config, or tool surface), update `docs/architecture.md`, `README.md`, and the relevant tool doc (`docs/web.md` for web tools, `docs/memory-v2.md` for memory) before advancing the card.

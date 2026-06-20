@@ -15,9 +15,12 @@
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
+ ;; :mojeek is opt-in; default is :none so no network traffic unless requested.
+ :lateralus/web-tools      {:provider :none}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
-                                  #ig/ref :lateralus/clojure-tools]
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
