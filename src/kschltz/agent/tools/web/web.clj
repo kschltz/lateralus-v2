@@ -28,11 +28,21 @@
    strings an LLM will use in a function-call request. The same
    strings are returned by `(-name _)` on each tool."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.web.guards :as guards]
             [kschltz.agent.tools.web.none :as none]
             [kschltz.agent.tools.web.protocol :as protocol]
-            [kschltz.agent.tools.web.schemas :as schemas]))
+            [kschltz.agent.tools.web.schemas :as schemas]
+            [kschltz.agent.tools.web.ssrf :as ssrf]))
+
+;; Phase 3 duplicate-query circuit breaker: a per-process atom holding the
+;; last normalized search query. If the model calls web/search with the
+;; exact same query twice in a row, the second call short-circuits to a
+;; :duplicate-query envelope instead of re-hitting the network — preventing
+;; agent loops. lateralus-v2 is single-user/single-agent MVP, so one
+;; web/search tool per process is the norm.
+(def ^:private last-search-query (atom nil))
 
 ;; `:mojeek` is JVM-only (it depends on hickory, which the native-image
 ;; build excludes from the classpath). Load it lazily so this namespace
@@ -141,17 +151,27 @@
       (try
         (if (:error query-check)
           (guard-error-envelope (:error query-check) :query-guard provider-name)
-          (let [cleaned   (:ok query-check)
-                result-count (min (:max-result-count cfg)
-                                  (max 1 (or (:result-count args) 5)))
-                opts       (assoc cfg :result-count result-count)
-                raw        (protocol/-search provider cleaned opts)
-                guarded    (guards/guard-results (:results raw) cfg)]
-            (json/generate-string
-             {:provider (or (:provider raw) provider-name)
-              :query    cleaned
-              :results  guarded}
-             {:pretty true})))
+          (let [cleaned    (:ok query-check)
+                normalized (str/lower-case (str/trim cleaned))]
+            ;; Phase 3 duplicate-query circuit breaker
+            (if (and (:block-duplicate-query? cfg) (= normalized @last-search-query))
+              (guard-error-envelope "duplicate query (circuit breaker engaged) — refine the query or use web/fetch"
+                                    :duplicate-query provider-name)
+              (do
+                (reset! last-search-query normalized)
+                (let [result-count (min (:max-result-count cfg)
+                                        (max 1 (or (:result-count args) 5)))
+                      opts       (assoc cfg :result-count result-count)
+                      raw        (protocol/-search provider cleaned opts)
+                      guarded    (guards/guard-results (:results raw) cfg)]
+                  (json/generate-string
+                   (cond-> {:provider (or (:provider raw) provider-name)
+                            :query    cleaned
+                            :results  guarded}
+                     ;; Phase 3 snippet-truncation hint: nudge the model
+                     ;; toward web/fetch for full content.
+                     (seq guarded) (assoc :note (ssrf/snippet-truncation-hint)))
+                   {:pretty true}))))))
         (catch Throwable t
           (envelope t nil provider-name))))))
 
