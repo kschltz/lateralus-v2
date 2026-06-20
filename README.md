@@ -202,8 +202,9 @@ echo "one-shot via stdin" | ./target/lateralus-v2-native --config resources/late
 What the build does:
 - Creates `target/lateralus-v2-native.jar` from a filtered classpath that omits
   `src/kschltz/agent/memory/proximum_backend.clj`,
-  `src/kschltz/agent/memory/langchain4j_embedding.clj`, and
-  `src/kschltz/agent/tools/web/mojeek.clj`.
+  `src/kschltz/agent/memory/langchain4j_embedding.clj`,
+  `src/kschltz/agent/tools/web/mojeek.clj`, and
+  `src/kschltz/agent/tools/web/ddg.clj`.
 - Compiles Clojure with `-Dclojure.compiler.direct-linking=true` and
   `*warn-on-reflection*` enabled.
 - Invokes `native-image` with `--features=clj_easy.graal_build_time.InitClojureClasses`
