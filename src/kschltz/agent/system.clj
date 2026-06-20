@@ -41,8 +41,6 @@
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
             [kschltz.agent.tools.clojure :as tools.clojure]
-            [kschltz.agent.tools.web-search :as tools.web-search]
-            [kschltz.agent.tools.web-search.guards :as web-search.guards]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -128,28 +126,6 @@
               [:rrf-k {:optional true} :int]
               [:extract-fn {:optional true} fn?]]]])
 
-(def ^:private WebSearchConfig
-  "Malli schema for the top-level :lateralus/web-search-tools key.
-   Guard settings are validated separately so the schema stays readable."
-  [:map
-   [:provider {:optional true} [:enum :ddg-lite :searxng]]
-   [:enabled? {:optional true} :boolean]
-   [:base-url {:optional true} [:maybe :string]]
-   [:policy-model? {:optional true} :boolean]
-   [:language {:optional true} :string]
-   [:safesearch {:optional true} :int]
-   [:categories {:optional true} [:vector :string]]])
-
-(defmethod ig/assert-key :lateralus/web-search-tools [_ config]
-  (assert-malli! :lateralus/web-search-tools WebSearchConfig config)
-  ;; Guard overrides are flat in the same map; validate them explicitly.
-  (when-let [problems (m/explain web-search.guards/GuardConfig config)]
-    (throw (ex-info "Integrant config failed Malli guard validation for :lateralus/web-search-tools"
-                    {:key :lateralus/web-search-tools
-                     :schema web-search.guards/GuardConfig
-                     :problems (:errors problems)
-                     :config config}))))
-
 (defmethod ig/assert-key :lateralus/llm-client [_ config]
   (assert-malli! :lateralus/llm-client LlmClientConfig config))
 
@@ -158,9 +134,6 @@
 
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
-
-(defmethod ig/assert-key :lateralus/web-search-tools [_ config]
-  (assert-malli! :lateralus/web-search-tools WebSearchConfig config))
 
 ;; ---- Component definitions ----
 
@@ -245,11 +218,6 @@
    clojure/insert-form, clojure/edit-def, clojure/format-file)."
   (tools.clojure/clojure-registry opts))
 
-(defmethod ig/init-key :lateralus/web-search-tools [_ opts]
-  "Returns the web_search tool registry. `opts` selects the provider
-   and overrides guard defaults."
-  (tools.web-search/web-search-registry opts))
-
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
   (plugins.tools/tools-plugin registry))
 
@@ -305,10 +273,8 @@
                               :last-n   5}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
-   :lateralus/web-search-tools     {:provider :ddg-lite}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
-                                    (ig/ref :lateralus/self-awareness-tools)
-                                    (ig/ref :lateralus/web-search-tools)]
+                                    (ig/ref :lateralus/self-awareness-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)]

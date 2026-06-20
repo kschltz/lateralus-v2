@@ -28,8 +28,7 @@
      --model NAME           LLM model name (overrides config)
      --base-url URL         LLM base URL (overrides config)
      --api-key KEY          LLM API key (overrides config; env support is a follow-up)"
-  (:require [cheshire.core :as json]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.cli :as cli]
             [integrant.core :as ig]
@@ -165,21 +164,6 @@
       (subs s 0 (dec (count s)))
       s)))
 
-(defn- web-search-result-summary
-  "Convert a web_search JSON result into a concise user-readable string."
-  [result-str]
-  (try
-    (let [parsed (json/parse-string result-str true)
-          results (:results parsed)]
-      (if (seq results)
-        (str "Web search results for '" (:query parsed "?") ":'\n"
-             (str/join "\n\n"
-                       (for [r (take 5 results)]
-                         (str (:title r) "\n" (:url r) "\n" (:snippet r)))))
-        (str "Web search returned no results for '" (:query parsed "?") "'.")))
-    (catch Throwable _
-      (str "Tool result: " (subs (str result-str) 0 (min 200 (count (str result-str))))))))
-
 (defn- tool-result-summary
   "Build a concise, user-readable summary of tool results when the
    model produced no final text. This prevents the interactive REPL
@@ -188,9 +172,7 @@
   (let [results (or (:tool/results result) [])
         summaries (for [{:keys [call result]} results
                         :let [name (get-in call [:function :name])]]
-                    (case name
-                      "web_search" (web-search-result-summary result)
-                      (format "- %s: %s" name (subs (str result) 0 (min 120 (count (str result)))))))
+                    (format "- %s: %s" name (subs (str result) 0 (min 120 (count (str result))))))
         body (str/join "\n\n" summaries)]
     (if (seq results)
       (str "The assistant used tools but produced no final text.\n\n" body)

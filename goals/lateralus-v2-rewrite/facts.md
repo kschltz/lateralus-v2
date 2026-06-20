@@ -14,6 +14,6 @@
 - Tool calls execute sequentially by default; parallel execution requires an explicit opt-in flag.
 - Tools and capabilities register only via plugin/interceptor bundles; there are no ad-hoc add-*-tool! installer functions.
 - Every src namespace has corresponding tests; no namespace exceeds 500 LOC without test coverage. No feature ships without integration tests.
-- Out of MVP scope: web-search, remember, file editing (clj_edit/file_edit), repl-eval, Portal visualize, nREPL integration, v1 uberjar build, and a real persistent memory backend (Datalevin, SQLite, etc. — the MVP MemoryBackend is a noop impl).
+- Out of MVP scope: remember, file editing (clj_edit/file_edit), repl-eval, Portal visualize, nREPL integration, v1 uberjar build, and a real persistent memory backend (Datalevin, SQLite, etc. — the MVP MemoryBackend is a noop impl).
 - Out of scope entirely: paid search APIs, repl-eval sandboxing, multi-agent orchestration, pi/Cursor SDK integration, custom TUI, and cloud hosting infrastructure.
 - Goal is done when MVP facts pass automated verification, JVM distributable runs, README documents the new CLI and architecture, and GraalVM native-image is attempted with outcome documented (success or explicit blocker + JVM fallback).
