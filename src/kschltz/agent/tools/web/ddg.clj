@@ -34,6 +34,8 @@
             [hato.client :as hato]
             [hickory.core :as hickory]
             [hickory.select :as hs]
+            [kschltz.agent.tools.web.guards :as guards]
+            [kschltz.agent.tools.web.ssrf :as ssrf]
             [kschltz.agent.tools.web.protocol :as protocol])
   (:import [java.net URL URLEncoder URLDecoder URI]
            [com.github.zhkl0228.impersonator ImpersonatorFactory]
@@ -219,12 +221,17 @@
           rb     (reduce (fn [b [k v]] (.header b k v)) rb (or headers {}))
           req    (.build rb)
           resp   (.execute (.newCall client req))
-          body   (try (.string (.body resp)) (catch Exception e (str "<body-err: " (.getMessage e) ">")))]
+          body   (try (.string (.body resp)) (catch Exception e (str "<body-err: " (.getMessage e) ">")))
+          ;; Build a header map so callers (and the redirect guard) can read
+          ;; `Location` etc. okhttp3.Headers is name->value; iterate names.
+          hdr-map (into {}
+                        (for [nm (iterator-seq (.iterator (.names (.headers resp))))]
+                          [nm (.get (.headers resp) nm)]))]
       {:status  (.code resp)
        :body    body
-       :headers {}})
+       :headers hdr-map})
     (catch Exception e
-      {:status -1 :body (str "<tls-err: " (.getMessage e) ">")})))
+      {:status -1 :body (str "<tls-err: " (.getMessage e) ">") :headers {}})))
 
 (defn- default-http-fn
   "Default HTTP wrapper. Resolves to impersonator when available (JVM);
@@ -290,18 +297,44 @@
           user-agent   (or (:user-agent cfg) default-user-agent)
           timeout-ms   (or (:timeout-ms cfg) 15000)
           max-bytes    (or (:max-page-bytes cfg) 2097152)
+          max-hops     (or (:max-redirects cfg) 5)
           http-fn      (or (:http-fn cfg) default-http-fn)
-          response     (http-fn {:method       :get
-                                 :url          url
-                                 :headers      {"User-Agent"      user-agent
-                                                "Accept"          "text/html"
-                                                "Accept-Language" "en-US,en;q=0.9"}
-                                 :as           :string
-                                 :timeout-ms   timeout-ms
-                                 :impersonate  (:impersonate cfg)})
-          status       (:status response)
-          body         (or (:body response) "")]
+          req          (fn [u]
+                         (http-fn {:method            :get
+                                   :url               u
+                                   :headers           {"User-Agent"      user-agent
+                                                       "Accept"          "text/html"
+                                                       "Accept-Language" "en-US,en;q=0.9"}
+                                   :as                :string
+                                   :timeout-ms        timeout-ms
+                                   :follow-redirects  false
+                                   :impersonate       (:impersonate cfg)}))
+          ;; Phase 3 SSRF redirect guard: follow up to `max-hops` 3xx
+          ;; redirects manually, re-validating each Location via
+          ;; `guards/safe-redirect-target` so a redirect to a private IP
+          ;; or disallowed scheme is blocked before the next hop.
+          final       (loop [u url hops 0]
+                        (let [resp   (req u)
+                              status (:status resp)]
+                          (cond
+                            (not status)
+                            {:url url :error :no-response}
+                            (and (<= 300 status 399) (< hops max-hops))
+                            (let [loc (get-in resp [:headers "Location"]
+                                             (get-in resp [:headers "location"]))
+                                  r   (ssrf/safe-redirect-target loc cfg)]
+                              (if (:ok r)
+                                (recur (:ok r) (inc hops))
+                                {:url u :status status :error (:error r) :blocked true}))
+                            :else
+                            {:url u :status status :body (or (:body resp) "")})))
+          status       (:status final)
+          body         (or (:body final) "")]
       (cond
+        (:blocked final)
+        (throw (ex-info (str "DuckDuckGo fetch blocked redirect: " (:error final))
+                        {:phase :url-guard :provider :ddg :url url :reason (:error final)}))
+
         (not status)
         (throw (ex-info "DuckDuckGo fetch failed: no HTTP response"
                         {:phase :provider :provider :ddg :url url}))

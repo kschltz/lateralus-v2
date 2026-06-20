@@ -72,6 +72,7 @@
    :block-injection-markers?    true
    :block-self-activation?      true
    :block-exfiltration-patterns? true
+   :block-duplicate-query?       true
    :strip-html?                 true
    :allowed-schemes             #{"http" "https"}
    :allowed-ports               #{80 443}
