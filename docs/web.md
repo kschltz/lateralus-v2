@@ -32,12 +32,17 @@ provider call.
 |---|---|---|
 | `:none` (default) | none required | Zero I/O. `web/extract` still works via a zero-dep regex stripper. |
 | `:mojeek` | none required | JVM-only. Uses `hickory` to parse Mojeek's public HTML result pages. **Opt-in** because HTML scraping can break if markup changes. |
+| `:ddg` | none required | JVM-only. Keyless DuckDuckGo search via `html.duckduckgo.com/html`, reached with a browser JA3/JA4 + HTTP/2 fingerprint (`impersonator-okhttp`) so DDG returns real HTML instead of a CAPTCHA page. Default preset is `android` (only preset that completes the TLS handshake with this bctls version); override via `:impersonate` in config. **Opt-in**. |
 | `:searxng` | not shipped | Planned self-hosted follow-up. |
 
-`:mojeek` is **excluded from the native-image classpath** because it depends on
-`hickory` (and transitively on `jsoup`). The `:native` alias in `deps.edn` keeps
-`hickory` in the top-level `:deps` only; `resources/lateralus/native.edn` pins
-`:provider :none`.
+`:mojeek` and `:ddg` are **excluded from the native-image classpath**: `:mojeek`
+depends on `hickory` (transitively `jsoup`), and `:ddg` depends on
+`impersonator-okhttp` (BouncyCastle bctls + forked OkHttp). Both are kept in the
+top-level `:deps` of `deps.edn` only (never `:native :replace-deps`); both
+namespaces load behind a guarded `try/require` in `web.clj` / `system.clj` so
+native-image builds stay clean and selecting either under native raises a typed
+`ex-info` instead of a `ClassNotFoundException`. `resources/lateralus/native.edn`
+pins `:provider :none`.
 
 ## Configuration
 
@@ -81,6 +86,11 @@ block-list.
 - **Result/snippet guards** — HTML stripping, `javascript:`/`data:text/html`
 URL removal, exfiltration-pattern detection, recursive self-activation
 detection (tool-call JSON markers in snippets).
+- **Phase 3 SSRF / UA / redirect guards** (`ssrf.clj`) — resolve host and pin
+IP before connect (block private/loopback/link-local and CGNAT `100.64.0.0/10`),
+random per-request User-Agent rotation, safe-redirect-target validation with
+up-to-5-hop re-validation (each hop re-resolved + re-pinned), per-process
+duplicate-query circuit breaker, snippet-truncation hint.
 
 ## Native-image / air-gap story
 
@@ -122,8 +132,10 @@ flips back to `:none`.
 - `src/kschltz/agent/tools/web/protocol.clj` — `WebProvider` protocol
 - `src/kschltz/agent/tools/web/schemas.clj` — Malli schemas
 - `src/kschltz/agent/tools/web/guards.clj` — defensive guard pipeline
+- `src/kschltz/agent/tools/web/ssrf.clj` — Phase 3 SSRF / UA / redirect guards
 - `src/kschltz/agent/tools/web/none.clj` — `:none` provider
 - `src/kschltz/agent/tools/web/mojeek.clj` — `:mojeek` provider
+- `src/kschltz/agent/tools/web/ddg.clj` — `:ddg` provider (impersonator TLS fingerprint)
 - `src/kschltz/agent/tools/web/web.clj` — `WebSearchTool`, `WebFetchTool`, `WebExtractTool`, registry factory
 - `test/kschltz/agent/tools/web/*_test.clj` — unit tests
 - `test/kschltz/agent/tools/web/web_e2e_test.clj` — `^:e2e` live web tests

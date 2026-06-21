@@ -32,7 +32,7 @@ This document records the original research and trade-offs. For the implemented 
 
 ### KG + BM25
 
-`kschltz.agent.memory.kg-bm25-backend` is the native-image default. It is embedding-free and therefore safe for GraalVM, where the LangChain4j ONNX embedder and Proximum's Panama-based HNSW index are unavailable.
+`kschltz.agent.memory.kg-bm25` is the native-image default. It is embedding-free and therefore safe for GraalVM, where the LangChain4j ONNX embedder and Proximum's Panama-based HNSW index are unavailable.
 
 - Storage: per-session `messages.edn` + `index.edn` under the configured `:store` path.
 - Recall: recent-N + RRF fusion of BM25(query-text) and knowledge-graph entity overlap.
@@ -76,14 +76,14 @@ These are building blocks without vector search. They would need a companion vec
 
 ## Suggested next step
 
-Stabilize the existing `:kg-bm25` backend rather than starting a new SQLite spike. The active kanban card **"Refactor KG-BM25 backend into focused namespaces"** is the right next unit of work. See `src/kschltz/agent/memory/kg_bm25_backend.clj` and [`docs/memory-v2.md`](./memory-v2.md) for current behavior.
+Stabilize the existing `:kg-bm25` backend rather than starting a new SQLite spike. The active kanban card **"Refactor KG-BM25 backend into focused namespaces"** is the right next unit of work. See `src/kschltz/agent/memory/kg_bm25.clj` and [`docs/memory-v2.md`](./memory-v2.md) for current behavior.
 
 ## Code links
 
 - Protocol: `src/kschltz/agent/memory/protocol.clj`
 - Noop backend: `src/kschltz/agent/memory/noop_backend.clj`
 - Proximum backend: `src/kschltz/agent/memory/proximum_backend.clj`
-- KG-BM25 backend: `src/kschltz/agent/memory/kg_bm25_backend.clj`
+- KG-BM25 backend: `src/kschltz/agent/memory/kg_bm25.clj`
 - HTTP embedder: `src/kschltz/agent/memory/http_embedding.clj`
 - LangChain4j embedder: `src/kschltz/agent/memory/langchain4j_embedding.clj`
 - JVM runtime config: `resources/lateralus/config.edn`
