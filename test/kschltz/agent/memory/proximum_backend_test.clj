@@ -5,10 +5,12 @@
    session isolation, close, and concurrent store safety. They use
    an in-memory Proximum index and a deterministic fake embedder so
    semantic search is reproducible without network calls."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.protocol :as mem]
-            [kschltz.agent.memory.proximum-backend :as proximum]))
+            [kschltz.agent.memory.proximum-backend :as proximum])
+  (:import [java.nio.file Files Path]))
 
 (defn- fake-embedder
   "Return a deterministic embedder that maps each input string to a
@@ -120,3 +122,35 @@
         (is (= n (count recalled)))
         (is (= (set (map :msg-id recalled))
                (set (map :msg-id msgs))))))))
+
+(deftest proximum-backend-file-persistence
+  (testing "file-backed store writes durable files to disk"
+    (let [dir       (str (Files/createTempDirectory "proximum-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+          store-path (str dir "/store")
+          store     {:backend :file
+                     :path    store-path
+                     :id      #uuid "465df026-fcd3-4cb3-be44-29a929776250"}
+          b         (proximum/backend {:embedder        (fake-embedder 16)
+                                       :dim             16
+                                       :capacity        100
+                                       :M               8
+                                       :ef-construction 100
+                                       :ef-search       100
+                                       :store           store
+                                       :sync-on-write?  true})]
+      (try
+        (mem/-store-message b "s1" {:role "user" :content "persist me"
+                                    :msg-id "p1" :timestamp 100})
+        (mem/-close b)
+        (let [f (io/file store-path)]
+          (is (.exists f) "file store path was created")
+          (is (.isDirectory f) "file store path is a directory"))
+        (finally
+          (let [f (io/file store-path)]
+            (when (.exists f)
+              (doseq [c (.listFiles f)]
+                (.delete c))
+              (.delete f)))
+          (let [f (io/file dir)]
+            (when (.exists f)
+              (.delete f))))))))
