@@ -4,7 +4,7 @@ This document catalogs **concrete, open-source agentic memory systems that do no
 
 ## Current state
 
-A production-ready, embedding-free backend already exists: **`kschltz.agent.memory.kg-bm25-backend`** (`:impl :kg-bm25`). It is the **native-image default** in `resources/lateralus/native.edn`. The **JVM runtime default** remains **Proximum + LangChain4j in-process ONNX embeddings** (`resources/lateralus/config.edn`).
+A production-ready, embedding-free backend already exists: **`kschltz.agent.memory.kg-bm25`** (`:impl :kg-bm25`). It is the **native-image default** in `resources/lateralus/native.edn`. The **JVM runtime default** remains **Proximum + LangChain4j in-process ONNX embeddings** (`resources/lateralus/config.edn`).
 
 - `kg-bm25` uses BM25 keyword scoring plus a small knowledge graph for the top-Y channel and last-N timestamp recall.
 - It requires no ONNX, no Panama Vector API, no incubator JVM flags, and no native libraries.
@@ -162,7 +162,7 @@ These systems change **how** context is assembled, not just how storage is searc
 
 | System | Category | Embedding-free? | Drop-in `MemoryBackend`? | Main Clojure building blocks | Native-image risk |
 |--------|----------|-----------------|--------------------------|-------------------------------|-------------------|
-| **Existing `kg-bm25`** | BM25 + session KG | Yes | Yes (already wired) | `kg_bm25_backend.clj` | None |
+| **Existing `kg-bm25`** | BM25 + session KG | Yes | Yes (already wired) | `kg_bm25.clj` | None |
 | **AriGraph** | KG world model | Yes | Pattern only | Asami / custom graph | Low |
 | **HippoRAG** | KG + PageRank | Yes | Pattern only | Custom graph + PPR | Low |
 | **`compiled-memory`** | KG + BM25 + RRF | Yes | **Strong blueprint** | SQLite + inverted index + RRF | Low |
@@ -181,7 +181,7 @@ These systems change **how** context is assembled, not just how storage is searc
 
 Rather than starting a new `:bm25-text` spike, the current priority is to harden the backend that already ships:
 
-- Refactor `src/kschltz/agent/memory/kg_bm25_backend.clj` into focused namespaces (tracked by kanban card **"Refactor KG-BM25 backend into focused namespaces"**).
+- Refactor `src/kschltz/agent/memory/kg_bm25.clj` into focused namespaces (tracked by kanban card **"Refactor KG-BM25 backend into focused namespaces"**).
 - Add tests that mirror `kschltz.agent.memory.proximum-backend-test` for store/recall/session isolation/close.
 - Improve recall quality by tuning `:top-y`, `:last-n`, `:rrf-k`, and the default `:extract-fn`.
 - Consider optional graph-weighting improvements inspired by HippoRAG / `compiled-memory`.
@@ -217,7 +217,7 @@ This is exploratory and not scheduled. If it ever lands, it should reuse the sam
 ## Code links
 
 - Protocol: `src/kschltz/agent/memory/protocol.clj`
-- KG-BM25 backend: `src/kschltz/agent/memory/kg_bm25_backend.clj`
+- KG-BM25 backend: `src/kschltz/agent/memory/kg_bm25.clj`
 - Noop backend: `src/kschltz/agent/memory/noop_backend.clj`
 - HTTP embedder: `src/kschltz/agent/memory/http_embedding.clj`
 - Native-image config: `resources/lateralus/native.edn`

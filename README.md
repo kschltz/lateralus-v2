@@ -89,11 +89,14 @@ For details, see [`docs/architecture.md`](docs/architecture.md).
 The agent now ships `web/search`, `web/fetch`, and `web/extract` tools. The
 default provider is `:none`, so **no API key, no paid service, and no network
 I/O** are required out of the box. `web/extract` still works on raw HTML in
-air-gapped mode. Live web access is opt-in via `:provider :mojeek`.
+air-gapped mode. Live web access is opt-in via `:provider :mojeek` or `:provider :ddg`.
 
 The `:mojeek` provider parses Mojeek's public HTML result pages with
-`hickory`. It is JVM-only and excluded from the GraalVM native-image classpath;
-`resources/lateralus/native.edn` pins `:provider :none`.
+`hickory`. The `:ddg` provider queries DuckDuckGo's `html.duckduckgo.com/html`
+endpoint with a browser TLS/HTTP2 fingerprint (`impersonator-okhttp`) so DDG
+returns real HTML instead of a CAPTCHA page. Both are JVM-only and excluded
+from the GraalVM native-image classpath; `resources/lateralus/native.edn` pins
+`:provider :none`.
 
 All three ops are guarded against SSRF (private/loopback/metadata IPs,
 `file://`, protocol-relative URLs), prompt-injection markers, recursive
@@ -230,7 +233,7 @@ Notes and limitations:
 | [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
-| [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek` opt-in, guards, native-image story |
+| [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |
@@ -249,6 +252,7 @@ Notes and limitations:
 | [`src/kschltz/agent/tools/web/guards.clj`](src/kschltz/agent/tools/web/guards.clj) | URL/query/snippet guard pipeline |
 | [`src/kschltz/agent/tools/web/none.clj`](src/kschltz/agent/tools/web/none.clj) | `:none` provider (air-gapped default) |
 | [`src/kschltz/agent/tools/web/mojeek.clj`](src/kschltz/agent/tools/web/mojeek.clj) | `:mojeek` live provider (JVM-only, opt-in) |
+| [`src/kschltz/agent/tools/web/ddg.clj`](src/kschltz/agent/tools/web/ddg.clj) | `:ddg` live provider (JVM-only, opt-in; impersonator TLS fingerprint) |
 | [`src/kschltz/agent/tools/web/web.clj`](src/kschltz/agent/tools/web/web.clj) | `web/search`, `web/fetch`, `web/extract` Tool implementations |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
@@ -284,7 +288,7 @@ Recently completed:
 - [008] Refactor KG-BM25 backend into focused namespaces
 - [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
 - [011] Promote tool-calling loop into the base plugin + filesystem tools example
-- [web] Revive web tool: `:none` default, `:mojeek` opt-in live provider, full guard pipeline, Integrant wiring, docs
+- [web] Revive web tool: `:none` default, `:mojeek`/`:ddg` opt-in live providers, full guard pipeline (SSRF/UA/redirect), Integrant wiring, docs
 
 Deferred:
 - Async worker thread for the runtime

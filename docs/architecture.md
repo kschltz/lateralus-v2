@@ -127,8 +127,8 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
-- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure tools (`:lateralus/clojure-tools`), and web tools (`:lateralus/web-tools` with providers `:none` and `:mojeek`).
-- **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25-backend`).
+- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure tools (`:lateralus/clojure-tools`), and web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`).
+- **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
 - **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
 - **New chain stage:** add an interceptor to an existing plugin slot or contribute a full `:plugin/chain`.
@@ -145,11 +145,15 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 They are exposed to the LLM through `:lateralus/tool-registry`, which is now a
 vector of registry maps merged by `kschltz.agent.tools.web.web/merge-tool-registries`.
 
-The default provider is `:none` (air-gapped). Live search is opt-in via `:provider :mojeek`,
-which parses Mojeek's public HTML result pages with `hickory`. `:mojeek` is
-JVM-only and excluded from the GraalVM native-image classpath; `resources/lateralus/native.edn`
-pins `:provider :none`. See [`docs/web.md`](docs/web.md) for configuration and
-security details.
+The default provider is `:none` (air-gapped). Live search is opt-in via `:provider :mojeek`
+(Mojeek public HTML, parsed with `hickory`) or `:provider :ddg` (DuckDuckGo's
+`html.duckduckgo.com/html` endpoint, reached with a browser TLS/HTTP2 fingerprint
+via `impersonator-okhttp` so DDG returns real HTML instead of a CAPTCHA page).
+Both `:mojeek` and `:ddg` are JVM-only and excluded from the GraalVM native-image
+classpath; `resources/lateralus/native.edn` pins `:provider :none`. A Phase 3 guard
+stack (SSRF resolve+pin, UA rotation, safe-redirect re-validation, duplicate-query
+breaker, snippet hint) backs every live provider. See [`docs/web.md`](docs/web.md)
+for configuration and security details.
 
 ## KG-BM25 memory backend
 
@@ -253,8 +257,10 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/tools/web/protocol.clj` | `WebProvider` protocol |
 | `src/kschltz/agent/tools/web/schemas.clj` | Web tool Malli schemas |
 | `src/kschltz/agent/tools/web/guards.clj` | URL/query/snippet guard pipeline |
+| `src/kschltz/agent/tools/web/ssrf.clj` | Phase 3 SSRF / UA / redirect guards |
 | `src/kschltz/agent/tools/web/none.clj` | `:none` provider (air-gapped default) |
 | `src/kschltz/agent/tools/web/mojeek.clj` | `:mojeek` live provider (JVM-only, opt-in) |
+| `src/kschltz/agent/tools/web/ddg.clj` | `:ddg` live provider (JVM-only, opt-in; impersonator TLS fingerprint) |
 | `src/kschltz/agent/tools/web/web.clj` | `web/search`, `web/fetch`, `web/extract` Tool implementations and registry factory |
 | `src/kschltz/agent/llm/client.clj` | `LlmClient` protocol + stub + HTTP wrapper |
 | `src/kschltz/agent/llm/http.clj` | real OpenAI-shaped HTTP client |
