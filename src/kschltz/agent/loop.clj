@@ -145,8 +145,8 @@
                                      (assoc :tool/results results)
                                      (update :agent/all-tool-results (fnil into []) results))
                   any-unavailable? (some (fn [r]
-                                            (str/starts-with? (str (:result r)) "Tool '"))
-                                          results)]
+                                           (str/starts-with? (str (:result r)) "Tool '"))
+                                         results)]
               (if any-unavailable?
                 (update-in ctx' [:llm/request :messages]
                            conj {:role "system"
@@ -212,7 +212,7 @@
                       (assoc :agent/last-tool-call-sig sig
                              :agent/loop-continuing? true)
                       (chain/enqueue (-follow-up-chain loop
-                                                        (or (:agent/tool-registry ctx) {}))))))
+                                                       (or (:agent/tool-registry ctx) {}))))))
               (assoc ctx :agent/loop-continuing? false)))})
 
 ;; ---- Self-heal ----
@@ -255,61 +255,96 @@
 
 ;; ---- Ensure a textual response when the loop stops ----
 
+(def ^:private max-summary-attempts
+  "Cap on summary LLM calls per exchange when the loop stops with a blank
+   response. A model can return empty even with :tools stripped (refusal,
+   truncation); a second attempt with the same text-only request is cheap
+   insurance. After the cap, :agent/summary-failed? is set so the CLI can
+   surface a clear message."
+  2)
+
+(def ^:private max-empty-retry-attempts
+  "Cap on empty-response retry calls per exchange when the model produced
+   neither text nor tool calls on the first turn."
+  2)
+
 (defn compose-summary-request-interceptor
   "Append a system message instructing the model to produce the final
-   answer from the tool results already in the conversation. Used by
-   `ensure-text-response-interceptor` when the loop stopped with a blank
-   response but tool results exist."
+   answer from the tool results already in the conversation, and STRIP
+   :tools from the request so the model cannot escape back into
+   tool-calling on the summary turn. Root-cause fix for the 2026-06-22
+   empty-response bug: the summary call used to advertise all tools, so
+   the model returned tool_calls (finish_reason tool_calls) instead of
+   text. Used by ensure-text-response-interceptor when the loop stopped
+   with a blank response but tool results exist."
   []
   {:name ::compose-summary-request
    :enter (fn [ctx]
-            (update-in ctx [:llm/request :messages]
-                       conj {:role "system"
-                             :content "You have finished calling tools. Using the tool results above, produce the final answer for the user."}))})
+            (-> ctx
+                (update-in [:llm/request :messages]
+                           conj {:role "system"
+                                 :content "You have finished calling tools. Using the tool results above, produce the final answer for the user."})
+                (update :llm/request dissoc :tools)))})
 
 (defn compose-empty-retry-interceptor
   "Append a system message nudging the model to reply after it returned
-   an empty response with no tool calls. Used by
-   `ensure-text-response-interceptor` on the first turn when the model
+   an empty response with no tool calls, and STRIP :tools so the model
+   cannot escape into a tool call when forced to produce text. Used by
+   ensure-text-response-interceptor on the first turn when the model
    produced nothing at all."
   []
   {:name ::compose-empty-retry
    :enter (fn [ctx]
-            (update-in ctx [:llm/request :messages]
-                       conj {:role "system"
-                             :content "Your last response was empty. Reply to the user."}))})
+            (-> ctx
+                (update-in [:llm/request :messages]
+                           conj {:role "system"
+                                 :content "Your last response was empty. Reply to the user."})
+                (update :llm/request dissoc :tools)))})
 
 (defn ensure-text-response-interceptor
   "`:finalize` interceptor placed AFTER `tool-loop-interceptor`. When the
-   loop is NOT continuing and `:exchange/response` is blank, enqueue one
-   final mini-chain to coax a textual answer: a summary request when tool
-   results exist, or an empty-response retry otherwise. Capped at one
-   summary and one empty-retry per exchange via
-   `:agent/summary-attempted` / `:agent/empty-retry-attempted`. When a
+   loop is NOT continuing and :exchange/response is blank, enqueue a
+   final mini-chain to coax a textual answer: a summary request when
+   tool results exist, or an empty-response retry otherwise. Attempts
+   are capped via counters :agent/summary-attempts (max
+   max-summary-attempts) and :agent/empty-retry-attempts (max
+   max-empty-retry-attempts). When the cap is exhausted, sets
+   :agent/summary-failed? / :agent/empty-retry-failed? and returns ctx
+   unchanged so the CLI fallback can surface a clear message. When a
    response is already present or the loop is still continuing, this
    interceptor is a no-op. The `loop` arg is accepted for symmetry with
-   `tool-loop-interceptor` and ignored — the continue decision is read
-   from `:agent/loop-continuing?` which `tool-loop-interceptor` sets."
+   tool-loop-interceptor and ignored — the continue decision is read
+   from :agent/loop-continuing? which tool-loop-interceptor sets."
   [loop]
   {:name ::ensure-text-response
    :slot :finalize
    :enter (fn [ctx]
-            (cond
-              (not (str/blank? (:exchange/response ctx))) ctx
-              (:agent/loop-continuing? ctx)               ctx
-              (get ctx :agent/summary-attempted)           ctx
-              (get ctx :agent/empty-retry-attempted)       ctx
-              (seq (:agent/all-tool-results ctx))
-              (-> ctx
-                  (assoc :agent/summary-attempted true)
-                  (chain/enqueue [(compose-summary-request-interceptor)
-                                  (llm-call-with-self-heal)
-                                  ix/llm-call
-                                  ix/parse-response]))
-              :else
-              (-> ctx
-                  (assoc :agent/empty-retry-attempted true)
-                  (chain/enqueue [(compose-empty-retry-interceptor)
-                                  (llm-call-with-self-heal)
-                                  ix/llm-call
-                                  ix/parse-response]))))})
+            (let [summary-attempts (get ctx :agent/summary-attempts 0)
+                  retry-attempts   (get ctx :agent/empty-retry-attempts 0)]
+              (cond
+                (not (str/blank? (:exchange/response ctx))) ctx
+                (:agent/loop-continuing? ctx)               ctx
+                ;; summary path: tools ran, response blank
+                (and (seq (:agent/all-tool-results ctx))
+                     (< summary-attempts max-summary-attempts))
+                (-> ctx
+                    (update :agent/summary-attempts (fnil inc 0))
+                    (chain/enqueue [(compose-summary-request-interceptor)
+                                    (llm-call-with-self-heal)
+                                    ix/llm-call
+                                    ix/parse-response
+                                    (ensure-text-response-interceptor loop)]))
+                (and (seq (:agent/all-tool-results ctx))
+                     (>= summary-attempts max-summary-attempts))
+                (assoc ctx :agent/summary-failed? true)
+                ;; empty-retry path: no tools ran, response blank
+                (< retry-attempts max-empty-retry-attempts)
+                (-> ctx
+                    (update :agent/empty-retry-attempts (fnil inc 0))
+                    (chain/enqueue [(compose-empty-retry-interceptor)
+                                    (llm-call-with-self-heal)
+                                    ix/llm-call
+                                    ix/parse-response
+                                    (ensure-text-response-interceptor loop)]))
+                :else
+                (assoc ctx :agent/empty-retry-failed? true))))})
