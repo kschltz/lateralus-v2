@@ -14,7 +14,8 @@
    Slotting:
      :compose  — inject tool definitions into the LLM request
      :tools    — execute dispatched tools and compose tool-result messages
-     :finalize — decide whether to loop back to the LLM
+     :finalize — decide whether to loop back to the LLM; ensure a
+                textual response when the loop stops
 
    The loop keeps provider-neutral tool data on the context
    (`:tool/calls`, `:tool/results`, `:agent/all-tool-results`) and
@@ -48,7 +49,9 @@
 
 ;; Forward declarations for interceptors used inside ReActLoop.
 (declare bump-loop-depth-interceptor compose-tool-results-interceptor
-         llm-call-with-self-heal dispatch-tools-interceptor tool-loop-interceptor)
+         llm-call-with-self-heal dispatch-tools-interceptor tool-loop-interceptor
+         compose-summary-request-interceptor compose-empty-retry-interceptor
+         ensure-text-response-interceptor)
 
 ;; ---- ReAct loop implementation ----
 
@@ -73,12 +76,19 @@
      ix/llm-call
      ix/parse-response
      (dispatch-tools-interceptor)
-     (tool-loop-interceptor this)]))
+     (tool-loop-interceptor this)
+     (ensure-text-response-interceptor this)]))
 
 (defn react-loop
   "Construct a `ReActLoop` with an optional `max-depth` (default 5)."
   ([] (react-loop max-loop-depth))
   ([max-depth] (->ReActLoop max-depth)))
+
+(defn configured-react-loop
+  "Build a `ReActLoop` from an opts map, allowing the Integrant config
+   to set `:max-loop-depth`. Falls back to the default cap when unset."
+  ([opts]
+   (react-loop (or (:max-loop-depth opts) max-loop-depth))))
 
 ;; ---- Message builders ----
 
@@ -121,17 +131,29 @@
   "`:tools` interceptor that executes tool calls against the registry
    in `:agent/tool-registry` and stores `:tool/results`. Also accumulates
    every result in `:agent/all-tool-results` so the final ctx records tools
-   that ran in earlier loop iterations."
+   that ran in earlier loop iterations. When any requested tool is not in
+   the registry, appends a system message listing the available tools so
+   the follow-up turn can self-correct instead of silently stopping."
   []
   {:name ::dispatch-tools
    :slot :tools
    :enter (fn [ctx]
-            (let [calls    (or (:tool/calls ctx) [])
-                  registry (or (:agent/tool-registry ctx) {})
-                  results  (tool/execute-tools registry ctx calls)]
-              (-> ctx
-                  (assoc :tool/results results)
-                  (update :agent/all-tool-results (fnil into []) results))))})
+            (let [calls          (or (:tool/calls ctx) [])
+                  registry       (or (:agent/tool-registry ctx) {})
+                  results        (tool/execute-tools registry ctx calls)
+                  ctx'           (-> ctx
+                                     (assoc :tool/results results)
+                                     (update :agent/all-tool-results (fnil into []) results))
+                  any-unavailable? (some (fn [r]
+                                            (str/starts-with? (str (:result r)) "Tool '"))
+                                          results)]
+              (if any-unavailable?
+                (update-in ctx' [:llm/request :messages]
+                           conj {:role "system"
+                                 :content (str "One or more requested tools are not available. "
+                                               "Available tools: "
+                                               (str/join ", " (sort (keys registry))))})
+                ctx')))})
 
 (defn compose-tool-results-interceptor
   "`:tools` interceptor that appends the assistant tool-calling message
@@ -156,18 +178,42 @@
    :enter (fn [ctx]
             (update ctx :agent/tool-loop-depth (fnil inc 0)))})
 
+(defn- tool-call-sig
+  "A stable signature for the current set of tool calls, used for
+   stall detection. Compares tool name + raw arguments JSON."
+  [calls]
+  (mapv (fn [c] {(get-in c [:function :name])
+                 (get-in c [:function :arguments])})
+        calls))
+
 (defn tool-loop-interceptor
   "`:finalize` interceptor that asks the `loop` strategy whether to
    continue and, if so, enqueues the follow-up chain. The registry is
    read from `:agent/tool-registry` on each turn so the same loop works
-   even if the registry is injected late."
+   even if the registry is injected late. Stall detection: when the
+   model emits the SAME set of tool calls as the previous turn, the
+   loop does NOT enqueue again — `ensure-text-response-interceptor`
+   then coaxes a textual summary instead of looping forever. Sets
+   `:agent/loop-continuing?` so the adjacent `ensure-text-response`
+   interceptor knows whether more LLM turns are coming (it cannot
+   simply re-ask `-continue?`, because stall detection can refuse to
+   enqueue even when `-continue?` is true)."
   [loop]
   {:name ::tool-loop
    :slot :finalize
    :enter (fn [ctx]
             (if (-continue? loop ctx)
-              (chain/enqueue ctx (-follow-up-chain loop (or (:agent/tool-registry ctx) {})))
-              ctx))})
+              (let [calls    (or (:tool/calls ctx) [])
+                    sig      (tool-call-sig calls)
+                    last-sig (:agent/last-tool-call-sig ctx)]
+                (if (= sig last-sig)
+                  (assoc ctx :agent/loop-continuing? false)
+                  (-> ctx
+                      (assoc :agent/last-tool-call-sig sig
+                             :agent/loop-continuing? true)
+                      (chain/enqueue (-follow-up-chain loop
+                                                        (or (:agent/tool-registry ctx) {}))))))
+              (assoc ctx :agent/loop-continuing? false)))})
 
 ;; ---- Self-heal ----
 
@@ -206,3 +252,64 @@
                                       ix/llm-call
                                       ix/parse-response]))
                   ctx))))})
+
+;; ---- Ensure a textual response when the loop stops ----
+
+(defn compose-summary-request-interceptor
+  "Append a system message instructing the model to produce the final
+   answer from the tool results already in the conversation. Used by
+   `ensure-text-response-interceptor` when the loop stopped with a blank
+   response but tool results exist."
+  []
+  {:name ::compose-summary-request
+   :enter (fn [ctx]
+            (update-in ctx [:llm/request :messages]
+                       conj {:role "system"
+                             :content "You have finished calling tools. Using the tool results above, produce the final answer for the user."}))})
+
+(defn compose-empty-retry-interceptor
+  "Append a system message nudging the model to reply after it returned
+   an empty response with no tool calls. Used by
+   `ensure-text-response-interceptor` on the first turn when the model
+   produced nothing at all."
+  []
+  {:name ::compose-empty-retry
+   :enter (fn [ctx]
+            (update-in ctx [:llm/request :messages]
+                       conj {:role "system"
+                             :content "Your last response was empty. Reply to the user."}))})
+
+(defn ensure-text-response-interceptor
+  "`:finalize` interceptor placed AFTER `tool-loop-interceptor`. When the
+   loop is NOT continuing and `:exchange/response` is blank, enqueue one
+   final mini-chain to coax a textual answer: a summary request when tool
+   results exist, or an empty-response retry otherwise. Capped at one
+   summary and one empty-retry per exchange via
+   `:agent/summary-attempted` / `:agent/empty-retry-attempted`. When a
+   response is already present or the loop is still continuing, this
+   interceptor is a no-op. The `loop` arg is accepted for symmetry with
+   `tool-loop-interceptor` and ignored — the continue decision is read
+   from `:agent/loop-continuing?` which `tool-loop-interceptor` sets."
+  [loop]
+  {:name ::ensure-text-response
+   :slot :finalize
+   :enter (fn [ctx]
+            (cond
+              (not (str/blank? (:exchange/response ctx))) ctx
+              (:agent/loop-continuing? ctx)               ctx
+              (get ctx :agent/summary-attempted)           ctx
+              (get ctx :agent/empty-retry-attempted)       ctx
+              (seq (:agent/all-tool-results ctx))
+              (-> ctx
+                  (assoc :agent/summary-attempted true)
+                  (chain/enqueue [(compose-summary-request-interceptor)
+                                  (llm-call-with-self-heal)
+                                  ix/llm-call
+                                  ix/parse-response]))
+              :else
+              (-> ctx
+                  (assoc :agent/empty-retry-attempted true)
+                  (chain/enqueue [(compose-empty-retry-interceptor)
+                                  (llm-call-with-self-heal)
+                                  ix/llm-call
+                                  ix/parse-response]))))})

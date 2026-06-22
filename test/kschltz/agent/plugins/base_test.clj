@@ -5,9 +5,12 @@
    in the right slots and that assembling it produces the expected
    default chain order. The base plugin is now tool-aware: it includes
    the loop interceptors from `kschltz.agent.loop`, which are no-ops
-   when no tool registry is seeded on the context."
+   when no tool registry is seeded on the context. The :guard slot also
+   carries the per-stage `logging` interceptor (first), and :finalize
+   also carries `ensure-text-response` (after tool-loop)."
   (:require [clojure.test :refer [deftest is testing]]
             [kschltz.agent.interceptors :as ix]
+            [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as base]))
@@ -19,7 +22,7 @@
   (testing "base plugin contributes core interceptors in expected slots"
     (let [p (base/base-plugin)]
       (is (= :base (-> p meta :plugin/name)))
-      (is (= [::ix/error-boundary]
+      (is (= [::logging/logging ::ix/error-boundary]
              (mapv :name (by-slot p :guard))))
       (is (= [::ix/compose-context ::loop/inject-tools]
              (mapv :name (by-slot p :compose))))
@@ -27,7 +30,7 @@
              (mapv :name (by-slot p :llm))))
       (is (= [::loop/dispatch-tools ::loop/compose-tool-results]
              (mapv :name (by-slot p :tools))))
-      (is (= [::loop/tool-loop]
+      (is (= [::loop/tool-loop ::loop/ensure-text-response]
              (mapv :name (by-slot p :finalize))))
       (is (= [::ix/store-exchange]
              (mapv :name (by-slot p :history))))
@@ -39,7 +42,8 @@
 (deftest assembled-base-matches-default-exchange-order
   (testing "assembling only the base plugin yields the canonical stage order"
     (let [chain (plugin/assemble-chain [(base/base-plugin)])]
-      (is (= [::ix/error-boundary
+      (is (= [::logging/logging
+              ::ix/error-boundary
               ::ix/compose-context
               ::loop/inject-tools
               ::loop/llm-call-with-self-heal
@@ -48,6 +52,7 @@
               ::loop/dispatch-tools
               ::loop/compose-tool-results
               ::loop/tool-loop
+              ::loop/ensure-text-response
               ::ix/store-exchange
               ::ix/deliver-responses
               ::ix/notify]

@@ -15,8 +15,10 @@
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
- ;; :mojeek is opt-in; default is :none so no network traffic unless requested.
- :lateralus/web-tools      {:provider :none}
+ :lateralus/logging             {}
+ ;; :ddg is opt-in and JVM-only (uses impersonator to bypass DDG's CAPTCHA).
+ ;; :none / :mojeek are the other choices; :none ships zero network traffic.
+ :lateralus/web-tools      {:provider :ddg}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools

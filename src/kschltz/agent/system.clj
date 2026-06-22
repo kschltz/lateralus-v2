@@ -43,6 +43,7 @@
             [kschltz.agent.tools.clojure :as tools.clojure]
             [kschltz.agent.tools.web.web :as tools.web]
             [kschltz.agent.tools.web.schemas :as web.schemas]
+            [kschltz.agent.logging :as logging]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -142,6 +143,16 @@
 (defmethod ig/assert-key :lateralus/web-tools [_ config]
   (assert-malli! :lateralus/web-tools WebToolsConfig config))
 
+(def ^:private LoggingConfig
+  "Malli schema for :lateralus/logging."
+  [:map
+   [:enabled {:optional true} :boolean]
+   [:dir     {:optional true} :string]
+   [:sink    {:optional true} [:enum :file :stdout]]])
+
+(defmethod ig/assert-key :lateralus/logging [_ config]
+  (assert-malli! :lateralus/logging LoggingConfig config))
+
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
 
@@ -171,6 +182,12 @@
    provider is :none, so the registry is always present but performs no
    network I/O unless the operator opts into :mojeek."
   (tools.web/web-registry opts))
+
+(defmethod ig/init-key :lateralus/logging [_ opts]
+  "Resolve the logging config. Defaults are applied at sink-build time
+   in `logging/build-sink`; here we just normalize nil to an empty map
+   so the agent component can read it."
+  (or opts {}))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl _embedder] :as opts}]
   ;; In-memory default: :noop. :proximum is the runtime default and
@@ -240,19 +257,22 @@
   (plugins.tools/tools-plugin registry))
 
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins llm-client embedder memory-backend llm-config]}]
+  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
   ;; seeds the runtime's state atom so compose-context sees the
   ;; LLM config (:base-url / :api-key / :model) and any other
   ;; persistent context. The state atom is the only place chain
   ;; stages should read persistent context from.
   ;;
-  ;; The exchange chain is assembled from `:plugins`.
+  ;; The exchange chain is assembled from `:plugins`. `:agent/logging`
+  ;; carries the resolved logging config so the runtime can build a
+  ;; per-session sink in `start`.
   (let [llm-config (or llm-config {})
         assembled (plugin/assemble-chain (or plugins []))]
     {:agent/llm-client  llm-client    ; pre-wired into ctx as `:llm/client`
      :embedder          embedder
      :memory-backend    memory-backend
+     :agent/logging     logging
      :assembled         assembled
      :exchange-chain    assembled
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
@@ -289,6 +309,7 @@
                               :embedder (ig/ref :lateralus/embedder)
                               :top-y    3
                               :last-n   5}
+   :lateralus/logging             {}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
    :lateralus/web-tools            {:provider :none}
@@ -302,4 +323,5 @@
                                     :llm-client     (ig/ref :lateralus/llm-client)
                                     :llm-config     (ig/ref :lateralus/llm-config)
                                     :embedder       (ig/ref :lateralus/embedder)
-                                    :memory-backend (ig/ref :lateralus/memory-backend)}})
+                                    :memory-backend (ig/ref :lateralus/memory-backend)
+                                    :logging        (ig/ref :lateralus/logging)}})

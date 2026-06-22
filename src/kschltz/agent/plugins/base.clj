@@ -11,7 +11,7 @@
      :compose  — compose-context, inject-tools
      :llm      — llm-call-with-self-heal, llm-call, parse-response
      :tools    — dispatch-tools, compose-tool-results
-     :finalize — tool-loop
+     :finalize — tool-loop, ensure-text-response
      :history  — store-exchange
      :observe  — deliver-responses
      :notify   — notify
@@ -25,25 +25,32 @@
    chain. Callers and tests can build the same chain with
    `(plugin/assemble-chain [(base-plugin)])`."
   (:require [kschltz.agent.interceptors :as ix]
+            [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]))
 
 (defn base-plugin
   "Return the default base plugin vector. With no additional plugins,
    `(plugin/assemble-chain [(base-plugin)])` produces a chain that
-   is the single source of truth for the default stage order."
+   is the single source of truth for the default stage order. The
+   `tool-loop` and `ensure-text-response` interceptors share one
+   `ReActLoop` instance so `ensure-text-response` can ask the same
+   loop whether it is still continuing."
   []
-  (with-meta
-    [(assoc ix/error-boundary :slot :guard)
-     (assoc ix/compose-context :slot :compose)
-     (assoc (loop/inject-tools-interceptor) :slot :compose)
-     (assoc (loop/llm-call-with-self-heal) :slot :llm)
-     (assoc ix/llm-call :slot :llm)
-     (assoc ix/parse-response :slot :llm)
-     (assoc (loop/dispatch-tools-interceptor) :slot :tools)
-     (assoc (loop/compose-tool-results-interceptor) :slot :tools)
-     (assoc (loop/tool-loop-interceptor (loop/react-loop)) :slot :finalize)
-     (assoc ix/store-exchange :slot :history)
-     (assoc ix/deliver-responses :slot :observe)
-     (assoc ix/notify :slot :notify)]
-    {:plugin/name :base}))
+  (let [react-loop (loop/react-loop)]
+    (with-meta
+      [(assoc (logging/logging-interceptor) :slot :guard)
+       (assoc ix/error-boundary :slot :guard)
+       (assoc ix/compose-context :slot :compose)
+       (assoc (loop/inject-tools-interceptor) :slot :compose)
+       (assoc (loop/llm-call-with-self-heal) :slot :llm)
+       (assoc ix/llm-call :slot :llm)
+       (assoc ix/parse-response :slot :llm)
+       (assoc (loop/dispatch-tools-interceptor) :slot :tools)
+       (assoc (loop/compose-tool-results-interceptor) :slot :tools)
+       (assoc (loop/tool-loop-interceptor react-loop) :slot :finalize)
+       (assoc (loop/ensure-text-response-interceptor react-loop) :slot :finalize)
+       (assoc ix/store-exchange :slot :history)
+       (assoc ix/deliver-responses :slot :observe)
+       (assoc ix/notify :slot :notify)]
+      {:plugin/name :base})))

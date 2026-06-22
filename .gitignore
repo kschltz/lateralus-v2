@@ -37,3 +37,7 @@ node_modules/
 # review history (commit messages are the durable record).
 .audit/
 .kanban/
+
+# Per-session chain logs (runtime artifacts)
+logs/
+.clj-kondo/imports/

@@ -167,14 +167,19 @@
 (defn- tool-result-summary
   "Build a concise, user-readable summary of tool results when the
    model produced no final text. This prevents the interactive REPL
-   from appearing silent after a tool loop."
+   from appearing silent after a tool loop. Falls back to
+   `:agent/all-tool-results` (results from earlier loop iterations)
+   when the current turn has no `:tool/results`."
   [result]
-  (let [results (or (:tool/results result) [])
-        summaries (for [{:keys [call result]} results
+  (let [all      (or (:agent/all-tool-results result)
+                     (:tool/results result)
+                     [])
+        truncate (fn [s] (subs (str s) 0 (min 120 (count (str s)))))
+        summaries (for [{:keys [call result]} all
                         :let [name (get-in call [:function :name])]]
-                    (format "- %s: %s" name (subs (str result) 0 (min 120 (count (str result))))))
+                    (format "- %s: %s" name (truncate result)))
         body (str/join "\n\n" summaries)]
-    (if (seq results)
+    (if (seq all)
       (str "The assistant used tools but produced no final text.\n\n" body)
       "The assistant produced no response for this turn.")))
 
