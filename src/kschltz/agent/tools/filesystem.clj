@@ -1,24 +1,42 @@
 (ns kschltz.agent.tools.filesystem
-  "Read-only filesystem Tool implementations for the lateralus
-   tool-calling loop.
+  "Filesystem Tool implementations for the lateralus tool-calling loop.
 
-   These are basic file operations exposed to the LLM: read a file,
-   list a directory, get file metadata, and search for text inside a
-   directory tree. Paths may be absolute or relative; when a
-   `:workspace-root` is provided, relative paths are resolved against it.
+   These are file operations exposed to the LLM: read a file, list a
+   directory, get file metadata, search for text inside a directory
+   tree, create a file, overwrite a file, and apply in-place edits to a
+   file. Paths may be absolute or relative; when a `:workspace-root` is
+   provided, relative paths are resolved against it.
+
+   `file/read`, `file/list`, `file/info`, `file/search`, and
+   `file/create` are thin convenience wrappers that live in this
+   namespace. `file/create` is a create-only convenience that
+   silently overwrites and creates parent directories; it does NOT
+   enforce containment, block paths, or back up the previous file.
+
+   `file/write` and `file/update` are the safe mutation tools. Their
+   deftypes, schemas, edit-validation helpers, and factory functions
+   live in `kschltz.agent.tools.file-write` so this namespace can
+   stay under the project's per-file line budget. The behavior is
+   unchanged: they enforce `:workspace-root` containment (skippable
+   per-call via `:force`), refuse to touch blocked path segments
+   (`.git`, `target`, `node_modules`, ... — never skippable), can
+   refuse Clojure/EDN source files unless `:clj-override` is set,
+   write a timestamped `.bak.<millis>` sidecar backup of the original
+   before mutating, and land the new content with an atomic temp-file
+   + move so a crashed write never leaves a truncated file. Edits to
+   the same path are serialized across threads via a per-path lock.
 
    All hard limits are configurable via the registry options:
-   `:max-read-bytes`, `:max-search-file-bytes`, and
-   `:max-search-results`. Sensible defaults are used when a limit is
-   omitted.
-
-   No sandboxing is enforced in this version. The caller is responsible
-   for configuring the workspace root and for only granting access to
-   paths the agent should be allowed to read."
+   `:max-read-bytes`, `:max-search-file-bytes`, `:max-search-results`,
+   `:max-write-bytes`, `:refuse-clojure?`, `:blocked-paths`, and
+   `:clojure-guard?`. Sensible defaults are used when a limit is
+   omitted."
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [kschltz.agent.tool :as tool])
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.file-path :as fpath]
+            [kschltz.agent.tools.file-write :as fw])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files Path]))
@@ -65,30 +83,6 @@
   "All filesystem tools return a JSON or plain string."
   :string)
 
-(defn- workspace-root->file
-  "Turn an optional `workspace-root` string into a `java.io.File`.
-   Falls back to the current working directory when nil or empty."
-  [workspace-root]
-  (if (seq workspace-root)
-    (io/file workspace-root)
-    (io/file ".")))
-
-(defn- resolve-path
-  "Resolve a user path against the workspace root. Absolute paths are
-   preserved; relative paths are resolved under the workspace root. The
-   result is normalized so that parent references collapse."
-  [workspace-root user-path]
-  (let [user-file (io/file user-path)]
-    (.normalize
-     (.toPath (if (.isAbsolute user-file)
-                user-file
-                (io/file (workspace-root->file workspace-root) user-path))))))
-
-(defn- path->str
-  "Convert a `Path` to a normalized string."
-  [^Path path]
-  (str (.normalize path)))
-
 (defn- safe-int
   "Coerce a value to a positive integer, returning default if missing or invalid."
   [value default]
@@ -107,7 +101,7 @@
         _ (when (> (count bytes) max-read-bytes)
             (throw (ex-info (format "File too large: %d bytes (limit %d)"
                                     (count bytes) max-read-bytes)
-                            {:path (path->str path)
+                            {:path (fpath/path->str path)
                              :size (count bytes)})))
         text  (String. ^bytes bytes StandardCharsets/UTF_8)
         off   (max 0 (safe-int offset 0))
@@ -130,13 +124,13 @@
   (let [dir (.toFile path)]
     (if (.isDirectory dir)
       (mapv describe-entry (.listFiles dir))
-      (throw (ex-info "Path is not a directory" {:path (path->str path)})))))
+      (throw (ex-info "Path is not a directory" {:path (fpath/path->str path)})))))
 
 (defn- do-file-info
   "Return metadata for `path` as an EDN map."
   [^Path path]
   (let [f (.toFile path)]
-    {:path          (path->str path)
+    {:path          (fpath/path->str path)
      :exists        (.exists f)
      :type          (cond
                       (.isDirectory f) "directory"
@@ -195,11 +189,11 @@
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
     (try
-      (let [path (resolve-path workspace-root (:path args))
+      (let [path (fpath/resolve-path workspace-root (:path args))
             offset (:offset args)
             limit (:limit args)]
         (json/generate-string
-         {:path      (path->str path)
+         {:path      (fpath/path->str path)
           :size      (Files/size path)
           :truncated (boolean (when limit (> limit 0)))
           :content   (read-text path offset limit max-read-bytes)}))
@@ -216,7 +210,7 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       {:entries (do-list-directory (resolve-path workspace-root (:path args)))})
+       {:entries (do-list-directory (fpath/resolve-path workspace-root (:path args)))})
       (catch Throwable t
         (error-result t)))))
 
@@ -230,7 +224,7 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       (do-file-info (resolve-path workspace-root (:path args))))
+       (do-file-info (fpath/resolve-path workspace-root (:path args))))
       (catch Throwable t
         (error-result t)))))
 
@@ -244,7 +238,7 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       (do-search-files (resolve-path workspace-root (:path args))
+       (do-search-files (fpath/resolve-path workspace-root (:path args))
                         (:pattern args)
                         (:max-results args)
                         max-search-file-bytes
@@ -256,7 +250,7 @@
   (let [file (.toFile path)]
     (.mkdirs (.getParentFile file))
     (spit file (or content "") :encoding "UTF-8")
-    {:path (path->str path)
+    {:path (fpath/path->str path)
      :created true
      :size (.length file)}))
 
@@ -270,7 +264,7 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       (do-create-file (resolve-path workspace-root (:path args)) (:content args)))
+       (do-create-file (fpath/resolve-path workspace-root (:path args)) (:content args)))
       (catch Throwable t
         (error-result t)))))
 
@@ -306,6 +300,22 @@
   ([workspace-root]
    (->CreateFileTool workspace-root)))
 
+(defn write-file
+  "Return a new `file/write` Tool instance. Re-exported from
+   [[kschltz.agent.tools.file-write/write-file]] so callers can
+   continue to use `kschltz.agent.tools.filesystem/write-file`."
+  ([] (fw/write-file))
+  ([workspace-root] (fw/write-file workspace-root))
+  ([workspace-root opts] (fw/write-file workspace-root opts)))
+
+(defn update-file
+  "Return a new `file/update` Tool instance. Re-exported from
+   [[kschltz.agent.tools.file-write/update-file]] so callers can
+   continue to use `kschltz.agent.tools.filesystem/update-file`."
+  ([] (fw/update-file))
+  ([workspace-root] (fw/update-file workspace-root))
+  ([workspace-root opts] (fw/update-file workspace-root opts)))
+
 (defn filesystem-registry
   "Return a map of filesystem tool name -> Tool instance.
 
@@ -316,18 +326,40 @@
                                    (default 128 KB)
      :max-search-results      — default hit cap for `file/search`
                                    (default 100)
+     :max-write-bytes         — cap for `file/write` and `file/update`
+                                   (default 10 MiB)
+     :refuse-clojure?         — refuse Clojure/EDN targets unless a
+                                   call sends `:clj-override`
+                                   (default true)
+     :blocked-paths           — set of forbidden path segments
+                                   (default .git, target, node_modules, .svn, CVS)
+     :clojure-guard?          — round-trip-validate Clojure/EDN results
+                                   via rewrite-clj (default false)
 
    When `:workspace-root` is omitted, the current working directory is
-   used. No path containment is enforced."
+   used. `file/write` and `file/update` enforce workspace-root
+   containment (per-call `:force` skips it) and always refuse blocked
+   path segments; `file/create` remains a thin create-only wrapper
+   that does not enforce containment."
   ([] (filesystem-registry {}))
   ([{:keys [workspace-root
             max-read-bytes
             max-search-file-bytes
-            max-search-results]}]
-   {"file/read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
-    "file/list"    (list-directory workspace-root)
-    "file/info"    (file-info workspace-root)
-    "file/create"  (create-file workspace-root)
-    "file/search"  (search-files workspace-root
-                                (or max-search-file-bytes default-max-search-file-bytes)
-                                (or max-search-results default-max-search-results))}))
+            max-search-results
+            max-write-bytes
+            refuse-clojure?
+            blocked-paths
+            clojure-guard?]}]
+   (let [write-opts {:max-write-bytes  max-write-bytes
+                     :refuse-clojure? refuse-clojure?
+                     :blocked-paths   blocked-paths
+                     :clojure-guard?  clojure-guard?}]
+     {"file/read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
+      "file/list"    (list-directory workspace-root)
+      "file/info"    (file-info workspace-root)
+      "file/create"  (create-file workspace-root)
+      "file/search"  (search-files workspace-root
+                                  (or max-search-file-bytes default-max-search-file-bytes)
+                                  (or max-search-results default-max-search-results))
+      "file/write"   (fw/write-file workspace-root write-opts)
+      "file/update"  (fw/update-file workspace-root write-opts)})))
