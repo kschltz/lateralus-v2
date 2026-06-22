@@ -154,7 +154,7 @@
                {"echo" (->EchoTool)})]
       (is (= "here is the answer" (:exchange/response out)))
       (is (seq (:agent/all-tool-results out)))
-      (is (true? (:agent/summary-attempted out))))))
+      (is (pos? (:agent/summary-attempts out 0))))))
 
 (deftest ensure-text-response-fires-empty-retry-when-nothing-ran
   (testing "model returned empty content with no tool calls on turn 1 -> an
@@ -165,7 +165,7 @@
                "hi"
                {"echo" (->EchoTool)})]
       (is (= "hello back" (:exchange/response out)))
-      (is (true? (:agent/empty-retry-attempted out))))))
+      (is (pos? (:agent/empty-retry-attempts out 0))))))
 
 (deftest unregistered-tool-does-not-end-in-silence
   (testing "calling a tool not in the registry still yields a textual response
@@ -186,8 +186,8 @@
                "hi"
                {"echo" (->EchoTool)})]
       (is (= "immediate answer" (:exchange/response out)))
-      (is (nil? (:agent/summary-attempted out)))
-      (is (nil? (:agent/empty-retry-attempted out))))))
+      (is (zero? (:agent/summary-attempts out 0)))
+      (is (zero? (:agent/empty-retry-attempts out 0))))))
 
 (deftest loop-stall-detection-stops-repeated-calls
   (testing "when the model emits the SAME tool call twice in a row, the loop
@@ -202,4 +202,71 @@
       (is (= "stalled; here is the answer" (:exchange/response out)))
       (is (= 1 (:agent/tool-loop-depth out))
           "stall detection stops the loop on the second identical call")
-      (is (true? (:agent/summary-attempted out))))))
+      (is (pos? (:agent/summary-attempts out 0))))))
+
+;; ---- empty-summary-call fix (2026-06-22 investigation) ----
+;;
+;; The summary mini-chain used to advertise :tools on the summary LLM
+;; call, so tool-happy models (kimi-k2.7-code:cloud) returned tool_calls
+;; instead of text -> empty :exchange/response. The fix strips :tools
+;; from the summary/empty-retry request and bumps the cap to 2 attempts.
+
+(deftest summary-call-strips-tools-so-model-cannot-re-call
+  (testing "ensure-text-response's summary LLM call has :tools removed
+            from :llm/request — even if the registry had tools, the
+            summary is text-only. Regression guard for the 2026-06-22
+            bug where the summary re-called file/read instead of
+            producing text."
+    (let [req-views (atom [])
+          observer  (reify LlmClient
+                      (-call [_ req]
+                        (swap! req-views conj req)
+                         ;; turn 1: emit a tool_call so the loop runs,
+                         ;; then the model returns empty + no calls on
+                         ;; the follow-up, triggering the summary path.
+                        (condp = (count @req-views)
+                          1 {:choices [{:message {:role "assistant"
+                                                  :content ""
+                                                  :tool_calls [{:id "tc1" :type "function"
+                                                                :function {:name "echo"
+                                                                           :arguments "{\"msg\":\"hi\"}"}}]}}]
+                             :model "fake/v0"}
+                          2 {:choices [{:message {:role "assistant" :content ""}}]
+                             :model "fake/v0"}
+                          3 {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
+                             :model "fake/v0"})))
+          out       (run-exchange observer "call echo" {"echo" (->EchoTool)})
+          summary-req (get @req-views 2)]   ; the 3rd call is the summary
+      (is (>= (count @req-views) 3) "at least 3 LLM calls ran (tool, empty, summary)")
+      (is (nil? (:tools summary-req))
+          "the summary LLM call must NOT advertise :tools")
+      (is (= "FINAL ANSWER" (:exchange/response out))
+          (str "with :tools stripped, the model must produce text; got response="
+               (pr-str (:exchange/response out))))
+      (is (not (true? (:agent/summary-failed? out)))
+          "summary should not fail when :tools is stripped"))))
+
+(deftest summary-returns-tool-calls-anyway-sets-summary-failed-flag
+  (testing "when the summary call STILL returns tool_calls (an
+            adversarial provider that ignores the absent :tools key),
+            the retry cap kicks in, sets :agent/summary-failed?, and
+            the response stays blank so the CLI fallback engages."
+    (let [out (run-with-queue
+               [(tool-call-choice (tool-call "tc1" "echo" "{\"msg\":\"x\"}"))
+                (text-choice "")
+                 ;; summary call #1 — returns tool_calls again
+                (tool-call-choice (tool-call "tc2" "echo" "{\"msg\":\"x\"}"))
+                 ;; summary call #2 — returns tool_calls again (cap hit)
+                (tool-call-choice (tool-call "tc3" "echo" "{\"msg\":\"x\"}"))
+                 ;; never reached
+                (text-choice "UNREACHED")]
+               "call echo"
+               {"echo" (->EchoTool)})]
+      (is (true? (:agent/summary-failed? out))
+          (str "summary-failed? must be set after the cap; got "
+               (pr-str (select-keys out [:agent/summary-failed?
+                                         :agent/summary-attempts]))))
+      (is (= 2 (:agent/summary-attempts out 0))
+          "summary must attempt exactly 2 times before giving up")
+      (is (str/blank? (:exchange/response out))
+          "response stays blank when summary exhausts its cap"))))

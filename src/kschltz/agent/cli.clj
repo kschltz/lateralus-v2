@@ -188,15 +188,24 @@
    response is at :exchange/response; future agents may put it
    elsewhere (e.g. a streaming buffer). When the model returns empty
    content after tool calls, prints a readable summary of those tool
-   results so the REPL is not silent."
+   results so the REPL is not silent. When :agent/summary-failed? or
+   :agent/empty-retry-failed? is set, prepend a one-line breadcrumb so
+   the user knows the model did not produce a final answer (the
+   tool-result-summary digest still prints so the REPL is not blank)."
   [^java.io.PrintWriter out result]
   (let [response (:exchange/response result)
+        prefix  (cond
+                 (:agent/summary-failed? result)
+                 "[lateralus: model kept calling tools on the summary turn; showing tool results instead]\n\n"
+                 (:agent/empty-retry-failed? result)
+                 "[lateralus: model produced no response after retries]\n\n"
+                 :else "")
         text (if (seq response)
                response
                (or (tool-result-summary result)
                    (str "lateralus: no response (chain returned: "
                         (pr-str result) ")")))]
-    (.println out text)))
+    (.println out (str prefix text))))
 
 (defn- default-system-fn
   "Production :system-fn. Builds and starts an Integrant system
