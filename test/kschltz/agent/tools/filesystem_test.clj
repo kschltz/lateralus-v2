@@ -36,15 +36,17 @@
 
 (def ^:private dummy-ctx {})
 
-(deftest filesystem-registry-contains-five-tools
+(deftest filesystem-registry-contains-seven-tools
   (testing "filesystem-registry returns the filesystem tools"
     (let [registry (tools.filesystem/filesystem-registry)]
-      (is (= 5 (count registry)))
+      (is (= 7 (count registry)))
       (is (contains? registry "file/read"))
       (is (contains? registry "file/list"))
       (is (contains? registry "file/info"))
       (is (contains? registry "file/create"))
       (is (contains? registry "file/search"))
+      (is (contains? registry "file/write"))
+      (is (contains? registry "file/update"))
       (is (every? tool/tool? (vals registry))))))
 
 (deftest file-create-writes-content-and-parents
@@ -168,6 +170,277 @@
           parsed (json/parse-string result true)]
       (is (= 2 (count parsed))))))
 
+(deftest file-write-creates-new-file-and-parents
+  (testing "file/write creates missing parent directories and the file"
+    (let [reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/write")
+                                  {:path "deep/nested/written.txt"
+                                   :content "hello world\n"
+                                   :create-dirs true}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)
+          on-disk (slurp (io/file @tmp-dir "deep/nested/written.txt"))]
+      (is (true? (:created parsed)))
+      (is (true? (:changed parsed)))
+      (is (nil? (:backup-path parsed)))
+      (is (= "hello world\n" on-disk))
+      (is (= (count (.getBytes "hello world\n" "UTF-8")) (:bytes-written parsed))))))
+
+(deftest file-write-overwrites-and-backs-up
+  (testing "file/write writes a timestamped .bak.<millis> sidecar of the prior contents"
+    (let [target (temp-file "overwrite.txt" "old content\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/write")
+                                  {:path "overwrite.txt"
+                                   :content "new content\n"}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)
+          backup (io/file (:backup-path parsed))]
+      (is (true? (:changed parsed)))
+      (is (string? (:backup-path parsed)))
+      (is (.exists backup) "backup sidecar should exist")
+      (is (re-find #"\.bak\.\d+$" (.getPath backup)))
+      (is (= "old content\n" (slurp backup)))
+      (is (= "new content\n" (slurp target))))))
+
+(deftest file-write-rejects-omission-placeholder
+  (testing "file/write refuses content containing an omission-placeholder"
+    (let [target (temp-file "stub.txt" "real content\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/write")
+                                  {:path "stub.txt"
+                                   :content "// ... existing code ..."}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "omission-placeholder" (:error parsed)))
+      (is (= "real content\n" (slurp target)) "file must not be touched on rejection"))))
+
+(deftest file-write-rejects-blocked-path
+  (testing "file/write refuses to touch a blocked segment even with :force"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/write")
+                                  {:path ".git/hooks/pre-commit"
+                                   :content "evil"
+                                   :force true}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "blocked-path" (:error parsed)))
+      (is (not (.exists (io/file @tmp-dir ".git")))))))
+
+(deftest file-write-rejects-outside-workspace-without-force
+  (testing "file/write refuses paths outside the workspace root"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          outside (File/createTempFile "lateralus-outside-" ".txt")
+          outside-path (.getAbsolutePath outside)
+          _ (.delete outside)
+          result (tool/invoke-tool (get reg "file/write")
+                                  {:path outside-path :content "nope"}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "outside-write-dir" (:error parsed)))
+      (is (not (.exists outside))))))
+
+(deftest file-write-honors-create-dirs-false
+  (testing "file/write errors (does not silently mkdir) when :create-dirs is omitted"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/write")
+                                  {:path "missing-dir/x.txt" :content "x"}
+                                  dummy-ctx)]
+      (is (string? result))
+      (is (str/starts-with? result "Filesystem tool error:")
+          "missing parent dir + no :create-dirs must surface as a tool error")
+      (is (not (.exists (io/file @tmp-dir "missing-dir")))
+          "no parent directory should have been created"))))
+
+(deftest file-update-single-edit-applies
+  (testing "file/update applies a single old->new edit and reports fuzzy-fired false"
+    (let [target (temp-file "ed.txt" "AAA BBB CCC\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "ed.txt"
+                                   :edits [{:old-text "BBB" :new-text "X"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:changed parsed)))
+      (is (= 1 (:edits-applied parsed)))
+      (is (false? (:fuzzy-fired parsed)))
+      (is (= "AAA X CCC\n" (slurp target)))
+      (is (string? (:backup-path parsed))))))
+
+(deftest file-update-multi-edit-reverse-position-order
+  (testing "file/update applies multiple edits regardless of position order"
+    (let [target (temp-file "ed2.txt" "AAA BBB CCC\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "ed2.txt"
+                                   :edits [{:old-text "AAA" :new-text "X"}
+                                           {:old-text "CCC" :new-text "Z"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:changed parsed)))
+      (is (= 2 (:edits-applied parsed)))
+      (is (= "X BBB Z\n" (slurp target))))))
+
+(deftest file-update-overlap-rejected
+  (testing "file/update rejects overlapping old-text spans without writing"
+    (let [target (temp-file "ed-overlap.txt" "abcdefgh\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "ed-overlap.txt"
+                                   :edits [{:old-text "abcd" :new-text "X"}
+                                           {:old-text "cdef" :new-text "Y"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "overlap" (:error parsed)))
+      (is (= "abcdefgh\n" (slurp target)))
+      (is (nil? (:backup-path parsed)) "no backup should be written on rejection"))))
+
+(deftest file-update-no-op-rejected
+  (testing "file/update rejects an edit where old-text == new-text"
+    (let [target (temp-file "noop.txt" "hello\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "noop.txt"
+                                   :edits [{:old-text "hello" :new-text "hello"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "no-op" (:error parsed)))
+      (is (= "hello\n" (slurp target))))))
+
+(deftest file-update-empty-old-text-rejected
+  (testing "file/update rejects an edit with empty old-text"
+    (let [target (temp-file "empty.txt" "hello\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "empty.txt"
+                                   :edits [{:old-text "" :new-text "X"}]}
+                                  dummy-ctx)]
+      ;; The empty :old-text is rejected at the Malli input-schema
+      ;; boundary with min-length 1, so the tool never enters its body
+      ;; and never writes the file.
+      (is (string? result))
+      (is (str/includes? result "Malli validation"))
+      (is (= "hello\n" (slurp target))))))
+
+(deftest file-update-no-match-atomic-no-write
+  (testing "file/update returns :no-match atomically (no backup, file unchanged)"
+    (let [target (temp-file "nomatch.txt" "abc def\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "nomatch.txt"
+                                   :edits [{:old-text "zzz" :new-text "X"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "no-match" (:error parsed)))
+      (is (= "abc def\n" (slurp target)))
+      (is (nil? (:backup-path parsed))))))
+
+(deftest file-update-ambiguous-without-replace-all
+  (testing "file/update refuses multiple matches when :replace-all is absent"
+    (let [target (temp-file "ambig.txt" "foo foo foo\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "ambig.txt"
+                                   :edits [{:old-text "foo" :new-text "bar"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "ambiguous-match" (:error parsed)))
+      (is (= 3 (:count parsed)))
+      (is (= "foo foo foo\n" (slurp target))))))
+
+(deftest file-update-replace-all-replaces-every-occurrence
+  (testing "file/update replaces every occurrence when :replace-all is true"
+    (let [target (temp-file "repall.txt" "foo foo foo\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "repall.txt"
+                                   :edits [{:old-text "foo" :new-text "bar"
+                                            :replace-all true}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:changed parsed)))
+      (is (= 3 (:edits-applied parsed)))
+      (is (= "bar bar bar\n" (slurp target))))))
+
+(deftest file-update-expected-occurrences-mismatch
+  (testing "file/update rejects an :expected-occurrences count that does not match"
+    ;; 5 occurrences; expect 3 with replace-all so we bypass the
+    ;; ambiguous-match branch and reach the count check.
+    (let [target (temp-file "count.txt" "foo foo foo foo foo\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "count.txt"
+                                   :edits [{:old-text "foo" :new-text "bar"
+                                            :replace-all true
+                                            :expected-occurrences 3}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "count-mismatch" (:error parsed)))
+      (is (= 3 (:expected parsed)))
+      (is (= 5 (:actual parsed)))
+      (is (= "foo foo foo foo foo\n" (slurp target))))))
+
+(deftest file-update-fuzzy-on-eol-mismatch
+  (testing "file/update fuzzy-matches across CRLF/LF mismatches"
+    (let [target (temp-file "eol.txt" "alpha\r\nbeta\r\ngamma\r\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "eol.txt"
+                                   :edits [{:old-text "alpha\nbeta" :new-text "FIRST"}]
+                                   :fuzzy true}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:changed parsed)) "EOL mismatch should resolve via fuzzy")
+      (is (true? (:fuzzy-fired parsed)))
+      (is (= "FIRST\r\ngamma\r\n" (slurp target)))))
+
+  (testing "file/update without :fuzzy rejects the EOL mismatch"
+    (let [target (temp-file "eol2.txt" "alpha\r\nbeta\r\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "eol2.txt"
+                                   :edits [{:old-text "alpha\nbeta" :new-text "FIRST"}]
+                                   :fuzzy false}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "no-match" (:error parsed)))
+      (is (= "alpha\r\nbeta\r\n" (slurp target))))))
+
+(deftest file-update-missing-file
+  (testing "file/update reports :file-not-found for a non-existent path"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "no-such-file.txt"
+                                   :edits [{:old-text "a" :new-text "b"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "file-not-found" (:error parsed))))))
+
+(deftest file-update-line-number-prefix-rejected
+  (testing "file/update rejects a pasted old-text that carries a line-number prefix"
+    (let [target (temp-file "numbered.txt" "alpha\nbeta\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "numbered.txt"
+                                   :edits [{:old-text "12:foo" :new-text "bar"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "line-number-prefix" (:error parsed)))
+      (is (= "alpha\nbeta\n" (slurp target))))))
+
+(deftest file-update-stringified-edits-seam
+  (testing "file/update accepts :edits as a JSON string and decodes it"
+    (let [target (temp-file "seam.txt" "foo bar\n")
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "seam.txt"
+                                   :edits "[{\"old-text\":\"foo\",\"new-text\":\"FOO\"}]"}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:changed parsed)) (str "result=" result))
+      (is (= 1 (:edits-applied parsed)))
+      (is (= "FOO bar\n" (slurp target))))))
+
 (deftest custom-max-search-file-bytes-skips-large-files
   (testing "a configured :max-search-file-bytes skips large files"
     (temp-file "small.txt" "needle")
@@ -179,3 +452,37 @@
           parsed (json/parse-string result true)]
       (is (= 1 (count parsed)))
       (is (str/ends-with? (:file (first parsed)) "small.txt")))))
+
+(deftest file-update-fuzzy-on-smart-quotes
+  (testing "file/update fuzzy-matches smart quotes in the file against an ASCII old-text"
+    (let [target (temp-file "smart.txt"
+                            (str "foo " (char 0x2018) "bar" (char 0x2019) " baz\n"))
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "smart.txt"
+                                   :edits [{:old-text "'bar'"
+                                            :new-text "'BAR'"}]
+                                   :fuzzy true}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:changed parsed)) (str "result=" result))
+      (is (= 1 (:edits-applied parsed)))
+      (is (true? (:fuzzy-fired parsed)) "smart-quote match must come from the fuzzy path")
+      (is (= "foo 'BAR' baz\n" (slurp target))))))
+
+(deftest file-update-preserves-bom-on-edit
+  (testing "file/update edits a BOM-prefixed file and leaves exactly one leading BOM"
+    (let [target (temp-file "bom.txt"
+                            (str (char 0xFEFF) "foo bar baz\n"))
+          reg    (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/update")
+                                  {:path "bom.txt"
+                                   :edits [{:old-text "bar" :new-text "BAR"}]}
+                                  dummy-ctx)
+          parsed (json/parse-string result true)
+          after  (slurp target)]
+      (is (true? (:changed parsed)) (str "result=" result))
+      (is (= (str (char 0xFEFF) "foo BAR baz\n") after)
+          "result must retain exactly one leading BOM, not two")
+      (is (= 1 (count (filter #(= % (char 0xFEFF)) after)))
+          "exactly one U+FEFF in the file after the edit"))))
