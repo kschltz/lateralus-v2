@@ -15,6 +15,7 @@
  :lateralus/file-tools           {:workspace-root "/tmp/lateralus-demo"}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {:workspace-root "/tmp/lateralus-demo"}
+ :lateralus/logging             {}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools]

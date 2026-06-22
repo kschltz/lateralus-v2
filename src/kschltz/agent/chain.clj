@@ -86,14 +86,32 @@
                        :chain/explanation explanation}))))
   ctx)
 
+(defn- call-on-stage
+  "Invoke the :chain/on-stage logging hook when :chain/log? is true.
+   Swallows all errors so logging can never break the chain. Returns
+   `ctx` unchanged (the hook is side-effect only)."
+  [ctx interceptor stage direction]
+  (when (and (:chain/log? ctx) (:chain/on-stage ctx))
+    (try
+      ((:chain/on-stage ctx) ctx interceptor stage direction)
+      (catch Throwable t
+        (binding [*out* *err*]
+          (println "lateralus chain logging error:" (ex-message t))))))
+  ctx)
+
 (defn- try-stage
   "Run a :enter or :leave fn. On throw (or instrumentation throw) sets
-   ::error and returns ctx without re-throwing."
+   ::error and returns ctx without re-throwing. When :chain/log? is
+   true, the :chain/on-stage hook is invoked before (:enter direction)
+   and after (:leave direction) the stage fn; logging failures are
+   swallowed so they never affect the chain."
   [ctx interceptor stage]
   (if-some [f (get interceptor stage)]
     (try
-      (-> (f ctx)
-          (check-instrumented interceptor stage))
+      (call-on-stage ctx interceptor stage :enter)
+      (let [result (check-instrumented (f ctx) interceptor stage)]
+        (call-on-stage result interceptor stage :leave)
+        result)
       (catch Throwable t
         (assoc ctx ::error (error-map t interceptor stage))))
     ctx))

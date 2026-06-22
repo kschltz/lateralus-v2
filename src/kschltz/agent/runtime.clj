@@ -4,6 +4,7 @@
    back into its state atom. Also accumulates token usage from LLM
    responses."
   (:require [kschltz.agent.chain :as chain]
+            [kschltz.agent.logging :as logging]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]))
 
@@ -39,7 +40,7 @@
   (send-message [runtime user-text] "Run one exchange.")
   (stop [runtime] "Return the current merged state."))
 
-(defrecord RuntimeRecord [state agent-map session-id]
+(defrecord RuntimeRecord [state agent-map session-id log-sink]
   AgentRuntime
   (session-id [_] session-id)
   (send-message [this user-text]
@@ -53,7 +54,8 @@
                             :agent/state               base-state
                             :llm/client               (:agent/llm-client agent-map)
                             :memory/backend           (:memory-backend agent-map)
-                            :embedder                 (:embedder agent-map)}
+                            :embedder                 (:embedder agent-map)
+                            :agent/log-sink           log-sink}
           chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
@@ -66,12 +68,17 @@
 
 (defn start
   "Create a runtime for the given agent-map. 1-arity generates a fresh
-   session-id; 2-arity uses the supplied session-id."
+   session-id; 2-arity uses the supplied session-id. Builds and opens a
+   per-session log sink from the agent-map's `:agent/logging` config so
+   the logging interceptor (first in the chain) can write per-stage
+   events. When logging is disabled the sink is nil and logging is inert."
   ([agent-map]
    (start agent-map (str (random-uuid))))
   ([agent-map session-id]
-   (map->RuntimeRecord
-    {:state      (atom (merge (:initial-state agent-map {})
-                              {:agent/session-id session-id}))
-     :agent-map  agent-map
-     :session-id session-id})))
+   (let [log-sink (logging/build-sink (:agent/logging agent-map) session-id)]
+     (map->RuntimeRecord
+      {:state      (atom (merge (:initial-state agent-map {})
+                                {:agent/session-id session-id}))
+       :agent-map  agent-map
+       :session-id session-id
+       :log-sink   log-sink}))))

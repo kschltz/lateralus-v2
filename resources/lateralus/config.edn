@@ -36,6 +36,7 @@
  :lateralus/clojure-tools        {}
  ;; Web tools: :none by default (air-gapped). Switch to :mojeek for live search.
  :lateralus/web-tools      {:provider :none}
+ :lateralus/logging             {}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools

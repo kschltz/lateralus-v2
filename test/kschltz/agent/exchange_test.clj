@@ -17,6 +17,7 @@
             [kschltz.agent.interceptors.schema :as schema]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.llm.client :as lcm-client]
+            [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
@@ -48,7 +49,8 @@
 
 (deftest chain-loads-in-correct-order
   (testing "default chain has the locked stage order"
-    (is (= [::ix/error-boundary
+    (is (= [::logging/logging
+            ::ix/error-boundary
             :kschltz.agent.plugins.tools/seed-registry
             ::ix/compose-context
             ::loop/inject-tools
@@ -58,6 +60,7 @@
             ::loop/dispatch-tools
             ::loop/compose-tool-results
             ::loop/tool-loop
+            ::loop/ensure-text-response
             ::ix/store-exchange
             ::ix/deliver-responses
             ::ix/notify]
