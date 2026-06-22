@@ -70,13 +70,79 @@
 ;; TODO memory-followup: delete this stub. It is a no-op marker
 ;; so a future history-trimming PR has a clear `find-fn + replace`
 ;; target (token budget, recall window, etc.).
-(defn- trim-history-stub
-  "Stub for history trimming. A future memory/history follow-up
-   replaces this with a real implementation; see the
-   :compose/trimmed? marker on ctx."
-  [messages]
-  messages)
+(def ^:private max-history-entries
+  "Hard cap on the number of non-system messages retained in
+   `:agent/history` after trimming. Keeps context growth bounded so
+   large file reads do not blow up the request forever."
+  40)
 
+(def ^:private max-tool-content-chars
+  "Hard cap on the `:content` of any `:role tool` message retained
+   in history. Tool results larger than this are truncated with a
+   `...[trimmed]` marker so the model still knows the original was
+   larger but does not pay the token cost on every subsequent turn."
+  2000)
+
+(defn- truncate-tool-content
+  "Truncate a single message's `:content` if it is a `:role tool`
+   message whose content exceeds `max-tool-content-chars`. Non-tool
+   messages (and tool messages already under the cap) pass through
+   unchanged. The truncation appends a `...[trimmed]` marker so the
+   model can see it was elided, not silently corrupted."
+  [msg]
+  (let [content (:content msg)
+        over?   (and (= "tool" (:role msg))
+                     (string? content)
+                     (> (count content) max-tool-content-chars))]
+    (if over?
+      (assoc msg :content
+             (str (subs content 0 max-tool-content-chars)
+                  "...[trimmed]"))
+      msg)))
+
+(defn- body-window
+  "Pick the trailing window of `body` (non-system messages) to keep.
+   Guarantees that the most recent `:role user` message survives
+   even when the raw `max-history-entries` window would have cut it
+   off. Returns a vector."
+  [body]
+  (if (<= (count body) max-history-entries)
+    (vec body)
+    (let [n            (count body)
+          window-start (- n max-history-entries)
+          raw-tail     (subvec body window-start)
+          last-user-ix (loop [i (dec n)]
+                         (cond
+                           (neg? i)                      nil
+                           (= "user" (:role (nth body i))) i
+                           :else                          (recur (dec i))))]
+      (if (or (nil? last-user-ix)
+              (>= last-user-ix window-start))
+        (vec raw-tail)
+        ;; Most recent user message sits BEFORE the raw window start;
+        ;; anchor the window to include it (and everything after).
+        ;; This can exceed `max-history-entries` when the user turn is
+        ;; far back — acceptable because "never drop the most recent
+        ;; user turn" outranks the hard cap.
+        (vec (subvec body last-user-ix))))))
+
+(defn- trim-history
+  "Trim `messages` to a conservative, OpenAI-compatible form:
+   - always keep the leading `:role system` message if present;
+   - keep the last `max-history-entries` non-system messages, but
+     never drop the most recent `:role user` message;
+   - truncate any `:role tool` `:content` over
+     `max-tool-content-chars` with a `...[trimmed]` marker.
+
+   Returns a vector of messages in original order."
+  [messages]
+  (let [msgs     (vec messages)
+        first-   (first msgs)
+        has-sys? (and (map? first-) (= "system" (:role first-)))
+        body     (if has-sys? (subvec msgs 1) msgs)
+        kept     (body-window body)
+        result   (if has-sys? (into [first-] kept) kept)]
+    (mapv truncate-tool-content result)))
 (def error-boundary
   "Handles any error raised by the chain. Clears the engine ::error
    key so the engine treats the error as handled and proceeds to
@@ -116,9 +182,7 @@
                               (seq recalled) (into recalled)
                               (seq history)  (into history)
                               (seq user-text) (conj {:role "user" :content user-text}))
-                  ;; TODO memory-followup: replace the trim-history-stub
-                  ;; call with the real implementation.
-                  trimmed   (trim-history-stub messages)]
+                  trimmed   (trim-history messages)]
               (assoc ctx
                      :llm/request
                      {:base-url (:base-url state)
@@ -148,20 +212,67 @@
 
 (def store-exchange
   "Leave stage. Records the final exchange on ctx as
-   `:memory/last-exchange` and appends the current user/assistant
-   turn to `:agent/state-delta :agent/history` so the next exchange
-   can include the full explicit transcript."
+   `:memory/last-exchange` and appends the current user / assistant
+   turn (including the assistant `tool_calls` turn and matching :role tool result messages) to `:agent/state-delta
+   :agent/history` so the next exchange can include the full explicit
+   transcript. The accumulated history is then routed through
+   `trim-history` so big file reads do not blow up the context window
+   forever.
+
+   Tool persistence keys off `:agent/all-tool-results` (which survives
+   across ReAct loop iterations), NOT `:tool/calls` (which only holds
+   the final turn's calls). When the ensure-text-response summary path
+   runs, the final turn has no tool calls but earlier turns did — so
+   keying off `:tool/calls` would silently drop the tool results. We
+   reconstruct the assistant tool-calling message from the results'
+   `:call` fields so the OpenAI `:tool_calls` + :role tool pairing
+   stays valid."
   {:name ::store-exchange
    :leave (fn [ctx]
             (let [state        (:agent/state ctx)
                   prev-history (or (:agent/history state) [])
                   user-text    (:exchange/user-text ctx)
                   response     (:exchange/response ctx)
-                  history      (cond-> prev-history
-                                  (seq user-text) (conj {:role "user" :content user-text})
-                                  (seq response)  (conj {:role "assistant" :content response}))
+                  tool-results (or (:agent/all-tool-results ctx) [])
+                  had-tools?   (seq tool-results)
+                  ;; Build the OpenAI-compatible message order:
+                  ;;   1. optional user turn,
+                  ;;   2. when tools ran: assistant tool-calling turn
+                  ;;      (content empty — the model emitted calls,
+                  ;;      not text) carrying :tool_calls reconstructed
+                  ;;      from the results' :call fields,
+                  ;;   3. one {:role tool :tool_call_id ...} entry
+                  ;;      per result,
+                  ;;   4. the final assistant text (the summary or the
+                  ;;      direct response), when non-empty.
+                  with-user    (if (seq user-text)
+                                 (conj prev-history
+                                       {:role "user" :content user-text})
+                                 prev-history)
+                  with-tool-asm (if had-tools?
+                                  (conj with-user
+                                        {:role       "assistant"
+                                         :content    ""
+                                         :tool_calls (mapv :call tool-results)})
+                                  with-user)
+                  with-tool-results (if had-tools?
+                                      (into with-tool-asm
+                                            (mapv (fn [{:keys [call result]}]
+                                                    {:role         "tool"
+                                                     :tool_call_id (:id call)
+                                                     :content      (str result)})
+                                                  tool-results))
+                                      with-tool-asm)
+                  with-response (if (seq response)
+                                  (conj with-tool-results
+                                        {:role "assistant" :content response})
+                                  with-tool-results)
+                  ;; Cap history growth: keep the system message + the
+                  ;; last N entries, never drop the most recent user
+                  ;; turn, and truncate huge tool :content strings.
+                  history      (trim-history with-response)
                   delta        (merge (or (:agent/state-delta ctx) {})
-                                        {:agent/history history})]
+                                      {:agent/history history})]
               (assoc ctx
                      :memory/last-exchange
                      {:session-id       (:exchange/session-id ctx)
