@@ -162,17 +162,33 @@
           "compose stage records the trim marker; the future
    history-trimming follow-up will replace or remove it"))))
 
-(deftest trim-history-stub-arity
-  (testing "trim-history-stub is a no-op identity with arity 1 (memory follow-up keeps the arity)"
-    (let [resolved (resolve 'kschltz.agent.interceptors/trim-history-stub)
+(deftest trim-history-is-arity-1-and-bounds-growth
+  (testing "trim-history is a fn of arity 1 that keeps the leading system
+            message, caps the body to max-history-entries, never drops the
+            most recent user turn, and truncates oversized tool content"
+    (let [resolved (resolve 'kschltz.agent.interceptors/trim-history)
           v        resolved
           arity    (-> v meta :arglists first count)]
-      (is (some? resolved) "trim-history-stub is defined")
-      (is (fn? @v) "trim-history-stub is a fn")
-      (is (= 1 arity)
-          "trim-history-stub takes exactly 1 arg (memory follow-up keeps the arity)")
-      (is (= [:a :b] (@v [:a :b]))
-          "trim-history-stub returns its input unchanged"))))
+      (is (some? resolved) "trim-history is defined")
+      (is (fn? @v) "trim-history is a fn")
+      (is (= 1 arity) "trim-history takes exactly 1 arg")
+      ;; Keeps a small vector as-is.
+      (let [small [{:role "system" :content "sys"}
+                   {:role "user" :content "hi"}
+                   {:role "assistant" :content "yo"}]]
+        (is (= small (@v small)) "small history is returned unchanged"))
+      ;; Truncates an oversized :role "tool" :content with the marker.
+      (let [big (apply str (repeat 3000 "x"))
+            trimmed (@v [{:role "tool" :tool_call_id "t1" :content big}])]
+        (is (str/ends-with? (-> trimmed first :content) "...[trimmed]")
+            "oversized tool content is truncated with a marker"))
+      ;; Never drops the most recent user turn even when the window would cut it.
+      (let [msgs (into [{:role "system" :content "sys"}]
+                     (concat (repeat 50 {:role "assistant" :content "x"})
+                             [{:role "user" :content "latest user"}]))
+            out (@v msgs)]
+        (is (some #(= "latest user" (:content %)) out)
+            "the most recent user turn survives the cap")))))
 
 ;; ---- error-boundary handles errors so :error/raised is observable ----
 
