@@ -5,6 +5,7 @@ All notable changes to `lateralus-v2`.
 ## [Unreleased]
 
 ### Added
+- **Runtime-eval tool suite** (`kschltz.agent.tools.runtime.*`): `clojure/eval` (evaluate Clojure in a persistent runtime namespace, with stdout/value/exception capture and a per-call timeout), `clojure/add-lib` (load Maven/Git dependencies at runtime via Clojure 1.12 `clojure.repl.deps/add-libs`), and `clojure/loaded-libs`. Isolated behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary; wired via the `:lateralus/runtime-tools` Integrant key (JVM config + `default-config`; excluded from native-image). Guarded by `:enabled?` / `:network?` toggles. See `docs/runtime-eval.md`.
 - Bootstrap: new repo at `net.clojars.kschltz/lateralus-v2`, Clojure 1.12.5, Integrant, Malli, hato.
 - Chain engine (`kschltz.agent.chain`): Pedestal-style enter/leave/error interceptor engine with pure context maps.
 - Plugin system (`kschltz.agent.plugin`) + default exchange chain (`kschltz.agent.exchange`).

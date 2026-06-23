@@ -41,6 +41,8 @@
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
             [kschltz.agent.tools.clojure :as tools.clojure]
+            [kschltz.agent.tools.runtime.tools :as tools.runtime]
+            [kschltz.agent.tools.runtime.schemas :as runtime.schemas]
             [kschltz.agent.tools.web.web :as tools.web]
             [kschltz.agent.tools.web.schemas :as web.schemas]
             [kschltz.agent.logging :as logging]
@@ -153,6 +155,9 @@
 (defmethod ig/assert-key :lateralus/logging [_ config]
   (assert-malli! :lateralus/logging LoggingConfig config))
 
+(defmethod ig/assert-key :lateralus/runtime-tools [_ config]
+  (assert-malli! :lateralus/runtime-tools runtime.schemas/RuntimeConfig config))
+
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
 
@@ -253,6 +258,14 @@
    clojure/insert-form, clojure/edit-def, clojure/format-file)."
   (tools.clojure/clojure-registry opts))
 
+(defmethod ig/init-key :lateralus/runtime-tools [_ opts]
+  "Returns the runtime-eval tool registry (clojure/eval, clojure/add-lib,
+   clojure/loaded-libs). These run Clojure code in-process and load Maven
+   dependencies at runtime; gate them with `:enabled?` / `:network?`.
+   JVM-only — not wired into the native-image config (GraalVM cannot
+   compile arbitrary forms at runtime)."
+  (tools.runtime/runtime-registry opts))
+
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
   (plugins.tools/tools-plugin registry))
 
@@ -312,9 +325,11 @@
    :lateralus/logging             {}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
+   :lateralus/runtime-tools        {}
    :lateralus/web-tools            {:provider :none}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)
+                                    (ig/ref :lateralus/runtime-tools)
                                     (ig/ref :lateralus/web-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)

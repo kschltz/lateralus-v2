@@ -29,6 +29,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/file-tools       ──▶  convenience filesystem tool registry│
 │  :lateralus/self-awareness-tools ──▶  self/status tool registry      │
 │  :lateralus/clojure-tools    ──▶  clojure structured-edit tool registry│
+│  :lateralus/runtime-tools    ──▶  ClojureRuntime tool registry (clojure/eval, add-lib, loaded-libs)│
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web/search, web/fetch, web/extract)│
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
@@ -127,7 +128,7 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
-- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure tools (`:lateralus/clojure-tools`), and web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`).
+- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure structured-editing tools (`:lateralus/clojure-tools`), clojure runtime-eval tools (`:lateralus/runtime-tools` — `clojure/eval`, `clojure/add-lib`, `clojure/loaded-libs`, behind the `ClojureRuntime` protocol), and web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`).
 - **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
 - **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
@@ -209,7 +210,7 @@ Required keys: `:base-url`, `:model`, `:dimensions`. Optional: `:api-key`, `:con
 
 ## Config validation
 
-`kschltz.agent.system` registers `defmethod ig/assert-key` for the externally-configurable `:lateralus/*` keys: `:lateralus/llm-client`, `:lateralus/embedder`, `:lateralus/memory-backend`, and `:lateralus/web-tools`. Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
+`kschltz.agent.system` registers `defmethod ig/assert-key` for the externally-configurable `:lateralus/*` keys: `:lateralus/llm-client`, `:lateralus/embedder`, `:lateralus/memory-backend`, `:lateralus/web-tools`, and `:lateralus/runtime-tools`. Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
 
 For example:
 
@@ -254,6 +255,10 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/tools/filesystem.clj` | read-only filesystem `Tool` implementations |
 | `src/kschltz/agent/tools/self.clj` | self-awareness `Tool` (`self/status`) |
 | `src/kschltz/agent/tools/clojure.clj` | clojure structured-editing `Tool` implementations |
+| `src/kschltz/agent/tools/runtime/protocol.clj` | `ClojureRuntime` protocol (runtime-eval boundary) |
+| `src/kschltz/agent/tools/runtime/schemas.clj` | runtime-eval Malli schemas + config |
+| `src/kschltz/agent/tools/runtime/jvm.clj` | in-process `ClojureRuntime` impl (eval + `add-libs`), Malli-instrumented |
+| `src/kschltz/agent/tools/runtime/tools.clj` | `clojure/eval`, `clojure/add-lib`, `clojure/loaded-libs` Tool implementations and registry factory |
 | `src/kschltz/agent/tools/web/protocol.clj` | `WebProvider` protocol |
 | `src/kschltz/agent/tools/web/schemas.clj` | Web tool Malli schemas |
 | `src/kschltz/agent/tools/web/guards.clj` | URL/query/snippet guard pipeline |
