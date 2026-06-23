@@ -164,3 +164,27 @@
   (testing "parse-coords throws on empty input and non-map coords"
     (is (thrown? clojure.lang.ExceptionInfo (rt/parse-coords {})))
     (is (thrown? clojure.lang.ExceptionInfo (rt/parse-coords {:coords "[1 2 3]"})))))
+
+;; ---- paren-repair integration (2026-06-22) ----
+
+(deftest eval-tool-repairs-broken-code-before-evaluating
+  (testing "clojure/eval repairs missing delimiters before running the code,
+            and flags :paren-repaired? in the JSON envelope"
+    (let [reg  (rt/runtime-registry {:enabled? true})
+          etool (get reg "clojure/eval")
+          out   (json/parse-string (tool/invoke-tool etool {:code "(+ 1 2"} {}) true)]
+      (is (= 3 (-> out :value read-string))
+          "the broken (+ 1 2 was repaired to (+ 1 2) and evaluated to 3")
+      (is (true? (:paren-repaired? out))
+          "the envelope must flag that a repair was applied")
+      (is (= "parinfer" (:paren-repair-method out))
+          "the repair method is recorded"))))
+
+(deftest eval-tool-leaves-balanced-code-unrepaired
+  (testing "balanced code is not flagged as repaired"
+    (let [reg  (rt/runtime-registry {:enabled? true})
+          etool (get reg "clojure/eval")
+          out   (json/parse-string (tool/invoke-tool etool {:code "(+ 1 2)"} {}) true)]
+      (is (= 3 (-> out :value read-string)))
+      (is (nil? (:paren-repaired? out))
+          "balanced code must not carry the :paren-repaired? flag"))))

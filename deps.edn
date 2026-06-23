@@ -6,6 +6,13 @@
         hato/hato {:mvn/version "1.0.0"}
         cheshire/cheshire {:mvn/version "6.2.0"}
         rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
+        ;; edamame + parinferish: paren/delimiter rebalancing for the
+        ;; clojure/eval tool. edamame detects delimiter errors (fast,
+        ;; native-safe); parinferish (pure-Clojure parinfer, indent mode)
+        ;; repairs them. Both are pure Clojure and GraalVM-safe, so they
+        ;; are also listed in :native :replace-deps below.
+        borkdude/edamame {:mvn/version "1.5.37"}
+        parinferish/parinferish {:mvn/version "0.8.0"}
         ;; Hickory HTML parser, used by the `:mojeek` AND `:ddg` live web
         ;; providers (both parse result-page HTML). JVM-only — kept out
         ;; of the `:native` `:replace-deps` below so GraalVM builds stay
@@ -48,6 +55,8 @@
                           hato/hato {:mvn/version "1.0.0"}
                           cheshire/cheshire {:mvn/version "6.2.0"}
                           rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
+                          borkdude/edamame {:mvn/version "1.5.37"}
+                          parinferish/parinferish {:mvn/version "0.8.0"}
                           io.github.clojure/tools.build {:mvn/version "0.10.13"}
                           com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
            ;; Direct-linking improves native-image size and startup.

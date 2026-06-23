@@ -22,6 +22,7 @@
             [clojure.edn :as edn]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.runtime.jvm :as jvm]
+            [kschltz.agent.tools.runtime.paren-repair :as paren-repair]
             [kschltz.agent.tools.runtime.protocol :as proto]
             [kschltz.agent.tools.runtime.schemas :as schemas]))
 
@@ -112,9 +113,13 @@
     (try
       (if-not (enabled? config)
         (disabled-envelope "clojure/eval")
-        (json-envelope
-         (proto/-eval runtime (:code args)
-                      (cond-> {} (:ns args) (assoc :ns (:ns args))))))
+        (let [{:keys [code repaired? method]} (paren-repair/repair-code (:code args))
+              result (proto/-eval runtime code
+                                  (cond-> {} (:ns args) (assoc :ns (:ns args))))]
+          (json-envelope
+           (cond-> result
+             repaired? (assoc :paren-repaired? true
+                              :paren-repair-method (name method))))))
       (catch Throwable t
         (error-envelope t)))))
 
