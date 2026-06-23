@@ -102,6 +102,32 @@ All three ops are guarded against SSRF (private/loopback/metadata IPs,
 `file://`, protocol-relative URLs), prompt-injection markers, recursive
 self-activation, and snippet exfiltration patterns. See [`docs/web.md`](docs/web.md).
 
+## Runtime-eval tool
+
+The agent ships a Clojure runtime-eval suite for prototyping: it can write
+Clojure code and actually run it, then pull in missing dependencies at
+runtime without a JVM restart.
+
+- `clojure/eval` — evaluate Clojure source in a **persistent** runtime
+  namespace (`def`s and `require`s persist across calls). Returns the
+  last form's value, captured stdout, and any exception. Each call is
+  bounded by a configurable timeout so runaway loops are cancelled.
+- `clojure/add-lib` — load a Maven (or Git) dependency onto the live
+  classpath via Clojure 1.12's `clojure.repl.deps/add-libs`. After it
+  returns, `require` the new namespaces from `clojure/eval`.
+- `clojure/loaded-libs` — list the libs currently loaded in the JVM.
+
+The suite sits behind the `ClojureRuntime` protocol with a
+Malli-instrumented network boundary, and is wired via the
+`:lateralus/runtime-tools` Integrant key (enabled by default in the JVM
+config; excluded from native-image). It runs arbitrary Clojure in-process
+— set `:enabled? false` to disable it, or `:network? false` to keep eval
+but block runtime dependency loading. See [`docs/runtime-eval.md`](docs/runtime-eval.md).
+
+```clojure
+:lateralus/runtime-tools {:enabled? true :network? true}
+```
+
 ## Memory backend
 
 The runtime Integrant config (`resources/lateralus/config.edn`) now wires a **Proximum** HNSW memory backend and a **LangChain4j** in-process ONNX embedder (`all-MiniLM-L6-v2`, 384 dimensions) by default. Session memory (recent + semantic recall) works out of the box in one-shot mode.
@@ -234,6 +260,7 @@ Notes and limitations:
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
 | [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
+| [`docs/runtime-eval.md`](docs/runtime-eval.md) | Runtime-eval tool suite: `clojure/eval`, `clojure/add-lib`, `clojure/loaded-libs` |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |
@@ -247,6 +274,10 @@ Notes and limitations:
 | [`src/kschltz/agent/loop.clj`](src/kschltz/agent/loop.clj) | Tool-calling loop interceptors |
 | [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
 | [`src/kschltz/agent/tools/filesystem.clj`](src/kschltz/agent/tools/filesystem.clj) | Read-only filesystem `Tool` implementations |
+| [`src/kschltz/agent/tools/runtime/protocol.clj`](src/kschltz/agent/tools/runtime/protocol.clj) | `ClojureRuntime` protocol (runtime-eval boundary) |
+| [`src/kschltz/agent/tools/runtime/schemas.clj`](src/kschltz/agent/tools/runtime/schemas.clj) | Runtime-eval Malli schemas + config |
+| [`src/kschltz/agent/tools/runtime/jvm.clj`](src/kschltz/agent/tools/runtime/jvm.clj) | In-process `ClojureRuntime` impl (eval + `add-libs`), Malli-instrumented |
+| [`src/kschltz/agent/tools/runtime/tools.clj`](src/kschltz/agent/tools/runtime/tools.clj) | `clojure/eval`, `clojure/add-lib`, `clojure/loaded-libs` Tool implementations |
 | [`src/kschltz/agent/tools/web/protocol.clj`](src/kschltz/agent/tools/web/protocol.clj) | `WebProvider` protocol |
 | [`src/kschltz/agent/tools/web/schemas.clj`](src/kschltz/agent/tools/web/schemas.clj) | Web tool Malli schemas |
 | [`src/kschltz/agent/tools/web/guards.clj`](src/kschltz/agent/tools/web/guards.clj) | URL/query/snippet guard pipeline |
@@ -289,6 +320,7 @@ Recently completed:
 - [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
 - [011] Promote tool-calling loop into the base plugin + filesystem tools example
 - [web] Revive web tool: `:none` default, `:mojeek`/`:ddg` opt-in live providers, full guard pipeline (SSRF/UA/redirect), Integrant wiring, docs
+- [runtime-eval] Clojure runtime-eval tool suite: `clojure/eval` (persistent runtime ns + timeout), `clojure/add-lib` (Clojure 1.12 runtime dependency loading), `clojure/loaded-libs`, behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary
 
 Deferred:
 - Async worker thread for the runtime
