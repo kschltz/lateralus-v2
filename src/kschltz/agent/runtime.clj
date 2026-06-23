@@ -55,7 +55,8 @@
                             :llm/client               (:agent/llm-client agent-map)
                             :memory/backend           (:memory-backend agent-map)
                             :embedder                 (:embedder agent-map)
-                            :agent/log-sink           log-sink}
+                            :agent/log-sink           log-sink
+                            :agent/loop-opts          (:agent/loop-opts agent-map)}
           chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)

@@ -195,6 +195,8 @@
   [^java.io.PrintWriter out result]
   (let [response (:exchange/response result)
         prefix  (cond
+                 (:agent/tool-cap-hit result)
+                 "[lateralus: hit the per-exchange tool-call cap; showing tool results instead]\n\n"
                  (:agent/summary-failed? result)
                  "[lateralus: model kept calling tools on the summary turn; showing tool results instead]\n\n"
                  (:agent/empty-retry-failed? result)

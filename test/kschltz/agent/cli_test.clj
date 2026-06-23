@@ -218,7 +218,7 @@
    with Integrant tag support and merges it over default-config"
     (let [config (cli/build-system {})]
       (is (contains? config :lateralus/agent))
-      (is (= #{:plugins :llm-client :llm-config :embedder :memory-backend}
+      (is (= #{:plugins :llm-client :llm-config :embedder :memory-backend :loop-opts}
              (set (keys (:lateralus/agent config)))))
       ;; Pin that #ig/ref tags were resolved (not left as raw symbols).
       (is (every? ig/reflike?

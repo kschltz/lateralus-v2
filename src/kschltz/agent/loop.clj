@@ -133,27 +133,43 @@
    every result in `:agent/all-tool-results` so the final ctx records tools
    that ran in earlier loop iterations. When any requested tool is not in
    the registry, appends a system message listing the available tools so
-   the follow-up turn can self-correct instead of silently stopping."
+   the follow-up turn can self-correct instead of silently stopping.
+
+   Per-turn cap: reads `:max-tool-calls-per-turn` from `:agent/loop-opts`.
+   When the model emits more tool_calls than the cap, only the first N are
+   executed and `:tool/calls` is trimmed to match so the assistant
+   tool-calling message and the tool-result messages stay paired (OpenAI
+   requires every tool_call to have a matching tool result). The dropped
+   count is recorded as `:agent/tool-calls-dropped` so the CLI/logs can
+   surface it."
   []
   {:name ::dispatch-tools
    :slot :tools
    :enter (fn [ctx]
-            (let [calls          (or (:tool/calls ctx) [])
+            (let [loop-opts      (:agent/loop-opts ctx)
+                  max-per-turn   (:max-tool-calls-per-turn loop-opts)
+                  all-calls      (or (:tool/calls ctx) [])
                   registry       (or (:agent/tool-registry ctx) {})
-                  results        (tool/execute-tools registry ctx calls)
+                  capped-calls   (if (and max-per-turn (> (count all-calls) max-per-turn))
+                                   (take max-per-turn all-calls)
+                                   all-calls)
+                  dropped-count  (- (count all-calls) (count capped-calls))
+                  results        (tool/execute-tools registry ctx capped-calls)
                   ctx'           (-> ctx
-                                     (assoc :tool/results results)
+                                     (assoc :tool/calls capped-calls
+                                            :tool/results results)
                                      (update :agent/all-tool-results (fnil into []) results))
                   any-unavailable? (some (fn [r]
                                            (str/starts-with? (str (:result r)) "Tool '"))
                                          results)]
-              (if any-unavailable?
-                (update-in ctx' [:llm/request :messages]
-                           conj {:role "system"
-                                 :content (str "One or more requested tools are not available. "
-                                               "Available tools: "
-                                               (str/join ", " (sort (keys registry))))})
-                ctx')))})
+              (cond-> (if any-unavailable?
+                        (update-in ctx' [:llm/request :messages]
+                                   conj {:role "system"
+                                         :content (str "One or more requested tools are not available. "
+                                                       "Available tools: "
+                                                       (str/join ", " (sort (keys registry))))})
+                        ctx')
+                (pos? dropped-count) (assoc :agent/tool-calls-dropped dropped-count))))})
 
 (defn compose-tool-results-interceptor
   "`:tools` interceptor that appends the assistant tool-calling message
@@ -202,18 +218,42 @@
   {:name ::tool-loop
    :slot :finalize
    :enter (fn [ctx]
-            (if (-continue? loop ctx)
-              (let [calls    (or (:tool/calls ctx) [])
-                    sig      (tool-call-sig calls)
-                    last-sig (:agent/last-tool-call-sig ctx)]
-                (if (= sig last-sig)
-                  (assoc ctx :agent/loop-continuing? false)
-                  (-> ctx
-                      (assoc :agent/last-tool-call-sig sig
-                             :agent/loop-continuing? true)
-                      (chain/enqueue (-follow-up-chain loop
-                                                       (or (:agent/tool-registry ctx) {}))))))
-              (assoc ctx :agent/loop-continuing? false)))})
+            (let [loop-opts   (:agent/loop-opts ctx)
+                  ctx-max-depth (:max-loop-depth loop-opts)
+                  total-cap    (:max-tool-calls-per-exchange loop-opts)
+                  depth        (get ctx :agent/tool-loop-depth 0)
+                  results      (or (:tool/results ctx) [])
+                  all-results  (:agent/all-tool-results ctx)
+                  implemented? (some implemented-result? results)
+                  over-total?  (and total-cap (>= (count all-results) total-cap))
+                  ;; When ctx-max-depth is set it OVERRIDES the record's
+                  ;; max-depth (so config can raise the cap above the
+                  ;; default 5). Otherwise fall back to -continue? which
+                  ;; uses the record's max-depth + results/implemented checks.
+                  should-continue? (cond
+                                     over-total? false
+                                     ctx-max-depth (and (< depth ctx-max-depth)
+                                                        (seq results)
+                                                        implemented?)
+                                     :else (-continue? loop ctx))]
+              (cond
+                over-total?
+                (assoc ctx :agent/loop-continuing? false :agent/tool-cap-hit true)
+
+                (not should-continue?)
+                (assoc ctx :agent/loop-continuing? false)
+
+                :else
+                (let [calls    (or (:tool/calls ctx) [])
+                      sig      (tool-call-sig calls)
+                      last-sig (:agent/last-tool-call-sig ctx)]
+                  (if (= sig last-sig)
+                    (assoc ctx :agent/loop-continuing? false :agent/stall-hit true)
+                    (-> ctx
+                        (assoc :agent/last-tool-call-sig sig
+                               :agent/loop-continuing? true)
+                        (chain/enqueue (-follow-up-chain loop
+                                                         (or (:agent/tool-registry ctx) {})))))))))})
 
 ;; ---- Self-heal ----
 

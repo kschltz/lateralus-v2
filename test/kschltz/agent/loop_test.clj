@@ -270,3 +270,101 @@
           "summary must attempt exactly 2 times before giving up")
       (is (str/blank? (:exchange/response out))
           "response stays blank when summary exhausts its cap"))))
+
+;; ---- configurable tool-call caps (2026-06-22) ----
+
+(defn- run-with-loop-opts
+  "Run an exchange with an LlmClient + loop-opts seeded on ctx, so the
+  caps are exercised without wiring a full Integrant system."
+  [llm prompt registry loop-opts]
+  (let [chain (plugin/assemble-chain [(plugins.base/base-plugin)
+                                      (plugins.tools/tools-plugin registry)])]
+    (chain/execute
+     {:agent/state {:base-url "stub" :api-key nil :model "fake/v0"
+                    :agent/system-message "You have tools."}
+      :llm/client llm
+      :exchange/user-text prompt
+      :agent/tool-loop-depth 0
+      :agent/loop-opts loop-opts
+      :exchange/session-id :test-session
+      :exchange/user-msg-id "u1"
+      :exchange/assistant-msg-id "a1"}
+     chain)))
+
+(defn- varying-args-llm
+  "LLM that emits a tool_call(echo) every turn with a unique arg so stall
+  detection (identical-repeat) never trips."
+  []
+  (let [n (atom 0)]
+    (reify LlmClient
+      (-call [_ _req]
+        (swap! n inc)
+        {:choices [{:message {:role "assistant" :content ""
+                              :tool_calls [{:id (str "tc" @n) :type "function"
+                                            :function {:name "echo"
+                                                       :arguments (str "{\"msg\":\"n" @n "\"}")}}]}}]
+         :model "fake/v0"}))))
+
+(defn- alternating-args-llm
+  "LLM that emits a tool_call(echo) every turn alternating between two
+  args (a rut stall detection does NOT catch — only identical repeats)."
+  []
+  (let [n (atom 0)]
+    (reify LlmClient
+      (-call [_ _req]
+        (swap! n inc)
+        {:choices [{:message {:role "assistant" :content ""
+                              :tool_calls [{:id (str "tc" @n) :type "function"
+                                            :function {:name "echo"
+                                                       :arguments (str "{\"msg\":\"n" (mod @n 2) "\"}")}}]}}]
+         :model "fake/v0"}))))
+
+(deftest max-loop-depth-config-raises-cap-above-default
+  (testing ":max-loop-depth in loop-opts overrides the default 5 — the
+            loop runs 7 follow-up turns instead of stopping at 5"
+    (let [out (run-with-loop-opts (varying-args-llm) "loop" {"echo" (->EchoTool)}
+                                  {:max-loop-depth 7})]
+      (is (= 7 (:agent/tool-loop-depth out))
+          "loop runs to the configured cap of 7, not the default 5"))))
+
+(deftest max-tool-calls-per-exchange-stops-the-rut
+  (testing ":max-tool-calls-per-exchange stops the loop when cumulative
+            tool calls hit the cap, even with alternating (non-identical)
+            calls that stall detection would not catch, and sets
+            :agent/tool-cap-hit"
+    (let [out (run-with-loop-opts (alternating-args-llm) "loop" {"echo" (->EchoTool)}
+                                  {:max-tool-calls-per-exchange 3})]
+      (is (true? (:agent/tool-cap-hit out))
+          "the per-exchange cap must set :agent/tool-cap-hit")
+      (is (>= 3 (count (:agent/all-tool-results out)))
+          "the loop stops by the 3rd tool call"))))
+
+(deftest max-tool-calls-per-turn-caps-dispatch
+  (testing ":max-tool-calls-per-turn limits how many tool_calls execute in
+            one turn; only the capped number run (all-tool-results) and
+            the dropped count is recorded in :agent/tool-calls-dropped"
+    (let [five-calls (mapv (fn [i] {:id (str "tc" i) :type "function"
+                                    :function {:name "echo"
+                                               :arguments (str "{\"msg\":\"d" i "\"}")}})
+                           (range 5))
+          one-turn-five {:choices [{:message {:role "assistant" :content ""
+                                              :tool_calls five-calls}}]
+                         :model "fake/v0"}
+          llm (scripted-llm (atom [one-turn-five
+                                   (text-choice "")
+                                   (text-choice "done")]))
+          out (run-with-loop-opts llm "loop" {"echo" (->EchoTool)}
+                                  {:max-tool-calls-per-turn 2})]
+      (is (= 2 (count (:agent/all-tool-results out)))
+          "only 2 of the 5 emitted tool_calls run (cap=2)")
+      (is (= 3 (:agent/tool-calls-dropped out 0))
+          "the 3 dropped calls are recorded in :agent/tool-calls-dropped"))))
+
+(deftest loop-opts-absent-falls-back-to-defaults
+  (testing "with no loop-opts on ctx, the default max-loop-depth 5 still
+            applies and no caps trip"
+    (let [out (run-with-loop-opts (varying-args-llm) "loop" {"echo" (->EchoTool)} nil)]
+      (is (= 5 (:agent/tool-loop-depth out))
+          "default cap of 5 applies when loop-opts is absent")
+      (is (nil? (:agent/tool-cap-hit out))
+          "no per-exchange cap trips when unset"))))

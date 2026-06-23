@@ -155,6 +155,18 @@
 (defmethod ig/assert-key :lateralus/logging [_ config]
   (assert-malli! :lateralus/logging LoggingConfig config))
 
+(def ^:private LoopOpts
+  "Malli schema for :lateralus/loop-opts. All keys optional; the loop
+   interceptors fall back to code defaults (:max-loop-depth 5, no
+   per-exchange cap, no per-turn cap) when unset."
+  [:map
+   [:max-loop-depth            {:optional true} :int]
+   [:max-tool-calls-per-exchange {:optional true} :int]
+   [:max-tool-calls-per-turn   {:optional true} :int]])
+
+(defmethod ig/assert-key :lateralus/loop-opts [_ config]
+  (assert-malli! :lateralus/loop-opts LoopOpts config))
+
 (defmethod ig/assert-key :lateralus/runtime-tools [_ config]
   (assert-malli! :lateralus/runtime-tools runtime.schemas/RuntimeConfig config))
 
@@ -192,6 +204,13 @@
   "Resolve the logging config. Defaults are applied at sink-build time
    in `logging/build-sink`; here we just normalize nil to an empty map
    so the agent component can read it."
+  (or opts {}))
+
+(defmethod ig/init-key :lateralus/loop-opts [_ opts]
+  "Resolve the loop-opts config (per-exchange / per-turn tool-call caps
+   and the configurable LLM follow-up depth). Nil -> empty map so the
+   agent component can always read it; the interceptors fall back to
+   code defaults when a key is absent."
   (or opts {}))
 
 (defmethod ig/init-key :lateralus/memory-backend [_ {:keys [impl _embedder] :as opts}]
@@ -270,7 +289,7 @@
   (plugins.tools/tools-plugin registry))
 
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging]}]
+  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
   ;; seeds the runtime's state atom so compose-context sees the
   ;; LLM config (:base-url / :api-key / :model) and any other
@@ -285,6 +304,7 @@
     {:agent/llm-client  llm-client    ; pre-wired into ctx as `:llm/client`
      :embedder          embedder
      :memory-backend    memory-backend
+     :agent/loop-opts   loop-opts
      :agent/logging     logging
      :assembled         assembled
      :exchange-chain    assembled
@@ -323,6 +343,7 @@
                               :top-y    3
                               :last-n   5}
    :lateralus/logging             {}
+   :lateralus/loop-opts            {}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
    :lateralus/runtime-tools        {}
@@ -339,4 +360,5 @@
                                     :llm-config     (ig/ref :lateralus/llm-config)
                                     :embedder       (ig/ref :lateralus/embedder)
                                     :memory-backend (ig/ref :lateralus/memory-backend)
-                                    :logging        (ig/ref :lateralus/logging)}})
+                                    :logging        (ig/ref :lateralus/logging)
+                                    :loop-opts      (ig/ref :lateralus/loop-opts)}})

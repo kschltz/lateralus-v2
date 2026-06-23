@@ -16,6 +16,7 @@
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
  :lateralus/runtime-tools        {:enabled? true :network? true}
+ :lateralus/loop-opts            {:max-tool-calls-per-turn 100}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools
@@ -27,4 +28,5 @@
                                   :llm-client     #ig/ref :lateralus/llm-client
                                   :llm-config     #ig/ref :lateralus/llm-config
                                   :embedder       #ig/ref :lateralus/embedder
-                                  :memory-backend #ig/ref :lateralus/memory-backend}}
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :loop-opts        #ig/ref :lateralus/loop-opts}}
