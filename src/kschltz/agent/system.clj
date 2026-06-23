@@ -41,6 +41,7 @@
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
             [kschltz.agent.tools.clojure :as tools.clojure]
+            [kschltz.agent.tools.clojure-runtime :as tools.clojure-runtime]
             [kschltz.agent.tools.web.web :as tools.web]
             [kschltz.agent.tools.web.schemas :as web.schemas]
             [kschltz.agent.logging :as logging]
@@ -247,11 +248,27 @@
    init time like any other tool."
   (tools.self/self-awareness-registry workspace-root))
 
+(def ^:private ClojureRuntimeToolsConfig
+  "Malli schema for :lateralus/clojure-runtime-tools."
+  [:map
+   [:enabled? {:optional true} :boolean]
+   [:deps-edn-path {:optional true} [:maybe :string]]
+   [:max-code-bytes {:optional true} :int]])
+
+(defmethod ig/assert-key :lateralus/clojure-runtime-tools [_ config]
+  (assert-malli! :lateralus/clojure-runtime-tools ClojureRuntimeToolsConfig config))
+
 (defmethod ig/init-key :lateralus/clojure-tools [_ opts]
   "Returns the Clojure structured-editing tool registry (clojure/query,
    clojure/add-require, clojure/remove-def, clojure/rename-symbol,
    clojure/insert-form, clojure/edit-def, clojure/format-file)."
   (tools.clojure/clojure-registry opts))
+
+(defmethod ig/init-key :lateralus/clojure-runtime-tools [_ opts]
+  "Returns the Clojure runtime prototyping tool registry (clojure/eval,
+   clojure/add-lib, clojure/add-libs, clojure/sync-deps,
+   clojure/repl-reset)."
+  (tools.clojure-runtime/clojure-runtime-registry opts))
 
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
   (plugins.tools/tools-plugin registry))
@@ -312,9 +329,13 @@
    :lateralus/logging             {}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
+   :lateralus/clojure-tools           {}
+   :lateralus/clojure-runtime-tools   {}
    :lateralus/web-tools            {:provider :none}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)
+                                    (ig/ref :lateralus/clojure-tools)
+                                    (ig/ref :lateralus/clojure-runtime-tools)
                                     (ig/ref :lateralus/web-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)

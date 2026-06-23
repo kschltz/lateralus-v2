@@ -29,6 +29,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/file-tools       ──▶  convenience filesystem tool registry│
 │  :lateralus/self-awareness-tools ──▶  self/status tool registry      │
 │  :lateralus/clojure-tools    ──▶  clojure structured-edit tool registry│
+│  :lateralus/clojure-runtime-tools ──▶  clojure/eval + dynamic deps (add-lib, sync-deps)│
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web/search, web/fetch, web/extract)│
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
