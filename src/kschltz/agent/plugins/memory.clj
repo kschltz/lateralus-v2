@@ -48,19 +48,25 @@
       (assoc ctx :memory/recall recalled))))
 
 (defn- persist-leave
-  "Build the :leave fn for the persist interceptor."
+  "Build the :leave fn for the persist interceptor. Skips blank/nil
+   content (Clojure's empty string is truthy, so `when-let` alone is
+   not enough): a model that returns reasoning in a separate field
+   and an empty `content` (e.g. glm-5.2:cloud) must not crash the
+   embedder with 'text cannot be null or blank'."
   [backend]
   (fn [ctx]
-    (let [session-id (:exchange/session-id ctx)]
+    (let [session-id (:exchange/session-id ctx)
+          user-text  (:exchange/user-text ctx)
+          response   (:exchange/response ctx)]
       (when (and backend session-id)
-        (when-let [user-text (:exchange/user-text ctx)]
+        (when (seq user-text)
           (mem/-store-message
            backend session-id
            {:role      "user"
             :content   user-text
             :msg-id    (:exchange/user-msg-id ctx)
             :timestamp (now-ms)}))
-        (when-let [response (:exchange/response ctx)]
+        (when (seq response)
           (mem/-store-message
            backend session-id
            {:role      "assistant"
