@@ -70,12 +70,22 @@
            (some implemented-result? results))))
 
   (-follow-up-chain [this _registry]
+    ;; Order mirrors the base chain's :llm -> :tools(dispatch then
+    ;; compose) -> :finalize slots. compose-tool-results MUST run AFTER
+    ;; dispatch-tools so it appends THIS turn's freshly-produced
+    ;; :tool/results (not the previous turn's stale ones). The previous
+    ;; turn's results are already in :llm/request :messages from that
+    ;; turn's compose, so the model sees them at the llm-call below.
+    ;; (Placing compose BEFORE dispatch — the old order — re-appended
+    ;; the previous turn's results every follow-up turn, duplicating
+    ;; the [assistant(tool_calls), tool*] block and growing messages
+    ;; ~2x per turn — the "hands off before complete" root cause.)
     [(bump-loop-depth-interceptor)
-     (compose-tool-results-interceptor)
      (llm-call-with-self-heal)
      ix/llm-call
      ix/parse-response
      (dispatch-tools-interceptor)
+     (compose-tool-results-interceptor)
      (tool-loop-interceptor this)
      (ensure-text-response-interceptor this)]))
 

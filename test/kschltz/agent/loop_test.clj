@@ -368,3 +368,105 @@
           "default cap of 5 applies when loop-opts is absent")
       (is (nil? (:agent/tool-cap-hit out))
           "no per-exchange cap trips when unset"))))
+
+;; ---- regression: follow-up chain must not duplicate tool-result blocks ----
+;; Root cause of the "agent hands off the turn before it is complete" symptom
+;; (audit 2026-06-24): compose-tool-results was positioned BEFORE dispatch-tools
+;; in -follow-up-chain, so every follow-up turn re-appended the PREVIOUS turn's
+;; stale [assistant(tool_calls), tool*] block to :llm/request :messages. The fix
+;; moves compose-tool-results to AFTER dispatch-tools. This test pins the
+;; invariant: exactly one assistant(tool_calls) block per turn, each tool_call_id
+;; appears in exactly one {:role "tool"} message.
+
+(defn- fresh-ctx-for-chain
+  "Build the ctx the base chain expects, with a seeded tool registry and
+  loop-opts."
+  [llm registry loop-opts]
+  {:agent/state {:base-url "stub" :api-key nil :model "fake/v0"
+                 :agent/system-message "You have tools."}
+   :llm/client llm
+   :exchange/user-text "do it"
+   :agent/tool-loop-depth 0
+   :agent/loop-opts loop-opts
+   :exchange/session-id :test-session
+   :exchange/user-msg-id "u1"
+   :exchange/assistant-msg-id "a1"})
+
+(defn- counting-tool-call-llm
+  "LLM that emits a single echo tool_call every turn with a unique id+arg
+  for `n` turns, then a final text response. Returns [llm atom-of-turn]."
+  [n]
+  (let [turn (atom 0)]
+    [(reify LlmClient
+       (-call [_ _req]
+         (let [t (swap! turn inc)]
+           (if (<= t n)
+             {:choices [{:message {:role "assistant" :content ""
+                                   :tool_calls [{:id (str "tc" t) :type "function"
+                                                 :function {:name "echo"
+                                                            :arguments (str "{\\\"msg\\\":\\\"turn" t "\\\"}")}}]}}]
+              :model "fake/v0"}
+             {:choices [{:message {:role "assistant" :content (str "final answer after " n " tools")}}]
+              :model "fake/v0"})))) turn]))
+
+(deftest follow-up-chain-appends-each-turns-results-exactly-once
+  (testing "after a 3-tool ReAct loop, :llm/request :messages holds exactly
+            one assistant(tool_calls) block per tool turn and each tool_call_id
+            appears in exactly one tool result message — no duplicates"
+    (let [[llm turn-atom] (counting-tool-call-llm 3)
+          registry {"echo" (->EchoTool)}
+          chain (plugin/assemble-chain [(plugins.base/base-plugin)
+                                        (plugins.tools/tools-plugin registry)])
+          out (chain/execute (fresh-ctx-for-chain llm registry nil) chain)
+          msgs (get-in out [:llm/request :messages])]
+      (is (= 4 @turn-atom)
+          "sanity: 3 tool turns + 1 final text turn = 4 LLM calls")
+      (let [asst-tool-blocks (filter #(and (map? %)
+                                           (= "assistant" (:role %))
+                                           (seq (:tool_calls %)))
+                                     msgs)
+            tool-result-msgs (filter #(and (map? %) (= "tool" (:role %))) msgs)
+            ids-in-asst-blocks (mapcat #(map :id (:tool_calls %)) asst-tool-blocks)
+            ids-in-results (map :tool_call_id tool-result-msgs)]
+        (is (= 3 (count asst-tool-blocks))
+            "exactly one assistant(tool_calls) block per tool turn (no duplicates)")
+        (is (= ["tc1" "tc2" "tc3"] ids-in-asst-blocks)
+            "the three assistant tool_calls are tc1, tc2, tc3 in order")
+        (is (= 3 (count tool-result-msgs))
+            "exactly three tool result messages (one per call)")
+        (is (= (set ids-in-asst-blocks) (set ids-in-results))
+            "every tool_call_id is paired with exactly one tool result")
+        (is (= 3 (count (set ids-in-results)))
+            "no tool_call_id is duplicated across result messages")))))
+
+(deftest follow-up-chain-results-visible-to-next-turns-llm-call
+  (testing "turn N's tool results are in :llm/request :messages before turn N+1's
+            LLM call — the model always sees the prior turn's outcome (one-turn
+            ReAct cadence), not stale/duplicate context"
+    (let [seen-messages (atom [])
+          llm (reify LlmClient
+                (-call [_ req]
+                  (swap! seen-messages conj (:messages req))
+                  ;; turn 1: tool; turn 2: tool; turn 3: text
+                  (let [n (count @seen-messages)]
+                    (if (<= n 2)
+                      {:choices [{:message {:role "assistant" :content ""
+                                            :tool_calls [{:id (str "tc" n) :type "function"
+                                                          :function {:name "echo"
+                                                                     :arguments (str "{\\\"msg\\\":\\\"t" n "\\\"}")}}]}}]
+                       :model "fake/v0"}
+                      {:choices [{:message {:role "assistant" :content "done"}}]
+                       :model "fake/v0"}))))
+          registry {"echo" (->EchoTool)}
+          chain (plugin/assemble-chain [(plugins.base/base-plugin)
+                                        (plugins.tools/tools-plugin registry)])
+          _ (chain/execute (fresh-ctx-for-chain llm registry nil) chain)
+          ;; turn-2 call (2nd element) must include turn-1's tool result
+          turn2-msgs (nth @seen-messages 1)
+          turn3-msgs (nth @seen-messages 2)]
+      (is (some #(and (= "tool" (:role %)) (= "tc1" (:tool_call_id %))) turn2-msgs)
+          "turn 2's LLM call sees turn-1's tool result (tc1)")
+      (is (some #(and (= "tool" (:role %)) (= "tc2" (:tool_call_id %))) turn3-msgs)
+          "turn 3's LLM call sees turn-2's tool result (tc2)")
+      (is (= 1 (count (filter #(and (= "tool" (:role %)) (= "tc1" (:tool_call_id %))) turn2-msgs)))
+          "turn-1's tool result appears exactly once in turn 2's request (no duplicate)"))))
