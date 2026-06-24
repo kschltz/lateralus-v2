@@ -33,6 +33,46 @@
   "Safety cap on follow-up LLM calls inside a single exchange."
   5)
 
+(def ^:private max-in-flight-entries
+  "Cap on the number of messages retained in :llm/request :messages
+   DURING a multi-turn ReAct exchange. trim-history (cross-exchange)
+   anchors to the most-recent user turn, which mid-exchange sits at the
+   start and so would keep everything; trim-in-flight-messages instead
+   keeps the leading system message(s) + the first user turn + the last
+   `max-in-flight-entries` follow-up tool/assistant messages, dropping
+   the oldest tool results once the budget is hit. Defaults to the same
+   value as ix/max-history-entries."
+  ix/max-history-entries)
+
+(defn- trim-in-flight-messages
+  "Bound the in-exchange messages vector in BOTH count and size:
+  - count: keep the leading system message(s) + the first user turn +
+    the last `max-in-flight-entries` follow-up messages, dropping the
+    oldest tool/assistant blocks once the budget is hit;
+  - size: truncate any :role tool :content over
+    `ix/max-tool-content-chars` via `ix/truncate-tool-content`.
+
+  Unlike `ix/trim-history`, this does NOT anchor to the most-recent
+  user turn (that anchor defeats mid-exchange trimming because the
+  only user turn is at the exchange start)."
+  [messages]
+  (let [msgs (vec messages)
+        n    (count msgs)]
+    (if (<= n max-in-flight-entries)
+      (mapv ix/truncate-tool-content msgs)
+      (let [first-user-idx (->> msgs
+                                (map-indexed vector)
+                                (some (fn [[i m]] (when (= "user" (:role m)) i))))
+            head-end (cond
+                       first-user-idx (inc first-user-idx)
+                       (= "system" (:role (first msgs))) 1
+                       :else 0)
+            head       (subvec msgs 0 head-end)
+            tail-count (max 1 (- max-in-flight-entries head-end))
+            tail       (subvec msgs (- n tail-count))
+            combined   (into head tail)]
+        (mapv ix/truncate-tool-content combined)))))
+
 (def ^:private max-self-heal-attempts
   "Cap on Malli self-heal retries for invalid outgoing requests."
   3)
@@ -179,12 +219,23 @@
                                                        "Available tools: "
                                                        (str/join ", " (sort (keys registry))))})
                         ctx')
-                (pos? dropped-count) (assoc :agent/tool-calls-dropped dropped-count))))})
+                (pos? dropped-count)
+                (-> (assoc :agent/tool-calls-dropped dropped-count)
+                    (update-in [:llm/request :messages]
+                               conj {:role "system"
+                                     :content (str "Truncated " dropped-count
+                                                   " tool call(s) this turn; only the first "
+                                                   (count capped-calls)
+                                                   " will execute. Continue with the executed results or stop.")})))))})
 
 (defn compose-tool-results-interceptor
   "`:tools` interceptor that appends the assistant tool-calling message
    and matching tool-result messages to `:llm/request :messages` for the
-   follow-up turn."
+   follow-up turn, then bounds the in-flight messages vector in both
+   count and size via `trim-in-flight-messages` (audit 2026-06-24 rec #6:
+   trim-history otherwise only runs on turn 1 in compose-context and at
+   exchange end in store-exchange; a high max-loop-depth or a large
+   per-turn tool-call burst could grow the in-flight request unbounded)."
   []
   {:name ::compose-tool-results
    :slot :tools
@@ -195,7 +246,8 @@
                   new-msgs (if assistant-msg
                              (cons assistant-msg result-msgs)
                              result-msgs)]
-              (update-in ctx [:llm/request :messages] into new-msgs)))})
+              (update-in ctx [:llm/request :messages]
+                         (fn [msgs] (trim-in-flight-messages (into msgs new-msgs))))))})
 
 (defn bump-loop-depth-interceptor
   "Interceptor that increments `:agent/tool-loop-depth`."
@@ -370,13 +422,27 @@
    :slot :finalize
    :enter (fn [ctx]
             (let [summary-attempts (get ctx :agent/summary-attempts 0)
-                  retry-attempts   (get ctx :agent/empty-retry-attempts 0)]
+                  retry-attempts   (get ctx :agent/empty-retry-attempts 0)
+                  response         (:exchange/response ctx)
+                  continuing?      (:agent/loop-continuing? ctx)
+                  tools-ran?       (seq (:agent/all-tool-results ctx))
+                  ;; `:tool/calls` holds the CURRENT turn's calls (set by
+                  ;; parse-response, trimmed by dispatch-tools). When the
+                  ;; loop stopped (continuing? false) AND the last turn
+                  ;; still emitted tool_calls, the model was mid-tool —
+                  ;; possibly with non-blank preamble text. That preamble
+                  ;; is NOT a final answer; force a summary so the model
+                  ;; digests the tool results into real text. A non-blank
+                  ;; response with NO tool_calls is a clean final answer —
+                  ;; deliver it as-is.
+                  last-turn-called-tools? (seq (:tool/calls ctx))]
               (cond
-                (not (str/blank? (:exchange/response ctx))) ctx
-                (:agent/loop-continuing? ctx)               ctx
-                ;; summary path: tools ran, response blank
-                (and (seq (:agent/all-tool-results ctx))
-                     (< summary-attempts max-summary-attempts))
+                continuing? ctx
+                (and (not (str/blank? response)) (not last-turn-called-tools?)) ctx
+                ;; summary path: tools ran this exchange AND the loop
+                ;; stopped (either blank response, or non-blank preamble
+                ;; alongside tool_calls — the cap/stall/depth case).
+                (and tools-ran? (< summary-attempts max-summary-attempts))
                 (-> ctx
                     (update :agent/summary-attempts (fnil inc 0))
                     (chain/enqueue [(compose-summary-request-interceptor)
@@ -384,8 +450,7 @@
                                     ix/llm-call
                                     ix/parse-response
                                     (ensure-text-response-interceptor loop)]))
-                (and (seq (:agent/all-tool-results ctx))
-                     (>= summary-attempts max-summary-attempts))
+                (and tools-ran? (>= summary-attempts max-summary-attempts))
                 (assoc ctx :agent/summary-failed? true)
                 ;; empty-retry path: no tools ran, response blank
                 (< retry-attempts max-empty-retry-attempts)

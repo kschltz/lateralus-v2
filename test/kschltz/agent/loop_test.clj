@@ -470,3 +470,145 @@
           "turn 3's LLM call sees turn-2's tool result (tc2)")
       (is (= 1 (count (filter #(and (= "tool" (:role %)) (= "tc1" (:tool_call_id %))) turn2-msgs)))
           "turn-1's tool result appears exactly once in turn 2's request (no duplicate)"))))
+
+;; ---- audit 2026-06-24 follow-on fixes: #2 force-summary at cap-stop,
+;;      #3 truncation feedback, #6 in-loop trim, #4 exception-safe persist ----
+
+(defn- preamble-plus-tool-llm
+  "LLM that emits non-blank preamble ('Let me check...') + an echo
+  tool_call on every tool turn (unique arg so stall detection doesn't
+  trip), and a clean text answer once :tools is stripped from the
+  request (the summary call). Used to test that a cap-stop with a
+  preamble still forces a summary instead of delivering the preamble."
+  []
+  (let [n (atom 0)]
+    (reify LlmClient
+      (-call [_ req]
+        (if (contains? req :tools)
+          (let [t (swap! n inc)]
+            {:choices [{:message {:role "assistant" :content "Let me check that for you."
+                                  :tool_calls [{:id (str "tc" t) :type "function"
+                                                :function {:name "echo"
+                                                           :arguments (str "{\\\"msg\\\":\\\"n" t "\\\"}")}}]}}]
+             :model "fake/v0"})
+          {:choices [{:message {:role "assistant" :content "here is the final answer"}}]
+           :model "fake/v0"})))))
+
+(deftest cap-stop-with-preamble-forces-summary
+  (testing "audit #2: when the loop stops on a depth cap with a non-blank
+            preamble alongside tool_calls, ensure-text-response forces a
+            summary instead of delivering the preamble as the final answer"
+    (let [out (run-with-loop-opts (preamble-plus-tool-llm) "loop" {"echo" (->EchoTool)}
+                                  {:max-loop-depth 2})]
+      (is (pos? (:agent/summary-attempts out 0))
+          "a summary call was forced despite the non-blank preamble")
+      (is (= "here is the final answer" (:exchange/response out))
+          "the final response is the summary, not the preamble")
+      (is (not= "Let me check that for you." (:exchange/response out))
+          "the preamble was NOT delivered as the final answer"))))
+
+(defn- one-turn-five-calls-llm
+  "LLM that on turn 1 emits 5 echo tool_calls in a single message, then
+  a text 'done' on turn 2."
+  []
+  (let [five (mapv (fn [i] {:id (str "tc" i) :type "function"
+                            :function {:name "echo"
+                                       :arguments (str "{\\\"msg\\\":\\\"d" i "\\\"}")}})
+                   (range 5))
+        called (atom false)]
+    (reify LlmClient
+      (-call [_ _req]
+        (if (compare-and-set! called false true)
+          {:choices [{:message {:role "assistant" :content ""
+                                :tool_calls five}}]
+           :model "fake/v0"}
+          {:choices [{:message {:role "assistant" :content "done"}}]
+           :model "fake/v0"})))))
+
+(deftest truncated-tool-calls-are-surfaced-to-the-model
+  (testing "audit #3: when :max-tool-calls-per-turn drops calls, a system
+            message telling the model about the truncation is injected into
+            :llm/request :messages (not just silently recorded as a flag)"
+    (let [out (run-with-loop-opts (one-turn-five-calls-llm) "loop" {"echo" (->EchoTool)}
+                                  {:max-tool-calls-per-turn 2})
+          msgs (get-in out [:llm/request :messages])
+          truncation-msg (some #(and (map? %)
+                                     (= "system" (:role %))
+                                     (str/includes? (:content %) "Truncated 3 tool call(s)")
+                                     %)
+                               msgs)]
+      (is (= 3 (:agent/tool-calls-dropped out 0))
+          "3 of 5 calls were dropped")
+      (is (some? truncation-msg)
+          "a system message about the 3 truncated calls is in the request messages"))))
+
+(defn- many-turn-varying-llm
+  "LLM that emits a unique-arg echo tool_call for `n` tool turns, then
+  a text answer once :tools is stripped (the summary). Used to grow the
+  in-exchange messages vector past the trim cap."
+  [n]
+  (let [turn (atom 0)]
+    (reify LlmClient
+      (-call [_ req]
+        (if (contains? req :tools)
+          (let [t (swap! turn inc)]
+            (if (<= t n)
+              {:choices [{:message {:role "assistant" :content ""
+                                    :tool_calls [{:id (str "tc" t) :type "function"
+                                                  :function {:name "echo"
+                                                             :arguments (str "{\\\"msg\\\":\\\"turn" t "\\\"}")}}]}}]
+               :model "fake/v0"}
+              {:choices [{:message {:role "assistant" :content "summarized"}}]
+               :model "fake/v0"}))
+          {:choices [{:message {:role "assistant" :content "summarized"}}]
+           :model "fake/v0"})))))
+
+(deftest in-loop-trim-keeps-messages-bounded
+  (testing "audit #6: trim-history runs on follow-up turns (via
+            compose-tool-results), so a 25-turn ReAct loop does NOT grow
+            :llm/request :messages to ~52 entries; the oldest tool results
+            are trimmed while the newest survive"
+    (let [out (run-with-loop-opts (many-turn-varying-llm 25) "loop" {"echo" (->EchoTool)}
+                                  {:max-loop-depth 25})
+          msgs (get-in out [:llm/request :messages])
+          tool-ids (set (map :tool_call_id (filter #(and (map? %) (= "tool" (:role %))) msgs)))]
+      (is (< (count msgs) 45)
+          "messages stay bounded (without in-loop trim, ~52 entries would accumulate)")
+      (is (not (contains? tool-ids "tc1"))
+          "the oldest tool result (tc1) was trimmed off")
+      (is (contains? tool-ids "tc25")
+          "the newest tool result (tc25) survived the trim window"))))
+
+(defn- throw-on-follow-up-llm
+  "LLM that returns an echo tool_call on turn 1, then THROWS on the
+  turn-2 follow-up call — simulating a provider/transport failure mid-loop
+  after tool results have accumulated into :agent/all-tool-results."
+  []
+  (let [called (atom false)]
+    (reify LlmClient
+      (-call [_ _req]
+        (if (compare-and-set! called false true)
+          {:choices [{:message {:role "assistant" :content ""
+                                :tool_calls [{:id "tc1" :type "function"
+                                              :function {:name "echo"
+                                                         :arguments "{\\\"msg\\\":\\\"x\\\"}"}}]}}]
+           :model "fake/v0"}
+          (throw (ex-info "simulated provider failure on follow-up"
+                          {:chain/stage :llm})))))))
+
+(deftest mid-loop-throw-persists-partial-tool-history
+  (testing "audit #4: when a throw in :llm/:tools/:finalize prevents
+            store-exchange (slot :history) from ever entering, error-boundary
+            snapshots the accumulated :agent/all-tool-results into
+            :agent/state-delta :agent/history so the partial transcript
+            survives to the next exchange"
+    (let [out (run-with-loop-opts (throw-on-follow-up-llm) "loop" {"echo" (->EchoTool)} nil)
+          history (get-in out [:agent/state-delta :agent/history])]
+      (is (some? (:error/raised out))
+          "the throw was captured as :error/raised (not rethrown)")
+      (is (some #(and (map? %) (= "tool" (:role %)) (= "tc1" (:tool_call_id %))) history)
+          "the partial tool result (tc1) made it into the persisted history")
+      (is (some #(and (map? %) (= "user" (:role %))) history)
+          "the user turn is in the partial history")
+      (is (some #(and (map? %) (= "assistant" (:role %)) (seq (:tool_calls %))) history)
+          "the assistant tool-calling turn is reconstructed in the partial history"))))

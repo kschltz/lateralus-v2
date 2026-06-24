@@ -70,7 +70,7 @@
 ;; TODO memory-followup: delete this stub. It is a no-op marker
 ;; so a future history-trimming PR has a clear `find-fn + replace`
 ;; target (token budget, recall window, etc.).
-(def ^:private max-history-entries
+(def max-history-entries
   "Hard cap on the number of non-system messages retained in
    `:agent/history` after trimming. Keeps context growth bounded so
    large file reads do not blow up the request forever."
@@ -83,7 +83,7 @@
    larger but does not pay the token cost on every subsequent turn."
   2000)
 
-(defn- truncate-tool-content
+(defn truncate-tool-content
   "Truncate a single message's `:content` if it is a `:role tool`
    message whose content exceeds `max-tool-content-chars`. Non-tool
    messages (and tool messages already under the cap) pass through
@@ -126,7 +126,7 @@
         ;; user turn" outranks the hard cap.
         (vec (subvec body last-user-ix))))))
 
-(defn- trim-history
+(defn trim-history
   "Trim `messages` to a conservative, OpenAI-compatible form:
    - always keep the leading `:role system` message if present;
    - keep the last `max-history-entries` non-system messages, but
@@ -143,20 +143,84 @@
         kept     (body-window body)
         result   (if has-sys? (into [first-] kept) kept)]
     (mapv truncate-tool-content result)))
+(defn build-exchange-history
+  "Build the trimmed `:agent/history` for one exchange from the prior
+   history + this exchange's user text, tool results, and final
+   response. Shared by `store-exchange` (happy path) and `error-boundary`
+   (partial-exchange recovery) so a mid-loop throw still persists the
+   tool transcript that ran before the failure.
+
+   Message order is OpenAI-compatible:
+     1. optional user turn,
+     2. when tools ran: assistant tool-calling turn (content empty —
+        the model emitted calls, not text) carrying :tool_calls
+        reconstructed from the results' :call fields,
+     3. one {:role tool :tool_call_id ...} entry per result,
+     4. the final assistant text (the summary or direct response),
+        when non-empty."
+  [prev-history user-text response tool-results]
+  (let [had-tools?        (seq tool-results)
+        with-user         (if (seq user-text)
+                            (conj prev-history {:role "user" :content user-text})
+                            prev-history)
+        with-tool-asm     (if had-tools?
+                            (conj with-user
+                                  {:role       "assistant"
+                                   :content    ""
+                                   :tool_calls (mapv :call tool-results)})
+                            with-user)
+        with-tool-results (if had-tools?
+                            (into with-tool-asm
+                                  (mapv (fn [{:keys [call result]}]
+                                          {:role         "tool"
+                                           :tool_call_id (:id call)
+                                           :content      (str result)})
+                                        tool-results))
+                            with-tool-asm)
+        with-response     (if (seq response)
+                            (conj with-tool-results
+                                  {:role "assistant" :content response})
+                            with-tool-results)]
+    (trim-history with-response)))
+
 (def error-boundary
   "Handles any error raised by the chain. Clears the engine ::error
    key so the engine treats the error as handled and proceeds to
    the :leave phase; annotates ctx with `:error/raised` carrying
    the throwable + chain/stage. After this stage, the final ctx
-   carries :error/raised and :leave stages still run."
+   carries :error/raised and :leave stages still run.
+
+   Partial-exchange recovery (audit 2026-06-24 rec #4): when a throw in
+   :llm/:tools/:finalize prevents `store-exchange` (slot :history, last)
+   from ever entering, its :leave never runs and the partial tool
+   transcript would be lost. Because error-boundary is the FIRST
+   interceptor (slot :guard), it is always on the stack when the error
+   walk runs, so its :error handler snapshots whatever
+   `:agent/all-tool-results` accumulated before the failure into
+   `:agent/state-delta :agent/history`. The runtime still merges
+   state-delta on a handled error, so the next exchange sees the partial
+   transcript. When the throw happens AFTER store-exchange entered,
+   store-exchange's own :leave overwrites this with the complete
+   history — no double-persist."
   {:name ::error-boundary
    :error (fn [ctx ex]
-            (-> ctx
-                (dissoc ::chain/error)
-                (assoc :error/raised
-                       {:exception ex
-                        :stage     (or (:chain/stage (ex-data ex))
-                                       :unknown)})))})
+            (let [state        (:agent/state ctx)
+                  prev-history (or (:agent/history state) [])
+                  user-text    (:exchange/user-text ctx)
+                  response     (:exchange/response ctx)
+                  tool-results (or (:agent/all-tool-results ctx) [])
+                  partial      (when (seq tool-results)
+                                 (build-exchange-history prev-history user-text response tool-results))
+                  delta        (when partial {:agent/history partial})]
+              (cond->
+               (-> ctx
+                   (dissoc ::chain/error)
+                   (assoc :error/raised
+                          {:exception ex
+                           :stage     (or (:chain/stage (ex-data ex))
+                                          :unknown)}))
+                delta (assoc :agent/state-delta
+                             (merge (or (:agent/state-delta ctx) {}) delta)))))})
 
 (def compose-context
   "Build `:llm/request` from :agent/state + :exchange/user-text +
@@ -234,43 +298,7 @@
                   user-text    (:exchange/user-text ctx)
                   response     (:exchange/response ctx)
                   tool-results (or (:agent/all-tool-results ctx) [])
-                  had-tools?   (seq tool-results)
-                  ;; Build the OpenAI-compatible message order:
-                  ;;   1. optional user turn,
-                  ;;   2. when tools ran: assistant tool-calling turn
-                  ;;      (content empty — the model emitted calls,
-                  ;;      not text) carrying :tool_calls reconstructed
-                  ;;      from the results' :call fields,
-                  ;;   3. one {:role tool :tool_call_id ...} entry
-                  ;;      per result,
-                  ;;   4. the final assistant text (the summary or the
-                  ;;      direct response), when non-empty.
-                  with-user    (if (seq user-text)
-                                 (conj prev-history
-                                       {:role "user" :content user-text})
-                                 prev-history)
-                  with-tool-asm (if had-tools?
-                                  (conj with-user
-                                        {:role       "assistant"
-                                         :content    ""
-                                         :tool_calls (mapv :call tool-results)})
-                                  with-user)
-                  with-tool-results (if had-tools?
-                                      (into with-tool-asm
-                                            (mapv (fn [{:keys [call result]}]
-                                                    {:role         "tool"
-                                                     :tool_call_id (:id call)
-                                                     :content      (str result)})
-                                                  tool-results))
-                                      with-tool-asm)
-                  with-response (if (seq response)
-                                  (conj with-tool-results
-                                        {:role "assistant" :content response})
-                                  with-tool-results)
-                  ;; Cap history growth: keep the system message + the
-                  ;; last N entries, never drop the most recent user
-                  ;; turn, and truncate huge tool :content strings.
-                  history      (trim-history with-response)
+                  history      (build-exchange-history prev-history user-text response tool-results)
                   delta        (merge (or (:agent/state-delta ctx) {})
                                       {:agent/history history})]
               (assoc ctx
