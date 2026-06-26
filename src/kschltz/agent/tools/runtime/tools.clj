@@ -98,9 +98,32 @@
     (throw (ex-info "clojure/add-lib requires `lib` (+ optional `version`) or `coords`"
                     {}))))
 
-;; ---------------------------------------------------------------------------
-;; Tool records
-;; ---------------------------------------------------------------------------
+(defn- require-form
+  "Build a Clojure `require` form string from :require and optional :alias.
+   Returns nil when no :require is provided."
+  [{:keys [require alias]}]
+  (when (seq require)
+    (if (seq alias)
+      (format "(require '[%s :as %s])" require alias)
+      (format "(require '[%s])" require))))
+
+(defn- eval-require-in-runtime
+  "If a require form was requested, evaluate it in the runtime's default
+   namespace and return the eval result. Otherwise return nil."
+  [runtime require-form]
+  (when require-form
+    (proto/-eval runtime require-form {})))
+
+(defn- add-lib-result-with-require
+  "Merge the dependency-loading result with an optional auto-require result.
+   The eval result is attached under :required and :required-error so the
+   model can see whether the namespace was usable after loading."
+  [added-result require-form eval-result]
+  (cond-> added-result
+    require-form
+    (assoc :required require-form
+           :required-error (:error eval-result)
+           :loaded? (nil? (:error eval-result)))))
 
 (deftype EvalTool [runtime config]
   tool/Tool
@@ -127,7 +150,7 @@
   tool/Tool
   (-name [_] "clojure/add-lib")
   (-description [_]
-    "Add a Maven (or Git) dependency to the running JVM at runtime, without restarting, using Clojure 1.12's runtime dependency loading. Provide `lib` (e.g. \"org.clojure/data.json\") with an optional `version` (defaults to the latest RELEASE), or pass `coords`: an EDN map string of lib -> coordinate map for advanced/git coordinates. After it returns, `require` the newly added namespaces via clojure/eval. Returns JSON with `added` (libs loaded) and `error` (null on success). Requires the agent to run under the Clojure CLI.")
+    "Load any Maven or Git dependency into the running JVM at runtime, without restarting, using Clojure 1.12's runtime dependency loading. This is the explicit tool for adding libraries that are NOT on the default classpath — for example, ring/ring-jetty-adapter to start a web server, org.clojure/data.json for JSON handling, metosin/reitit for routing, etc.\n\nProvide `lib` (e.g. \"org.clojure/data.json\") with an optional `version` (defaults to the latest RELEASE), or pass `coords`: an EDN map string of lib -> coordinate map for advanced/git coordinates. After the dependency loads, optionally pass `require` (namespace string, e.g. \"ring.adapter.jetty\") and `alias` (e.g. \"jetty\") to automatically require the namespace in the persistent runtime namespace so it is immediately usable. Returns JSON with `added` (libs loaded), `required` (the require form that ran, if any), `loaded?` (true if the require succeeded), `required-error` (if the require failed), and `error` (null on success). Requires the agent to run under the Clojure CLI; will fail with a clear error under the uberjar or native-image.")
   (-input-schema [_] schemas/AddLibInput)
   (-output-schema [_] schemas/OutputString)
   (-invoke [_ args _ctx]
@@ -136,8 +159,11 @@
         (not (enabled? config))         (disabled-envelope "clojure/add-lib")
         (not (network-allowed? config)) (network-disabled-envelope)
         :else
-        (let [coords (parse-coords args)]
-          (json-envelope (proto/-add-libs runtime coords {}))))
+        (let [coords        (parse-coords args)
+              added-result  (proto/-add-libs runtime coords {})
+              req-form      (require-form args)
+              eval-result   (eval-require-in-runtime runtime req-form)]
+          (json-envelope (add-lib-result-with-require added-result req-form eval-result))))
       (catch Throwable t
         (error-envelope t)))))
 

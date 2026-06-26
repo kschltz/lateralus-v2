@@ -37,11 +37,18 @@
   "Input schema for `clojure/add-lib`. Either supply `lib` (a Maven
    coordinate string like \"org.clojure/data.json\") with an optional
    `version`, or supply `coords`: an EDN string of a full coordinate
-   map (`{lib {:mvn/version \"...\"}}` or git coords) for advanced use."
+   map (`{lib {:mvn/version \"...\"}}` or git coords) for advanced use.
+
+   After the dependency is loaded, the tool can automatically `require`
+   a namespace from it so the model can use it immediately: pass
+   `:require` (namespace string) and optionally `:alias` (short alias).
+   The require is evaluated in the persistent runtime namespace."
   [:map
    [:lib {:optional true} :string]
    [:version {:optional true} :string]
-   [:coords {:optional true} :string]])
+   [:coords {:optional true} :string]
+   [:require {:description "Namespace to require after loading, e.g. \"ring.adapter.jetty\"" :optional true} :string]
+   [:alias {:description "Alias for :require, e.g. \"jetty\" to produce [ring.adapter.jetty :as jetty]" :optional true} :string]])
 
 (def LoadedLibsInput
   "Input schema for `clojure/loaded-libs`. Takes no arguments."

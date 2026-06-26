@@ -134,6 +134,34 @@
       (is (= "tool" (:phase out)))
       (is (some? (:error out))))))
 
+(deftest add-lib-tool-auto-requires-namespace
+  (testing "lib + require + alias evaluates a require form after loading"
+    (let [cap (atom nil)
+          reg (rt/runtime-registry {:runtime (stub cap)})]
+      (tool/invoke-tool (get reg "clojure/add-lib")
+                        {:lib "ring/ring-jetty-adapter" :version "1.13.0"
+                         :require "ring.adapter.jetty" :alias "jetty"}
+                        {})
+      (is (= :eval (:op @cap)))
+      (is (= "(require '[ring.adapter.jetty :as jetty])" (:code @cap))))))
+
+(deftest add-lib-tool-reports-required-error
+  (testing "when the auto-require fails, :loaded? is false and :required-error is set"
+    (let [cap (atom nil)
+          reg (rt/runtime-registry {:runtime
+                                    (->StubRuntime
+                                     {:ns "lateralus.repl" :forms 1 :value nil :output "" :error "FileNotFoundException"}
+                                     {:added ["some/lib"] :error nil}
+                                     ["clojure.string" "clojure.test"]
+                                     cap)})]
+      (let [out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+                                         {:lib "some/lib" :require "missing.ns"}
+                                         {}))]
+        (is (= ["some/lib"] (:added out)))
+        (is (false? (:loaded? out)))
+        (is (= "(require '[missing.ns])" (:required out)))
+        (is (= "FileNotFoundException" (:required-error out)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; clojure/loaded-libs
 ;; ---------------------------------------------------------------------------
@@ -152,7 +180,7 @@
       (is (re-find #"validation" out)))))
 
 ;; ---------------------------------------------------------------------------
-;; parse-coords (unit)
+;; parse-coords + require-form (unit)
 ;; ---------------------------------------------------------------------------
 
 (deftest parse-coords-variants
@@ -164,6 +192,13 @@
   (testing "parse-coords throws on empty input and non-map coords"
     (is (thrown? clojure.lang.ExceptionInfo (rt/parse-coords {})))
     (is (thrown? clojure.lang.ExceptionInfo (rt/parse-coords {:coords "[1 2 3]"})))))
+
+(deftest require-form-variants
+  (testing "require-form builds a require statement from :require and :alias"
+    (is (= "(require '[ring.adapter.jetty])" (#'rt/require-form {:require "ring.adapter.jetty"})))
+    (is (= "(require '[ring.adapter.jetty :as jetty])" (#'rt/require-form {:require "ring.adapter.jetty" :alias "jetty"})))
+    (is (nil? (#'rt/require-form {})))
+    (is (nil? (#'rt/require-form {:require ""})))))
 
 ;; ---- paren-repair integration (2026-06-22) ----
 
