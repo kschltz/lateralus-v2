@@ -332,7 +332,7 @@
                                 edit-out  (validate-edits original edits fuzzy?)]
                             (if (:error edit-out)
                               (json/generate-string edit-out)
-                              (let [{:keys [normalized eol-style bom?]}
+                              (let [{:keys [eol-style bom?]}
                                     (fs/normalize-for-match original)
                                     result    (apply-edits original (:spans edit-out))
                                     result-eol (restore-eol result eol-style bom?)

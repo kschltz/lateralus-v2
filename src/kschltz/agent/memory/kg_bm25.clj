@@ -158,21 +158,17 @@
 
    `opts` keys:
      :store      -- {:backend :file :path ...} or {:backend :memory}
-     :top-y      -- default top-y recall count
-     :last-n     -- default last-n recall count
      :rrf-k      -- RRF constant (default 60)
      :extract-fn -- (fn [content] #{entity ...}), defaults to tokenize"
-  [{:keys [store top-y last-n rrf-k extract-fn]
-    :or   {top-y      3
-           last-n     5
-           rrf-k      60
+  [{:keys [store rrf-k extract-fn]
+    :or   {rrf-k      60
            extract-fn kg/default-extract}}]
   (let [store-config (parse-store-config store)
         state        (atom (merge store-config
                                   {:sessions {}}))
         lock         (Object.)]
     (reify mem/MemoryBackend
-      (mem/-store-message [backend session-id msg]
+      (mem/-store-message [_ session-id msg]
         (let [entities (extract-fn (:content msg ""))]
           (locking lock
             (case (:type @state)
@@ -188,7 +184,7 @@
               :file   (persist-message! state session-id msg entities))))
         nil)
 
-      (mem/-recall-hybrid [backend session-id {:keys [top-y last-n query-text]}]
+      (mem/-recall-hybrid [_ session-id {:keys [top-y last-n query-text]}]
         (locking lock
           (let [recent (recent-messages state session-id last-n)]
             (if (seq query-text)
@@ -202,7 +198,7 @@
                 (merge-recalls recent top-msgs))
               (merge-recalls recent [])))))
 
-      (mem/-close [backend]
+      (mem/-close [_]
         (locking lock
           (reset! state (merge store-config {:sessions {}})))
         nil))))

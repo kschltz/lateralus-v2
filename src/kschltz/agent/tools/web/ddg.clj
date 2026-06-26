@@ -213,7 +213,7 @@
    hato-shaped map `{:status n :body s :headers m}`. Never throws —
    non-2xx surfaces as a normal response map. A TLS handshake failure
    surfaces as `{:status -1 :body \"<tls-err: ...>\"}`."
-  [{:keys [url headers timeout-ms impersonate]}]
+  [{:keys [url headers impersonate]}]
   (try
     (let [api    ((preset-fn impersonate))
           client (-> (OkHttpClientFactory/create api) (.newHttpClient))

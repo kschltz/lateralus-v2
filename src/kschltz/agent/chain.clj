@@ -134,7 +134,7 @@
 
 (defn- rethrow-unhandled
   [{:keys [exception] :as error}]
-  (let [{:keys [interceptor/name stage] :as data} (dissoc error :exception)]
+  (let [data (dissoc error :exception)]
     (throw (ex-info (str "Unhandled interceptor error: " (ex-message exception))
                     (assoc data :chain/unhandled? true)
                     exception))))

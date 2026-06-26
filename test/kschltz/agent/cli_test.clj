@@ -27,13 +27,6 @@
     (binding [*out* sw]
       [(f) (str sw)])))
 
-(defn- capture-err
-  "Run `f` with *err* bound to a StringWriter; return [rv captured-str]."
-  [f]
-  (let [sw (java.io.StringWriter.)]
-    (binding [*err* sw]
-      [(f) (str sw)])))
-
 (defn- silent-exit
   "An :exit fn that records the code and returns it. We use
    (constantly nil) in tests where we don't care about the code,

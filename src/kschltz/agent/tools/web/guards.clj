@@ -202,8 +202,7 @@
    blocked (fail closed)."
   [host cfg]
   (let [block-priv (get cfg :block-private-ips? (:block-private-ips? default-config))
-        block-loop (get cfg :block-loopback? (:block-loopback? default-config))
-        block-meta (get cfg :block-metadata-endpoints? (:block-metadata-endpoints? default-config))]
+        block-loop (get cfg :block-loopback? (:block-loopback? default-config))]
     (try
       (let [addrs (InetAddress/getAllByName host)]
         (reduce
@@ -484,7 +483,7 @@
   [results config]
   (keep
     (fn [r]
-      (let [{:keys [allow? reason]} (validate-url (:url r) config)
+      (let [{:keys [allow?]} (validate-url (:url r) config)
             ok-url? allow?
             snippet-resp (sanitize-snippet (str (:snippet r)) config)
             ok-snip? (some? (:ok snippet-resp))]
