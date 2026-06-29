@@ -44,6 +44,8 @@ rg 'http/completion' src/                       # only in llm/http.clj
 rg 'agent\.loop' src/                            # no loop.clj dependency in interceptors
 rg 'web_search|web-search|ddg|duckduckgo' -- 'README.md' 'docs/' 'AGENT_INSTRUCTIONS.md' 'src/' 'resources/' 'test/'  # only archive references
 rg '\(first\s+url-check\)' src/ test/             # prior URL-guard bug must stay fixed
+rg 'max-history-entries' src/ test/              # cap is 100 (not the legacy 40)
+rg 'history-summarize' src/                      # summarizer is wired into the default chain
 ```
 
 When editing `build.clj`, `deps.edn`, or `resources/lateralus/config.edn`, run

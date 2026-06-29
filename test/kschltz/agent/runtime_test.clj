@@ -16,8 +16,11 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.interceptors :as ix]
+            [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.plugins.summarizer :as plugins.summarizer]
+            [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.tool :as tool]))
 
@@ -315,3 +318,219 @@
                     count)]
       (is (< lines 150)
           (str "runtime.clj is " lines " lines; plan requires < 150")))))
+
+;; ============================================================================
+;; Summarizer regression tests (cross-exchange)
+;; ----------------------------------------------------------------------------
+;; These pin the end-to-end behavior of the :history-summarize slot:
+;; after the summarizer fires on a long history, exactly one
+;; [Conversation Summary] system message persists across subsequent
+;; exchanges, the protected window (incl. :role tool messages) is
+;; preserved verbatim, and the next exchange's :llm/request carries
+;; both the summary and the protected turns.
+;; ============================================================================
+
+(defn- summary-text-choice
+  "OpenAI-shaped response carrying plain assistant `content`. Used both
+   for normal exchange turns and for the summarizer's summary call."
+  [content]
+  {:choices [{:message {:role "assistant" :content content}}]
+   :model   "fake/v0"})
+
+(defn- summary-tool-call-choice
+  "OpenAI-shaped response with one tool call (empty assistant content)."
+  [id name args]
+  {:choices [{:message {:role "assistant"
+                        :content ""
+                        :tool_calls [{:id id :type "function"
+                                      :function {:name name :arguments args}}]}}]
+   :model   "fake/v0"})
+
+(defn- sum-scripted-llm
+  "LlmClient that pops response maps from `queue-atom`. When the queue
+   is empty, returns a default text response. The atom is the only
+   mutable seam."
+  [queue-atom]
+  (reify LlmClient
+    (-call [_ _req]
+      (let [next (first @queue-atom)]
+        (swap! queue-atom rest)
+        (or next
+            {:choices [{:message {:role "assistant" :content "done"}}]
+             :model   "fake/v0"})))))
+
+(defn- summary-msg?
+  "Return `m` when it is a system message emitted by the summarizer,
+   else nil. Truthy as a predicate; returns the map so callers can
+   thread `:content` off it."
+  [m]
+  (when (and (map? m)
+              (= "system" (:role m))
+              (str/starts-with? (or (:content m) "")
+                                "[Conversation Summary - generated"))
+    m))
+
+(defn- count-summaries [history]
+  (count (filter summary-msg? history)))
+
+(defn- seed-pairs
+  "Return a vector of `n` user/assistant pairs (2n messages)."
+  [n]
+  (vec (mapcat (fn [i]
+                 [{:role "user"      :content (str "seed-q-" i)}
+                  {:role "assistant" :content (str "seed-a-" i)}])
+               (range n))))
+
+(defn- summary-agent-map
+  "Assemble a base + summarizer (+ tools) chain into a runtime-ready
+   agent-map. The SAME scripted LlmClient is wired as :agent/llm-client
+   and into the summarizer plugin so call order is deterministic."
+  ([llm summarizer-opts]
+   (summary-agent-map llm summarizer-opts nil))
+  ([llm summarizer-opts registry]
+   (let [chain (plugin/assemble-chain
+                (cond-> [(plugins.base/base-plugin)
+                         (plugins.summarizer/summarizer-plugin
+                          (assoc summarizer-opts :llm-client llm))]
+                  registry (conj (plugins.tools/tools-plugin registry))))]
+     {:agent/llm-client llm
+      :exchange-chain   chain
+      :initial-state    {:base-url             "stub"
+                         :api-key              nil
+                         :model                "fake/v0"
+                         :agent/system-message "You have tools."}})))
+
+;; ---- Echo tool for the tool-result protection variant ----
+
+(deftype SummaryEchoTool []
+  tool/Tool
+  (-name [_] "echo")
+  (-description [_] "Echoes the message back.")
+  (-input-schema [_] [:map [:msg :string]])
+  (-output-schema [_] :string)
+  (-invoke [_ args _ctx] (:msg args)))
+
+(deftest cross-exchange-summary-survives
+  (testing "after the summarizer fires on a long history, exactly one
+            [Conversation Summary] system message persists across
+            subsequent exchanges and is visible to a later exchange's
+            :llm/request; the latest user/assistant turns stay verbatim"
+    (let [;; Seed 100 messages (50 pairs) so the first exchange pushes
+            ;; the non-system body to 102 (> trigger 60) and fires the
+            ;; summarizer exactly once. Subsequent text exchanges append
+            ;; 2 messages each and stay under the trigger, so no second
+            ;; summary is produced.
+          queue       (atom [(summary-text-choice "a1")
+                             (summary-text-choice "SUMMARY-OF-SEED")
+                             (summary-text-choice "a2")
+                             (summary-text-choice "a3")])
+          llm         (sum-scripted-llm queue)
+          agent-map   (summary-agent-map
+                       llm {:trigger 60 :protected-pairs 10 :max-history 100
+                            :model "fake/v0"})
+          rt          (runtime/start
+                      (assoc agent-map
+                             :initial-state
+                             (assoc (:initial-state agent-map)
+                                    :agent/history (seed-pairs 50)))
+                      "summary-session")
+          _out1       (runtime/send-message rt "q1")
+          _out2       (runtime/send-message rt "q2")
+          out3        (runtime/send-message rt "q3")
+          final       (runtime/stop rt)
+          history     (:agent/history final)
+          req-msgs    (-> out3 :llm/request :messages)]
+      ;; Exactly one summary system message in the persisted history.
+      (is (= 1 (count-summaries history))
+          (str "history holds exactly one summary message; got "
+               (pr-str (mapv #(select-keys % [:role :content]) history))))
+      ;; The summary text came from the stub LlmClient.
+      (is (some #(str/includes? (:content % "") "SUMMARY-OF-SEED") history)
+          "the persisted summary carries the stub LlmClient's text")
+      ;; The summary survived across exchanges 2 and 3: exchange 3's
+      ;; outgoing LLM request messages include the summary system
+      ;; message (compose-context read it from :agent/history).
+      (is (some summary-msg? req-msgs)
+          (str "exchange 3 request carries the summary; got msgs="
+               (pr-str (mapv #(select-keys % [:role :content]) req-msgs))))
+      ;; The latest user/assistant turns are present verbatim.
+      (is (some #(= "q3" (:content %)) history)
+          "the latest user turn is present verbatim")
+      (is (some #(= "a3" (:content %)) history)
+          "the latest assistant turn is present verbatim")
+      ;; The summary precedes the recent turns in the request.
+      (is (some (fn [[i m]]
+                  (and (summary-msg? m)
+                       (some #(= "q3" (:content %))
+                             (drop (inc i) req-msgs))))
+                (map-indexed vector req-msgs))
+          "the summary precedes the latest user turn in the request")
+      ;; The oldest seed turn was replaced by the summary (not still
+      ;; present verbatim).
+      (is (not-any? #(= "seed-q-0" (:content %)) history)
+          "the oldest seed turn was summarized away"))))
+
+(deftest summarization-does-not-drop-tool-results
+  (testing "when summarization fires after a tool-calling exchange,
+            the protected :role tool result message (and its matching
+            assistant :tool_calls turn) survive in :agent/history and in
+            the next exchange's :llm/request :messages"
+    (let [;; q1 / q2 are plain text (1 LLM call each). q3 drives a tool
+            ;; call: tool_call -> empty-text (forces summary path) ->
+            ;; final text. After store-exchange appends 4 messages the
+            ;; non-system body is 8 (> trigger 6) so the summarizer
+            ;; fires once with the tool pair inside the 4-message
+            ;; protected window. q4 is plain text; it does NOT re-trigger
+            ;; the summarizer.
+          queue       (atom [(summary-text-choice "a1")
+                             (summary-text-choice "a2")
+                             (summary-tool-call-choice "tc3" "echo" "{\"msg\":\"hi\"}")
+                             (summary-text-choice "")
+                             (summary-text-choice "got it: hi")
+                             (summary-text-choice "SUMMARY-OF-OLD")
+                             (summary-text-choice "a4")])
+          llm         (sum-scripted-llm queue)
+          agent-map   (summary-agent-map
+                       llm {:trigger 6 :protected-pairs 2 :max-history 100
+                            :model "fake/v0"}
+                       {"echo" (->SummaryEchoTool)})
+          rt          (runtime/start agent-map "summary-tool-session")
+          _out1       (runtime/send-message rt "q1")
+          _out2       (runtime/send-message rt "q2")
+          _out3       (runtime/send-message rt "call echo with hi")
+          out4        (runtime/send-message rt "q4")
+          final       (runtime/stop rt)
+          history     (:agent/history final)
+          req-msgs    (-> out4 :llm/request :messages)]
+      ;; Sanity: exchange 3 actually ran the echo tool.
+      (is (= "got it: hi" (:exchange/response _out3))
+          "exchange 3 reached the final text via ensure-text-response")
+      ;; Exactly one summary message persisted.
+      (is (= 1 (count-summaries history))
+          "exactly one summary system message is present")
+      ;; The protected tool result survived summarization.
+      (is (some #(and (= "tool" (:role %))
+                      (= "tc3" (:tool_call_id %))
+                      (= "hi" (:content %))) history)
+          (str "the protected tool result for tc3 survived summarization; "
+               "got history=" (pr-str history)))
+      ;; The matching assistant tool_calls turn survived too (no orphan).
+      (is (some #(and (= "assistant" (:role %))
+                      (-> % :tool_calls first :id (= "tc3"))) history)
+          "the assistant tool_calls turn for tc3 survived (no orphan)")
+      ;; The tool result is visible to the next exchange's LLM request.
+      (is (some #(and (= "tool" (:role %))
+                      (= "tc3" (:tool_call_id %))) req-msgs)
+          (str "exchange 4 request includes the persisted tool message; "
+               "got msgs="
+               (pr-str (mapv #(select-keys % [:role :tool_call_id :content])
+                             req-msgs))))
+      ;; The summary is also in the next exchange's request, preceding
+      ;; the protected window.
+      (is (some summary-msg? req-msgs)
+          "exchange 4 request includes the summary system message")
+      ;; The latest turns are present verbatim.
+      (is (some #(= "q4" (:content %)) history)
+          "the latest user turn is present verbatim")
+      (is (some #(= "a4" (:content %)) history)
+          "the latest assistant turn is present verbatim"))))

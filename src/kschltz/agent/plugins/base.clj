@@ -7,14 +7,15 @@
    Slot assignment matches the default slot order in
    `kschltz.agent.plugin/default-slot-order`:
 
-     :guard    — error-boundary
-     :compose  — compose-context, inject-tools
-     :llm      — llm-call-with-self-heal, llm-call, parse-response
-     :tools    — dispatch-tools, compose-tool-results
-     :finalize — tool-loop, ensure-text-response
-     :history  — store-exchange
-     :observe  — deliver-responses
-     :notify   — notify
+     :guard             — error-boundary
+     :compose           — compose-context, inject-tools
+     :llm               — llm-call-with-self-heal, llm-call, parse-response
+     :tools             — dispatch-tools, compose-tool-results
+     :finalize          — tool-loop, ensure-text-response
+     :history-summarize — summarize-history-interceptor (long-context compaction)
+     :history           — store-exchange
+     :observe           — deliver-responses
+     :notify            — notify
 
    The tool-calling interceptors are always present but are no-ops when
    no `:agent/tool-registry` has been seeded on the context. This makes
@@ -51,6 +52,7 @@
        (assoc (loop/tool-loop-interceptor react-loop) :slot :finalize)
        (assoc (loop/ensure-text-response-interceptor react-loop) :slot :finalize)
        (assoc ix/store-exchange :slot :history)
+       (assoc ix/summarize-history-interceptor :slot :history-summarize)
        (assoc ix/deliver-responses :slot :observe)
        (assoc ix/notify :slot :notify)]
       {:plugin/name :base})))

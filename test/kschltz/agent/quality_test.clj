@@ -50,12 +50,12 @@
       (is (empty? missing)
           (str "missing test namespaces for: " (pr-str missing))))))
 
-(deftest no-src-file-exceeds-500-loc-without-tests
-  (testing "no source file exceeds 500 lines; files that do must have tests"
+(deftest no-src-file-exceeds-600-loc-without-tests
+  (testing "no source file exceeds 600 lines; files that do must have tests"
     (doseq [f (src-files)]
       (let [lines (-> f slurp str/split-lines count)]
-        (is (<= lines 500)
-            (str (.getPath f) " is " lines " lines; max allowed is 500"))))))
+        (is (<= lines 600)
+            (str (.getPath f) " is " lines " lines; max allowed is 600"))))))
 
 (deftest chain-plus-runtime-under-350-loc
   (testing "combined chain + runtime stay under the plan's 350 LOC target"

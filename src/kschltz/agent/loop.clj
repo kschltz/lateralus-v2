@@ -40,9 +40,15 @@
    start and so would keep everything; trim-in-flight-messages instead
    keeps the leading system message(s) + the first user turn + the last
    `max-in-flight-entries` follow-up tool/assistant messages, dropping
-   the oldest tool results once the budget is hit. Defaults to the same
-   value as ix/max-history-entries."
-  ix/max-history-entries)
+   the oldest tool results once the budget is hit.
+
+   Kept independent of `ix/max-history-entries` (which is the
+   cross-exchange history cap): the in-flight budget protects a
+   single LLM call, while the cross-exchange budget protects session
+   lifetime. Tying them together forced one to drive the other;
+   bumping the cross-exchange cap to 100 (so summarize-history can
+   compact long sessions) would otherwise defeat in-loop trimming."
+  40)
 
 (defn- trim-in-flight-messages
   "Bound the in-exchange messages vector in BOTH count and size:

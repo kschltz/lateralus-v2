@@ -13,17 +13,23 @@
    diagnostics and tooling.
 
    Reserved slots (in execution order; see `default-slot-order`):
-     :guard    — security / safety checks before compose
-     :enrich   — RAG / memory recall before compose
-     :compose  — context construction interceptors
-     :llm      — interceptors that wrap the LLM call
-     :dispatch — tool-loop dispatch interceptors
-     :tools    — tool interceptors
-     :finalize — after the loop, before leave
-     :history  — leave stage for history updates
-     :persist  — leave stage for memory persistence
-     :observe  — leave stage for tracing / metrics
-     :notify   — leave stage for event callbacks
+     :guard             — security / safety checks before compose
+     :enrich            — RAG / memory recall before compose
+     :compose           — context construction interceptors
+     :llm               — interceptors that wrap the LLM call
+     :dispatch          — tool-loop dispatch interceptors
+     :tools             — tool interceptors
+     :finalize          — after the loop, before leave
+     :history-summarize — leave stage for compacting long histories
+                          (placed BEFORE :history so its :leave runs
+                          AFTER :history's :leave; leave walks are
+                          stack-reverse, so :history-summarize's
+                          :leave sees the just-written
+                          :agent/history in :agent/state-delta)
+     :history           — leave stage for history updates
+     :persist           — leave stage for memory persistence
+     :observe           — leave stage for tracing / metrics
+     :notify            — leave stage for event callbacks
 
    Interceptors without a `:slot` are appended after all slotted
    interceptors, in plugin declaration order. A plugin that is entirely
@@ -41,7 +47,7 @@
    a chain."
   [:guard :enrich :compose :llm :dispatch
    :tools :finalize
-   :history :persist :observe :notify])
+   :history-summarize :history :persist :observe :notify])
 
 (def ^:private allowed-slots
   (set default-slot-order))

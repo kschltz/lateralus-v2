@@ -29,7 +29,8 @@
      store-exchange   — leave stage; records the final exchange
      deliver-responses — leave stage; hands responses to listeners
      notify           — leave stage; fires on-thought / on-response"
-    (:require [kschltz.agent.chain :as chain]
+    (:require [clojure.string :as str]
+              [kschltz.agent.chain :as chain]
               [kschltz.agent.interceptors.schema :as schema]
               [kschltz.agent.llm.client :as llm-client]
               [malli.core :as m]))
@@ -70,11 +71,38 @@
 ;; TODO memory-followup: delete this stub. It is a no-op marker
 ;; so a future history-trimming PR has a clear `find-fn + replace`
 ;; target (token budget, recall window, etc.).
+(declare trim-history)  ;; forward-declared so the summarizer helpers
+                        ;; below can call it
+
 (def max-history-entries
   "Hard cap on the number of non-system messages retained in
    `:agent/history` after trimming. Keeps context growth bounded so
-   large file reads do not blow up the request forever."
-  40)
+   large file reads do not blow up the request forever. Bumped from
+   40 → 100 in 2026-06 to give the summarize-history interceptor
+   room to compact long sessions instead of silently dropping the
+   oldest turns."
+  100)
+
+(def protected-turn-pairs
+  "Number of most-recent turn pairs the summarizer preserves verbatim
+   above the older block it compresses. A 'turn pair' is one user
+   message plus the assistant/tool messages that follow it. Defaults
+   to 10 — chosen so the protected window covers roughly the last
+   10 user turns of the conversation."
+  10)
+
+(def summarize-trigger
+  "Threshold (non-system message count) at which the summarize-history
+   interceptor fires. Below this, no summarization happens and
+   `trim-history` carries the cap. At or above this, the oldest block
+   above the protected window is replaced with a single
+   `[Conversation Summary - generated <ts>]` system message.
+
+   Picked to leave ~40 messages of headroom before the hard
+   `max-history-entries` cap (100), so a single summarization event
+   returns the history well below the cap and the next few exchanges
+   do not retrigger."
+  60)
 
 (def ^:private max-tool-content-chars
   "Hard cap on the `:content` of any `:role tool` message retained
@@ -99,6 +127,161 @@
              (str (subs content 0 max-tool-content-chars)
                   "...[trimmed]"))
       msg)))
+
+;; ---- Summarization helpers --------------------------------------------
+;;
+;; The summarizer plugin (`kschltz.agent.plugins.summarizer`) calls
+;; these pure helpers and the `summarize-history` factory. Exposed at
+;; the top level so tests and callers can drive each piece in isolation.
+
+(def ^:private default-summarize-instruction
+  "Summarize the following conversation for an AI agent. Preserve: user-stated goals, constraints, decisions made, facts discovered, errors resolved. Drop: pleasantries, redundant exploration. Be dense.")
+
+(defn split-protected-window
+  "Split `body` (non-system messages) into `[oldest-block
+   protected-window]`. The protected window covers the trailing
+   `protected-pairs` user turns and their following
+   assistant/tool messages, so an `:role assistant :tool_calls` /
+   `:role tool` pair is never split.
+
+   The split is anchored so the protected window never starts with a
+   `:role \"tool\"` message — if a malformed history has a tool
+   message at the boundary, the window is extended back to include
+   the matching assistant turn (or, failing that, the preceding
+   user turn)."
+  [body protected-pairs]
+  (let [n        (count body)
+        cut-idx
+        (loop [i     (dec n)
+               pairs 0]
+          (cond
+            (neg? i)             0
+            (>= pairs protected-pairs)
+            ;; have enough pairs; if the boundary lands on a tool
+            ;; message, extend back so the window starts on a user
+            ;; turn (which keeps the assistant tool_calls turn whole)
+            (let [start (if (= "tool" (:role (nth body i)))
+                          (loop [j i]
+                            (cond
+                              (neg? j) 0
+                              (= "user"      (:role (nth body j))) (inc j)
+                              (= "assistant" (:role (nth body j))) (inc j)
+                              :else (recur (dec j))))
+                          (inc i))]
+              (min start n))
+            (= "user" (:role (nth body i)))
+            (recur (dec i) (inc pairs))
+            :else (recur (dec i) pairs)))]
+    (if (zero? cut-idx)
+      [[] (vec body)]
+      [(subvec body 0 cut-idx)
+       (subvec body cut-idx)])))
+
+(defn build-summary-request
+  "Build the LlmClient request payload for one summarization call.
+   `oldest` is the contiguous block to compress; `model` is the
+   model name to set on the request."
+  [oldest model]
+  {:model    (or model "stub-summarizer")
+   :messages (into (vec oldest)
+                   [{:role "user" :content default-summarize-instruction}])})
+
+(defn build-summary-message
+  "Build the system-role marker message that replaces the summarized
+   block. `summary-text` is the LlmClient's response; `ts` is the
+   timestamp (ms since epoch)."
+  [summary-text ts]
+  {:role    "system"
+   :content (str "[Conversation Summary - generated " ts "]\n" summary-text)})
+
+(defn- now-ms []
+  (System/currentTimeMillis))
+
+(defn- history-body
+  "Return `[leading-system body]` for a history vector. The leading
+   system message (if any and not itself a prior summary) is kept
+   separate; the body is the rest."
+  [history]
+  (let [hist      (vec history)
+        first-    (first hist)
+        is-sys?   (and (map? first-) (= "system" (:role first-)))
+        is-summ?  (and is-sys?
+                      (str/starts-with? (or (:content first-) "")
+                                        "[Conversation Summary"))
+        leading   (when (and is-sys? (not is-summ?)) first-)
+        body      (cond
+                    (and is-sys? (not is-summ?)) (subvec hist 1)
+                    :else hist)]
+    [leading body]))
+
+(defn- call-summarizer-llm
+  "Invoke the summarizer LlmClient on a request. Returns the assistant
+   text from the response, or a placeholder string when the client is
+   missing or the response is malformed."
+  [client req]
+  (try
+    (let [resp (llm-client/-call client req)
+          txt  (or (get-in resp [:choices 0 :message :content]) "")]
+      (if (seq txt) txt "[summary unavailable]"))
+    (catch Throwable _
+      "[summary unavailable]")))
+
+(defn summarize-history
+  "Factory. Return an interceptor map (without `:name`/`:slot`) whose
+   `:leave` fn compacts a long `:agent/history` into a single summary
+   message plus a protected window of recent turns.
+
+   Options:
+     :llm-client      — required `LlmClient` instance
+     :trigger         — non-system message count above which to fire
+                        (default `summarize-trigger`)
+     :protected-pairs — number of user turns to keep verbatim (default
+                        `protected-turn-pairs`)
+     :model           — model hint passed to the LlmClient (default
+                        \"stub-summarizer\")
+
+   The interceptor name and slot are added by the plugin; this fn
+   returns only the stage fns."
+  [{:keys [llm-client trigger protected-pairs model]
+    :or   {trigger         summarize-trigger
+           protected-pairs protected-turn-pairs
+           model           "stub-summarizer"}}]
+  {:leave
+   (fn summarize-leave [ctx]
+     (let [delta      (:agent/state-delta ctx)
+           new-hist   (:agent/history delta)
+           base-hist  (:agent/history (:agent/state ctx))
+           hist       (cond
+                        (vector? new-hist)  new-hist
+                        (vector? base-hist) base-hist
+                        :else               nil)
+           [leading body] (history-body hist)
+           body-len      (count body)
+           [oldest protected] (split-protected-window body protected-pairs)]
+       (if (and (seq body) (> body-len trigger) (seq oldest))
+         (let [req    (build-summary-request oldest model)
+               client  (or llm-client (:llm/client ctx))
+               text   (if client
+                        (call-summarizer-llm client req)
+                        "[summary unavailable]")
+               marker (build-summary-message text (now-ms))
+               new-body (into [marker] protected)
+               new-hist (if leading
+                         (into [leading] new-body)
+                         new-body)
+               trimmed  (trim-history new-hist)]
+           (assoc ctx :agent/state-delta
+                  (merge delta {:agent/history trimmed})))
+         ctx)))})
+
+(def summarize-history-interceptor
+  "Default-configured summarize-history interceptor for the base
+   plugin. Carries `:name ::summarize-history` and `:slot
+   :history-summarize`. With no LlmClient on the agent map, the
+   interceptor falls back to `[summary unavailable]` placeholders
+   (still emits the marker so the protected window is preserved)."
+  (let [ix (summarize-history {:llm-client nil})]
+    (assoc ix :name ::summarize-history :slot :history-summarize)))
 
 (defn- body-window
   "Pick the trailing window of `body` (non-system messages) to keep.

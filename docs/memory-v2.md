@@ -153,7 +153,33 @@ The LangChain4j model weights are bundled in the jar, so no runtime network call
 - **`proximum` impl**: durable HNSW-backed memory. Runtime default in `resources/lateralus/config.edn`.
 - **`:langchain4j` embedder**: in-process ONNX all-MiniLM-L6-v2. Runtime default.
 - **Memory plugin slots**: `:enrich` (recall injection) and `:persist` (exchange persistence) are wired in the plugin. With the noop backend they are no-ops; with Proximum + LangChain4j they store and recall real session history.
+- **History compaction**: a `:history-summarize` `:leave` interceptor runs after `store-exchange` and compacts long `:agent/history` into a single `[Conversation Summary - generated <ts>]` system message plus a protected window of the most-recent user turns. Trigger = 60 non-system messages; protected window = 10 user turns; cap (`max-history-entries`) = 100. See "History summarization policy" below.
 - **No** `remember` tool facts in MVP (`:v2/kind` reserved for post-MVP).
+
+## History summarization policy
+
+`kschltz.agent.interceptors/summarize-history` (factored as
+`kschltz.agent.plugins.summarizer/summarizer-plugin`) compresses a
+long `:agent/history` so context growth stays bounded without silently
+dropping the oldest turns.
+
+| Constant | Value | Where |
+|---|---|---|
+| `max-history-entries` | 100 | hard cap on non-system messages retained in `:agent/history` after `trim-history` |
+| `summarize-trigger` | 60 | non-system message count at which the summarizer fires |
+| `protected-turn-pairs` | 10 | number of most-recent user turns preserved verbatim |
+
+Behavior:
+
+1. **Trigger guard.** When the non-system body grows past `summarize-trigger` (60), the interceptor reads the just-written `:agent/history` from `:agent/state-delta` and compacts.
+2. **Split.** The body is split into `[oldest-block protected-window]` where the protected window covers the trailing 10 user turns and their following assistant/tool messages. The split anchors so the window never starts with a `:role "tool"` message (assistant tool_calls / tool pairs stay whole).
+3. **Summarize.** The oldest block is sent to the configured `LlmClient` (or a stub/cheap model in production) with a dense "preserve user goals, decisions, facts, errors; drop pleasantries" instruction.
+4. **Emit.** A single `:role "system"` message is prepended to the protected window, with content `"[Conversation Summary - generated <ms>]\n<summary>"`. The leading original system message (if any) stays at position 0.
+5. **Write back.** The compacted history overwrites `:agent/history` in `:agent/state-delta`; the runtime merges it on the next exchange.
+
+When no `LlmClient` is wired, the marker still emits with `[summary unavailable]` so the boundary is observable.
+
+With the noop memory backend this has no effect on persisted memory — `:agent/history` is in-process state. With Proximum or kg-bm25, only the post-compaction summary is stored on the next persist call.
 
 ## Backend comparison
 

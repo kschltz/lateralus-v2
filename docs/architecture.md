@@ -62,6 +62,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :llm      → llm-call-with-self-heal, llm-call, parse-response    │
 │  :tools    → dispatch-tools-interceptor, compose-tool-results-interceptor │
 │  :finalize → tool-loop-interceptor                                │
+│  :history-summarize → summarize-history (compacts long histories) │
 │  :history  → store-exchange                                      │
 │  :persist  → memory persist (when memory plugin present)         │
 │  :observe  → deliver-responses                                   │
@@ -76,8 +77,14 @@ Slots are declared in `kschltz.agent.plugin/default-slot-order` and folded by `p
 ```clojure
 [:guard :enrich :compose :llm :dispatch
  :tools :finalize
- :history :persist :observe :notify]
+ :history-summarize :history :persist :observe :notify]
 ```
+
+`:history-summarize` is placed BEFORE `:history` because leave stages run
+stack-reverse: `summarize-history` enters before `store-exchange` and
+leaves after it, so its `:leave` sees the freshly-written
+`:agent/history` in `:agent/state-delta` and can compact it. See
+`docs/memory-v2.md` § History summarization policy.
 
 | Slot | Phase | Typical use | Wired by |
 |------|-------|-------------|----------|
@@ -88,6 +95,7 @@ Slots are declared in `kschltz.agent.plugin/default-slot-order` and folded by `p
 | `:dispatch` | enter | reserved slot (no interceptor wired) | — |
 | `:tools` | enter | dispatch and run registered tools | base plugin (`dispatch-tools-interceptor`, `compose-tool-results-interceptor`) |
 | `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop-interceptor`) |
+| `:history-summarize` | leave | compact long `:agent/history` into one summary + protected window | base plugin (`summarize-history`); optional `summarizer-plugin` overrides the LlmClient |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |
 | `:persist` | leave | memory / state persistence | memory plugin |
 | `:observe` | leave | tracing / metrics / outgoing queue | base plugin (`deliver-responses`) |
@@ -251,6 +259,7 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/plugins/base.clj` | default base plugin with core chain slots |
 | `src/kschltz/agent/plugins/memory.clj` | memory plugin (`:enrich` recall, `:persist` store) |
 | `src/kschltz/agent/plugins/tools.clj` | tool plugin: seeds `:agent/tool-registry` |
+| `src/kschltz/agent/plugins/summarizer.clj` | history-summarizer plugin (`:history-summarize` slot, overrides the summarizer `LlmClient`) |
 | `src/kschltz/agent/loop.clj` | ReAct tool-calling loop interceptors |
 | `src/kschltz/agent/tools/filesystem.clj` | read-only filesystem `Tool` implementations |
 | `src/kschltz/agent/tools/self.clj` | self-awareness `Tool` (`self/status`) |

@@ -61,6 +61,7 @@
             ::loop/compose-tool-results
             ::loop/tool-loop
             ::loop/ensure-text-response
+            ::ix/summarize-history
             ::ix/store-exchange
             ::ix/deliver-responses
             ::ix/notify]
