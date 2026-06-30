@@ -509,6 +509,29 @@
       (is (= 0 code))
       (is (false? @called)))))
 
+(deftest run-cli-uses-default-selector-when-seam-omitted
+  (testing "omitting :model-selector still works via the :or default (the -main path)"
+    ;; Before the fix, -main -> (run-cli opts {}) left model-selector nil
+    ;; and ensure-model NPE'd. Now the :or default + (or ...) fallback cover it.
+    (let [cfg-path (temp-config-file {:lateralus/llm-client
+                                       {:impl :http :base-url "http://x/v1"}})
+          out      (java.io.StringWriter.)
+          sys-opts (atom nil)
+          opts     (cli/parse-args ["--config" cfg-path "hi"])
+          code     (cli/run-cli opts
+                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
+                      :out    out
+                      :exit   (fn [_] nil)
+                      ;; NO :model-selector seam — exercises the :or default.
+                      :list-models-fn (fn [_base _api] ["a" "b"])
+                      :read-line-fn   (fn [] "2")
+                      :system-fn (fn [o] (reset! sys-opts o)
+                                  [{} "s" (fn [])])
+                      :runner-fn (fn [_] {:exchange/response "ok"})})]
+      (is (= 0 code))
+      (is (= "b" (:model @sys-opts))
+          "the default selector ran and threaded the chosen model through"))))
+
 (deftest run-cli-selector-give-up-keeps-opts-but-prints-guidance
   (testing "a nil selection does not assoc a model and prints guidance"
     (let [cfg-path (temp-config-file {:lateralus/llm-client

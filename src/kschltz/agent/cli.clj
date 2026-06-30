@@ -326,18 +326,18 @@
    prints guidance and returns `opts` unchanged so the build surfaces the
    missing model."
   [opts ^java.io.PrintWriter out
-   {:keys [model-selector list-models-fn read-line-fn]
-    :or   {model-selector default-model-selector}}]
+   {:keys [model-selector list-models-fn read-line-fn]}]
   (if (not (needs-model-selection? opts))
     opts
-    (let [resolved (resolve-llm-config opts)
+    (let [selector (or model-selector default-model-selector)
+          resolved (resolve-llm-config opts)
           base-url (:base-url resolved)
           api-key  (:api-key resolved)
           ctx     (cond-> {:base-url base-url :api-key api-key :out out}
                    list-models-fn (assoc :list-models-fn
                                          #(list-models-fn base-url api-key))
                    read-line-fn   (assoc :read-line-fn read-line-fn))
-          chosen  (model-selector ctx)]
+          chosen  (selector ctx)]
       (if (str/blank? chosen)
         (do (.println out (str "lateralus: no model selected; pass --model NAME "
                                "or set :model in your config."))
@@ -492,7 +492,8 @@
                  out      System/out
                  exit     (fn [n] (System/exit n))
                  system-fn default-system-fn
-                 runner-fn default-runner-fn}}]
+                 runner-fn default-runner-fn
+                 model-selector default-model-selector}}]
    (let [^java.io.PrintWriter o   (java.io.PrintWriter. (io/writer out :append true) true)
          seams {:model-selector model-selector
                 :list-models-fn list-models-fn
