@@ -60,24 +60,49 @@
       (is (= "created" (slurp (io/file @tmp-dir "nested/dir/test.txt")))))))
 
 (deftest file-read-returns-content
-  (testing "file/read returns the UTF-8 content of a text file"
+  (testing "file/read returns the UTF-8 content of a text file with line numbers"
     (let [f    (temp-file "hello.txt" "hello world")
           reg  (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
           result (tool/invoke-tool (get reg "file/read") {:path "hello.txt"} dummy-ctx)
           parsed (json/parse-string result true)]
       (is (map? parsed))
-      (is (= "hello world" (:content parsed)))
-      (is (= 11 (:size parsed))))))
+      (is (= "     1\thello world" (:content parsed)))
+      (is (str/includes? (:content parsed) "hello world"))
+      (is (= 11 (:size parsed)))
+      (is (= 1 (:total-lines parsed)))
+      (is (= 1 (:offset parsed)))
+      (is (= 2000 (:limit parsed)))
+      (is (= 1 (:lines-returned parsed)))
+      (is (false? (:truncated parsed)))
+      (is (not (str/includes? (:content parsed) "[file-window:"))))))
 
 (deftest file-read-honors-offset-and-limit
-  (testing "file/read supports offset and limit"
-    (let [f    (temp-file "abc.txt" "abcdefghij")
+  (testing "file/read honors 1-based line offset and line limit"
+    (let [f    (temp-file "lines.txt" "line1\nline2\nline3\nline4\nline5\n")
           reg  (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file/read") {:path "abc.txt"
+          result (tool/invoke-tool (get reg "file/read") {:path "lines.txt"
                                                           :offset 2
-                                                          :limit 3} dummy-ctx)
+                                                          :limit 2} dummy-ctx)
           parsed (json/parse-string result true)]
-      (is (= "cde" (:content parsed))))))
+      (is (str/starts-with? (:content parsed) "     2\tline2\n     3\tline3"))
+      (is (= 2 (:offset parsed)))
+      (is (= 2 (:limit parsed)))
+      (is (= 2 (:lines-returned parsed)))
+      (is (= 5 (:total-lines parsed)))
+      (is (true? (:truncated parsed)) "more lines remain beyond the window")
+      (is (str/ends-with? (:content parsed)
+                          (format "[file-window: %s lines 2-3 of 5; call file/read again with offset=4 to continue]"
+                                  (:path parsed))))))
+  (testing "file/read with no offset/limit returns the whole file untruncated"
+    (let [f    (temp-file "lines.txt" "line1\nline2\nline3\nline4\nline5\n")
+          reg  (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/read") {:path "lines.txt"} dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= 5 (:lines-returned parsed)))
+      (is (= 5 (:total-lines parsed)))
+      (is (false? (:truncated parsed)))
+      (is (not (str/includes? (:content parsed) "[file-window:")))
+      (is (str/starts-with? (:content parsed) "     1\tline1")))))
 
 (deftest file-read-errors-on-missing-file
   (testing "file/read returns a model-visible error for a missing file"
@@ -85,6 +110,81 @@
           result (tool/invoke-tool (get reg "file/read") {:path "does-not-exist.txt"} dummy-ctx)]
       (is (string? result))
       (is (str/starts-with? result "Filesystem tool error:")))))
+
+(deftest file-read-reports-binary-file
+  (testing "file/read reports a binary file as a structured :error rather than throwing"
+    (let [f   (io/file @tmp-dir "bin.dat")
+          _   (io/make-parents f)
+          _   (with-open [in (java.io.ByteArrayInputStream. (byte-array (map byte [0x00 0x41 0x42])))
+                          out (io/output-stream f)]
+                (io/copy in out))
+          _   (.deleteOnExit f)
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/read") {:path "bin.dat"} dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (not (str/starts-with? result "Filesystem tool error:")))
+      (is (map? parsed))
+      (is (= "binary-file" (:error parsed)))
+      (is (string? (:path parsed)))
+      (is (integer? (:size parsed))))))
+
+(deftest file-read-offset-beyond-end
+  (testing "file/read with offset past EOF returns empty content and no marker"
+    (let [f   (temp-file "three.txt" "l1\nl2\nl3\n")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/read") {:path "three.txt"
+                                                          :offset 10
+                                                          :limit 5} dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "" (:content parsed)))
+      (is (= 0 (:lines-returned parsed)))
+      (is (false? (:truncated parsed)))
+      (is (= 3 (:total-lines parsed)))
+      (is (not (str/includes? (:content parsed) "[file-window:"))))))
+
+(deftest file-read-reports-total-lines
+  (testing "file/read reports the real total line count for a known file"
+    (let [f   (temp-file "six.txt" "a\nb\nc\nd\ne\nf\n")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/read") {:path "six.txt"} dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= 6 (:total-lines parsed)))
+      (is (= 6 (:lines-returned parsed)))
+      (is (false? (:truncated parsed))))))
+
+(deftest file-read-truncation-marker-format
+  (testing "file/read emits a well-formed continuation marker and resumes on the next call"
+    (let [f   (temp-file "six.txt" "a\nb\nc\nd\ne\nf\n")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          r1  (tool/invoke-tool (get reg "file/read") {:path "six.txt" :offset 1 :limit 3} dummy-ctx)
+          p1  (json/parse-string r1 true)
+          expected-path (:path p1)]
+      (is (= 3 (:lines-returned p1)))
+      (is (true? (:truncated p1)))
+      (is (str/ends-with? (:content p1)
+                          (format "[file-window: %s lines 1-3 of 6; call file/read again with offset=4 to continue]"
+                                  expected-path))))
+  (testing "the follow-up read returns the remaining lines with no marker"
+    (let [_   (temp-file "six.txt" "a\nb\nc\nd\ne\nf\n")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          r2  (tool/invoke-tool (get reg "file/read") {:path "six.txt" :offset 4 :limit 3} dummy-ctx)
+          p2  (json/parse-string r2 true)]
+      (is (= 3 (:lines-returned p2)))
+      (is (= 6 (:total-lines p2)))
+      (is (false? (:truncated p2)))
+      (is (not (str/includes? (:content p2) "[file-window:")))
+      (is (str/starts-with? (:content p2) "     4\td"))))))
+
+(deftest file-read-file-window-marker
+  (testing "file/read with a small limit ends with a continuation marker mentioning offset="
+    (let [f   (temp-file "ten.txt" (str/join "\n" (map #(str "n" %) (range 1 11))))
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file/read") {:path "ten.txt" :limit 4} dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (true? (:truncated parsed)))
+      (is (= 4 (:lines-returned parsed)))
+      (is (str/ends-with? (:content parsed) " to continue]"))
+      (is (str/includes? (:content parsed) "call file/read again with offset=")))))
 
 (deftest file-list-returns-directory-entries
   (testing "file/list returns files and directories"
@@ -150,14 +250,23 @@
                                                               :pattern "[invalid"} dummy-ctx)]
       (is (str/starts-with? result "Filesystem tool error:")))))
 
-(deftest custom-max-read-bytes-rejects-large-files
-  (testing "a configured :max-read-bytes limit is honored"
+(deftest custom-max-read-bytes-truncates-large-files
+  (testing "a configured :max-read-bytes budget truncates a large file rather than erroring"
     (let [f   (temp-file "big.txt" (apply str (repeat 200 "x")))
           reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)
-                                                    :max-read-bytes 100})]
-      (is (str/starts-with?
-           (tool/invoke-tool (get reg "file/read") {:path "big.txt"} dummy-ctx)
-           "Filesystem tool error:")))))
+                                                    :max-read-bytes 100})
+          result (tool/invoke-tool (get reg "file/read") {:path "big.txt"} dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (map? parsed) "result must be JSON, not a Filesystem tool error string")
+      (is (not (str/starts-with? result "Filesystem tool error:")))
+      (is (= 200 (:size parsed)))
+      (is (= 1 (:total-lines parsed)))
+      (is (= 1 (:lines-returned parsed)) "the single oversized line is returned truncated-to-budget")
+      (is (true? (:truncated parsed)))
+      (is (str/includes? (:content parsed) "x"))
+      (is (str/includes? (:content parsed) " (line truncated to "))
+      (is (str/includes? (:content parsed) "[file-window:"))
+      (is (str/includes? (:content parsed) "offset=2")))))
 
 (deftest custom-max-search-results-caps-default
   (testing "a configured :max-search-results default is honored"

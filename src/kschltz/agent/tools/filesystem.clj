@@ -37,12 +37,14 @@
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-write :as fw])
-  (:import [java.io File]
-           [java.nio.charset StandardCharsets]
+  (:import [java.io BufferedReader File InputStream InputStreamReader]
+           [java.nio.charset CharsetDecoder CodingErrorAction StandardCharsets]
            [java.nio.file Files Path]))
 
 (def default-max-read-bytes
-  "Default upper bound on how many bytes `file/read` will slurp."
+  "Default hard ceiling on the byte length of `file/read`'s line-numbered
+   `:content` string. Not a gate that refuses a file — reads beyond the
+   budget return a window with a continuation marker."
   (* 256 1024))
 
 (def default-max-search-file-bytes
@@ -92,22 +94,198 @@
                  (catch Throwable _ default)))]
     (if (pos? v) v default)))
 
-(defn- read-text
-  "Read up to `max-read-bytes` bytes from `path` as UTF-8 text. Optional
-   `offset` skips that many characters; `limit` caps returned characters.
-   Returns a string. Throws on binary / decoding errors or missing file."
-  [^Path path offset limit max-read-bytes]
-  (let [bytes (Files/readAllBytes path)
-        _ (when (> (count bytes) max-read-bytes)
-            (throw (ex-info (format "File too large: %d bytes (limit %d)"
-                                    (count bytes) max-read-bytes)
-                            {:path (fpath/path->str path)
-                             :size (count bytes)})))
-        text  (String. ^bytes bytes StandardCharsets/UTF_8)
-        off   (max 0 (safe-int offset 0))
-        lim   (safe-int limit (count text))
-        end   (min (+ off lim) (count text))]
-    (subs text off end)))
+(defn- byte-count
+  "UTF-8 byte length of `s`."
+  [^String s]
+  (alength (.getBytes s "UTF-8")))
+
+(defn- read-first-bytes
+  "Read up to `n` bytes from `path`, returning a byte array of the bytes
+  actually read (length 0 at EOF). Does not load the whole file."
+  [^Path path ^long n]
+  (with-open [is (io/input-stream (.toFile path))]
+    (let [buf (byte-array n)
+          read (.read is buf 0 n)]
+      (if (neg? read)
+        (byte-array 0)
+        (java.util.Arrays/copyOf buf read)))))
+
+(defn- binary-sample?
+  "Return true if `sample` (a byte array of length `sample-len`) looks
+  binary: it contains a NUL byte, or the control-byte ratio exceeds
+  0.30. Control bytes are bytes < 0x20 (except the allowed whitespace
+  set \\t \\n \\r \\f \\v) and 0x7F. Bytes >= 0x80 are not control bytes
+  (valid UTF-8 lead/continuation bytes)."
+  [^bytes sample ^long sample-len]
+  (cond
+    (zero? sample-len) false
+    (loop [i 0]
+      (cond
+        (>= i sample-len) false
+        (zero? (bit-and (aget sample i) 0xFF)) true
+        :else (recur (inc i))))
+    true
+    :else
+    (let [control (loop [i 0 c 0]
+                     (if (>= i sample-len)
+                       c
+                       (let [b (bit-and (aget sample i) 0xFF)]
+                         (cond
+                           (or (== b 0x09) (== b 0x0A) (== b 0x0D)
+                               (== b 0x0C) (== b 0x0B))
+                           (recur (inc i) c)
+                           (or (< b 0x20) (== b 0x7F))
+                           (recur (inc i) (inc c))
+                           :else (recur (inc i) c)))))]
+      (> (/ (double control) (double sample-len)) 0.30))))
+
+(defn- fit-truncated-line
+  "Return the formatted content string for a single in-window line that
+  alone exceeds `max-read-bytes`: the line-numbered prefix plus as much
+  of `line` as fits, then the literal ` (line truncated to <N> chars)`
+  suffix. `<N>` is the number of characters of `line` kept. The whole
+  string fits within `max-read-bytes` bytes."
+  [^long line-no ^String line ^long max-read-bytes]
+  (let [prefix (format "%6d\t" line-no)
+        prefix-bytes (byte-count prefix)
+        kept (loop [lo 0 hi (count line)]
+               (if (>= lo hi)
+                 lo
+                 (let [mid (quot (+ lo hi 1) 2)
+                       mid-suffix (str " (line truncated to " mid " chars)")
+                       total (+ prefix-bytes
+                                (byte-count (subs line 0 mid))
+                                (byte-count mid-suffix))]
+                   (if (<= total max-read-bytes)
+                     (recur mid hi)
+                     (recur lo (dec mid))))))
+        suffix (str " (line truncated to " kept " chars)")]
+    (str prefix (subs line 0 kept) suffix)))
+
+(defn- continuation-marker
+  "Build the `:content`-appended continuation marker for a truncated read."
+  [path-str offset lines-returned total-lines]
+  (let [end (+ offset lines-returned -1)
+        next (inc end)]
+    (format "\n\n[file-window: %s lines %d-%d of %d; call file/read again with offset=%d to continue]"
+            path-str offset end total-lines next)))
+
+(defn- read-lines-with-window
+  "Stream-read `path` line by line as UTF-8, building the line-numbered
+  content window and the total line count in a single linear scan.
+
+  `offset` is the 1-based line to start at (already coerced/clamped to
+  >= 1); `limit` is the max lines to place into `:content`; `max-read-bytes`
+  is the hard byte ceiling on the formatted `:content` string. Returns the
+  result map with `:path :size :total-lines :offset :limit
+  :lines-returned :truncated :content`. Throws a `CharacterCodingException`
+  if the file is not valid UTF-8 (caught by the caller)."
+  [^Path path size offset limit max-read-bytes]
+  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
+                  (.onMalformedInput CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter CodingErrorAction/REPORT))
+        path-str (fpath/path->str path)]
+    (with-open [is (io/input-stream (.toFile path))
+                r (BufferedReader. (InputStreamReader. ^InputStream is ^CharsetDecoder decoder))]
+      (loop [line-no 0
+             collected 0
+             buf (StringBuilder.)
+             buf-bytes 0
+             collecting true
+             cut false]
+        (let [line (.readLine ^BufferedReader r)]
+          (cond
+            ;; EOF: finalize.
+            (nil? line)
+            (let [total-lines line-no
+                  lines-returned collected
+                  truncated (or cut
+                               (and (pos? lines-returned)
+                                    (< (+ offset lines-returned -1) total-lines)))
+                  content (.toString buf)
+                  content-final (if truncated
+                                  (str content (continuation-marker path-str offset lines-returned total-lines))
+                                  content)]
+              {:path path-str
+               :size size
+               :total-lines total-lines
+               :offset offset
+               :limit limit
+               :lines-returned lines-returned
+               :truncated truncated
+               :content content-final})
+
+            ;; Window closed (limit reached or budget cut): keep counting.
+            (not collecting)
+            (recur (inc line-no) collected buf buf-bytes collecting cut)
+
+            ;; Not yet in the window: skip but keep counting.
+            (< (inc line-no) offset)
+            (recur (inc line-no) collected buf buf-bytes collecting cut)
+
+            ;; In window and under the line limit: consider appending.
+            :else
+            (let [next-line-no (inc line-no)]
+              (if (>= collected limit)
+                ;; Line limit reached: stop collecting, keep counting.
+                (recur next-line-no collected buf buf-bytes false cut)
+                (let [fmt (format "%6d\t%s" next-line-no line)
+                      fmt-bytes (byte-count fmt)
+                      sep-bytes (if (pos? collected) 1 0)
+                      cand-bytes (+ sep-bytes fmt-bytes)]
+                  (if (<= (+ buf-bytes cand-bytes) max-read-bytes)
+                    ;; Fits: append.
+                    (recur next-line-no
+                           (inc collected)
+                           (do (when (pos? collected) (.append buf "\n"))
+                               (.append buf fmt)
+                               buf)
+                           (+ buf-bytes cand-bytes)
+                           collecting
+                           cut)
+                    ;; Would exceed the byte budget.
+                    (if (pos? collected)
+                      ;; Already have lines: stop, mark cut.
+                      (recur next-line-no collected buf buf-bytes false true)
+                      ;; First line of the window alone exceeds budget:
+                      ;; return it truncated-to-budget.
+                      (let [trunc (fit-truncated-line next-line-no line max-read-bytes)
+                            trunc-bytes (byte-count trunc)]
+                        (recur next-line-no
+                               1
+                               (do (.append buf trunc) buf)
+                               trunc-bytes
+                               false
+                               true)))))))))))))
+
+(defn- binary-file-result
+  "Build the structured binary-file error map returned (as JSON) when a
+  file is detected as binary or fails UTF-8 decoding."
+  [^Path path ^long size]
+  {:error "binary-file"
+   :path (fpath/path->str path)
+   :size size})
+
+(defn- read-file-json
+  "Build the JSON string result for a `file/read` invocation.
+
+  Returns either the structured content map or the `{:error
+  \"binary-file\" ...}` map, both as a JSON string. Unexpected I/O errors
+  (e.g. permission denied) propagate to the caller, which maps them to
+  `error-result`."
+  [^Path path offset-arg limit-arg max-read-bytes]
+  (let [size (Files/size path)
+        sample-len (min 8192 size)
+        sample (read-first-bytes path sample-len)]
+    (if (binary-sample? sample sample-len)
+      (json/generate-string (binary-file-result path size))
+      (try
+        (let [offset (safe-int offset-arg 1)
+              limit (safe-int limit-arg 2000)
+              result (read-lines-with-window path size offset limit max-read-bytes)]
+          (json/generate-string result))
+        (catch java.nio.charset.CharacterCodingException _
+          (json/generate-string (binary-file-result path size)))))))
 
 (defn- describe-entry
   "Return an EDN map describing a directory entry."
@@ -184,19 +362,15 @@
   tool/Tool
   (-name [_] "file/read")
   (-description [_]
-    "Read the contents of a UTF-8 text file. Optionally skip `offset` characters and return at most `limit` characters. Paths are resolved against the configured workspace root. The total file size is capped by the registry's `:max-read-bytes` setting.")
+    "Read the contents of a UTF-8 text file with line numbers. `offset` is the 1-based line to start at (default 1); `limit` is the max number of lines returned (default 2000). Lines are prefixed with their absolute line number. Large files are returned as a window with a continuation marker rather than erroring. Binary files are reported, not thrown.")
   (-input-schema [_] InputSchema:ReadFile)
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
     (try
-      (let [path (fpath/resolve-path workspace-root (:path args))
-            offset (:offset args)
-            limit (:limit args)]
-        (json/generate-string
-         {:path      (fpath/path->str path)
-          :size      (Files/size path)
-          :truncated (boolean (when limit (> limit 0)))
-          :content   (read-text path offset limit max-read-bytes)}))
+      (read-file-json (fpath/resolve-path workspace-root (:path args))
+                      (:offset args)
+                      (:limit args)
+                      max-read-bytes)
       (catch Throwable t
         (error-result t)))))
 
