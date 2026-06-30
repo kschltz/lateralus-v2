@@ -14,9 +14,11 @@
    talk to a real LLM in these tests. The :system-fn and
    :runner-fn callbacks are the test seam."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
-            [kschltz.agent.cli :as cli]))
+            [kschltz.agent.cli :as cli]
+            [kschltz.agent.llm.http :as llm-http])
+  (:import [java.io File]))
 
 ;; ---- capture helpers ----
 
@@ -298,3 +300,265 @@
           (is (str/includes? out "done"))
           (is (re-find #"\rthinking\.\..*\r" out)
               "spinner line is cleared before the response is printed"))))))
+
+;; ---- model selection: pure parser ----
+
+(deftest parse-selection-numeric-and-name
+  (let [ids ["a" "b" "c"]]
+    (testing "1-based integer selects that index"
+      (is (= "a" (cli/parse-selection "1" ids)))
+      (is (= "b" (cli/parse-selection "2" ids)))
+      (is (= "c" (cli/parse-selection "3" ids))))
+    (testing "exact id string selects it"
+      (is (= "c" (cli/parse-selection "c" ids)))
+      (is (= "a" (cli/parse-selection "  a  " ids)) "input is trimmed"))
+    (testing "out-of-range / unknown are :invalid"
+      (is (= :invalid (cli/parse-selection "0" ids)))
+      (is (= :invalid (cli/parse-selection "9" ids)))
+      (is (= :invalid (cli/parse-selection "zzz" ids))))
+    (testing "blank input is :blank"
+      (is (= :blank (cli/parse-selection "" ids)))
+      (is (= :blank (cli/parse-selection "   \t " ids))))))
+
+;; ---- resolve-llm-config ----
+
+(defn- temp-config-file
+  "Write `m` as EDN to a temp file and return its absolute path. Only
+   used for `:lateralus/llm-client` overrides here, so `pr-str` is
+   enough (no #ig/ref needed)."
+  [m]
+  (let [f (File/createTempFile "lat-cli-test" ".edn")]
+    (spit f (with-out-str (pr m)))
+    (.deleteOnExit f)
+    (.getAbsolutePath f)))
+
+(deftest resolve-llm-config-default-stub
+  (testing "with no config the default is the stub impl"
+    (let [cfg (cli/resolve-llm-config {})]
+      (is (= :stub (:impl cfg))))))
+
+(deftest resolve-llm-config-applies-cli-overrides
+  (testing "--model/--base-url/--api-key override the resolved client map"
+    (let [cfg (cli/resolve-llm-config {:model    "glm-5.1"
+                                       :base-url "http://x/v1"
+                                       :api-key  "k"})]
+      (is (= :stub (:impl cfg)) "impl stays :stub from default config")
+      (is (= "glm-5.1" (:model cfg)))
+      (is (= "http://x/v1" (:base-url cfg)))
+      (is (= "k" (:api-key cfg))))))
+
+(deftest resolve-llm-config-http-config-without-model
+  (testing "an :http config with no model resolves to :impl :http and no :model"
+    (let [cfg-path (temp-config-file {:lateralus/llm-client
+                                       {:impl :http :base-url "http://x/v1"}})
+          cfg (cli/resolve-llm-config {:config cfg-path})]
+      (is (= :http (:impl cfg)))
+      (is (= "http://x/v1" (:base-url cfg)))
+      (is (str/blank? (:model cfg))))))
+
+;; ---- default-model-selector (seam-driven) ----
+
+(defn- scripted-reader
+  "Return a 0-arg fn that pops lines from `atom` (a vector) one at a
+  time, returning nil when exhausted."
+  [lines]
+  (let [q (atom lines)]
+    (fn [] (let [l (first @q)] (swap! q rest) l))))
+
+(deftest model-selector-picks-by-number
+  (let [out (java.io.StringWriter.)
+        chosen (cli/default-model-selector
+                 {:base-url "http://x/v1" :api-key "k" :out out
+                  :list-models-fn (fn [] ["a" "b" "c"])
+                  :read-line-fn   (scripted-reader ["2"])})
+        s (str out)]
+    (is (= "b" chosen))
+    (is (str/includes? s "Models available"))
+    (is (str/includes? s "1) a"))
+    (is (str/includes? s "2) b"))
+    (is (str/includes? s "3) c"))
+    (is (str/includes? s "Using b"))))
+
+(deftest model-selector-picks-by-name
+  (let [out (java.io.StringWriter.)
+        chosen (cli/default-model-selector
+                 {:base-url "http://x/v1" :out out
+                  :list-models-fn (fn [] ["gemma4:31b" "glm-5.1"])
+                  :read-line-fn   (scripted-reader ["glm-5.1"])})]
+    (is (= "glm-5.1" chosen))))
+
+(deftest model-selector-blank-picks-first
+  (let [out (java.io.StringWriter.)
+        chosen (cli/default-model-selector
+                 {:base-url "http://x/v1" :out out
+                  :list-models-fn (fn [] ["a" "b"])
+                  :read-line-fn   (scripted-reader [""])})
+        s (str out)]
+    (is (= "a" chosen))
+    (is (str/includes? s "Using a"))))
+
+(deftest model-selector-no-tty-autopicks-first
+  (testing "read-line-fn returning nil (no TTY) auto-picks the first model"
+    (let [out (java.io.StringWriter.)
+          chosen (cli/default-model-selector
+                   {:base-url "http://x/v1" :out out
+                    :list-models-fn (fn [] ["a" "b"])
+                    :read-line-fn   (fn [] nil)})
+          s (str out)]
+      (is (= "a" chosen))
+      (is (str/includes? s "defaulting to a")))))
+
+(deftest model-selector-invalid-then-valid
+  (let [out (java.io.StringWriter.)
+        chosen (cli/default-model-selector
+                 {:base-url "http://x/v1" :out out
+                  :list-models-fn (fn [] ["a" "b"])
+                  :read-line-fn   (scripted-reader ["zzz" "99" "1"])})]
+    (is (= "a" chosen))
+    (is (str/includes? (str out) "Invalid choice"))))
+
+(deftest model-selector-listing-fails-free-text
+  (testing "when the listing throws, the selector falls back to free text"
+    (let [out (java.io.StringWriter.)
+          chosen (cli/default-model-selector
+                   {:base-url "http://x/v1" :out out
+                    :list-models-fn (fn [] (throw (ex-info "boom" {})))
+                    :read-line-fn   (scripted-reader ["typed-model"])})]
+      (is (= "typed-model" chosen))
+      (is (str/includes? (str out) "Type a model name")))))
+
+(deftest model-selector-listing-fails-no-tty-gives-up
+  (testing "no list + no TTY yields nil (run-cli then surfaces the missing model)"
+    (let [out (java.io.StringWriter.)
+          chosen (cli/default-model-selector
+                   {:base-url "http://x/v1" :out out
+                    :list-models-fn (fn [] (throw (ex-info "boom" {})))
+                    :read-line-fn   (fn [] nil)})]
+      (is (nil? chosen)))))
+
+;; ---- run-cli wiring ----
+
+(deftest run-cli-prompts-for-model-when-missing
+  (testing "an :http config with no model triggers :model-selector and threads the choice into :system-fn"
+    (let [cfg-path (temp-config-file {:lateralus/llm-client
+                                       {:impl :http :base-url "http://x/v1"}})
+          selected (atom nil)
+          sys-opts (atom nil)
+          opts     (cli/parse-args ["--config" cfg-path "hello"])
+          code     (cli/run-cli opts
+                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hello"))
+                      :out    (java.io.StringWriter.)
+                      :exit   (fn [_] nil)
+                      :model-selector (fn [ctx]
+                                        (reset! selected ctx)
+                                        "glm-5.1")
+                      :system-fn (fn [o] (reset! sys-opts o)
+                                  [{} "s" (fn [])])
+                      :runner-fn (fn [{:keys [prompt]}]
+                                  {:exchange/response (str "ran:" prompt)})})]
+      (is (= 0 code))
+      (is (= "glm-5.1" (:model @sys-opts))
+          "the chosen model must reach build-system via the :model override")
+      (is (= "http://x/v1" (:base-url @selected))
+          "selector receives the resolved base-url"))))
+
+(deftest run-cli-skips-selector-when-model-set-in-config
+  (testing "a config that already specifies a model does not trigger the selector"
+    (let [cfg-path (temp-config-file {:lateralus/llm-client
+                                       {:impl :http :base-url "http://x/v1"
+                                        :model "preset"}})
+          called   (atom false)
+          opts     (cli/parse-args ["--config" cfg-path "hi"])
+          code     (cli/run-cli opts
+                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
+                      :out    (java.io.StringWriter.)
+                      :exit   (fn [_] nil)
+                      :model-selector (fn [_] (reset! called true) "should-not")
+                      :system-fn (fn [_] [{} "s" (fn [])])
+                      :runner-fn (fn [_] {:exchange/response "ok"})})]
+      (is (= 0 code))
+      (is (false? @called)))))
+
+(deftest run-cli-skips-selector-when-model-set-via-flag
+  (testing "--model on the CLI also short-circuits the selector"
+    (let [cfg-path (temp-config-file {:lateralus/llm-client
+                                       {:impl :http :base-url "http://x/v1"}})
+          called   (atom false)
+          opts     (cli/parse-args ["--config" cfg-path "--model" "flagged" "hi"])
+          code     (cli/run-cli opts
+                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
+                      :out    (java.io.StringWriter.)
+                      :exit   (fn [_] nil)
+                      :model-selector (fn [_] (reset! called true) "should-not")
+                      :system-fn (fn [_] [{} "s" (fn [])])
+                      :runner-fn (fn [_] {:exchange/response "ok"})})]
+      (is (= 0 code))
+      (is (false? @called)))))
+
+(deftest run-cli-skips-selector-for-stub-impl
+  (testing "the default stub config never triggers the selector"
+    (let [called (atom false)
+          opts   (cli/parse-args ["hi"])
+          code   (cli/run-cli opts
+                    {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
+                     :out    (java.io.StringWriter.)
+                     :exit   (fn [_] nil)
+                     :model-selector (fn [_] (reset! called true) "nope")
+                     :system-fn (fn [_] [{} "s" (fn [])])
+                     :runner-fn (fn [_] {:exchange/response "ok"})})]
+      (is (= 0 code))
+      (is (false? @called)))))
+
+(deftest run-cli-selector-give-up-keeps-opts-but-prints-guidance
+  (testing "a nil selection does not assoc a model and prints guidance"
+    (let [cfg-path (temp-config-file {:lateralus/llm-client
+                                       {:impl :http :base-url "http://x/v1"}})
+          out      (java.io.StringWriter.)
+          seen     (atom nil)
+          opts     (cli/parse-args ["--config" cfg-path "hi"])
+          code     (cli/run-cli opts
+                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
+                      :out    out
+                      :exit   (fn [_] nil)
+                      :model-selector (fn [_] nil)
+                      :system-fn (fn [o] (reset! seen o)
+                                  [{} "s" (fn [])])
+                      :runner-fn (fn [_] {:exchange/response "ok"})})]
+      (is (str/blank? (:model @seen))
+          "ensure-model must NOT assoc a model when the selector gives up")
+      (is (str/includes? (str out) "no model selected")
+          "guidance is printed when no model is selected"))))
+
+;; ---- ^:e2e: live model listing ----
+
+(defn- ^:private host-port
+  "Parse http(s)://host:port from a URL string."
+  [base-url]
+  (let [m (re-find #"^https?://([^:/]+)(?::(\d+))?" base-url)]
+    (when m
+      {:host (nth m 1)
+       :port (if-let [p (nth m 2 nil)]
+               (Integer/parseInt p)
+               (if (str/starts-with? base-url "https://") 443 80))})))
+
+(defn- ^:private reachable?
+  [{:keys [host port]}]
+  (let [sock (java.net.Socket.)]
+    (try
+      (.connect sock (java.net.InetSocketAddress. ^String host (int port)) 1500)
+      (.close sock)
+      true
+      (catch Throwable _ false))))
+
+(deftest ^:e2e list-models-returns-ids-from-configured-endpoint
+  (testing "list-models returns a non-empty vector of strings from a live endpoint"
+    (let [base-url (or (System/getenv "OLLAMA_BASE_URL")
+                       "http://localhost:11434/v1")
+          api-key  (System/getenv "OLLAMA_API_KEY")
+          target   (host-port base-url)]
+      (if (not (reachable? target))
+        (println (str "SKIPPED list-models e2e: endpoint not reachable at " base-url))
+        (let [ids (llm-http/list-models base-url api-key)]
+          (is (vector? ids))
+          (is (seq ids) (str "expected at least one model from " base-url))
+          (is (every? string? ids)))))))

@@ -64,6 +64,56 @@
                   "/chat/completions"
                   "/v1/chat/completions")))
 
+(defn models-url
+  "Build the OpenAI-shaped model-list URL from `base-url`. Mirrors
+   `chat-completions-url`: a base-url ending in `/v1` gets `/models`
+   appended; any other base-url gets `/v1/models`. Works for OpenAI,
+   Ollama (`/v1/models`), and Ollama Cloud (`https://ollama.com/v1`)."
+  [base-url]
+  (str base-url (if (str/ends-with? base-url "/v1")
+                  "/models"
+                  "/v1/models")))
+
+(defn list-models
+  "GET the OpenAI-shaped model list from `base-url`. Returns a sorted,
+   deduplicated vector of model-id strings. Sends `Authorization: Bearer
+   <api-key>` when `api-key` is set. Throws `ex-info` with `:kind
+   :http-error`, `:parse`, or `:transport` on failure — the caller decides
+   whether to fall back to free-text entry.
+
+   This is the only other HTTP call in the codebase besides
+   `chat-completions`; it stays here so `rg 'http' src/` still routes all
+   network I/O through this namespace."
+  ([base-url] (list-models base-url nil))
+  ([base-url api-key]
+   (let [url      (models-url base-url)
+         response (http/request {:method           :get
+                                :url              url
+                                :headers          (->headers api-key)
+                                :as               :string
+                                :connect-timeout  default-connect-timeout-ms
+                                :request-timeout  default-request-timeout-ms
+                                :throw-exceptions false
+                                :coerce           :always})
+         status   (:status response)]
+     (cond
+       (and status (<= 200 status 299))
+       (let [body (try (json/parse-string (:body response) true)
+                       (catch Throwable t
+                         (throw (ex-info "models response is not valid JSON"
+                                         {:kind   :parse
+                                          :status status
+                                          :body   (:body response)
+                                          :cause  t}))))]
+         (->> (get body :data)
+              (map :id)
+              (filter string?)
+              (distinct)
+              (sort)
+              (vec)))
+       :else
+       (throw (error-response :http-error response))))))
+
 (defn- post-chat
   "POST a chat-completions request to the given base URL. Returns
    the parsed JSON body. Throws ex-info on transport / HTTP errors."
