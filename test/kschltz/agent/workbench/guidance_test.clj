@@ -10,7 +10,8 @@
   (is (re-find #"portal/clear" guidance/portal-system-guidance))
   (is (re-find #"portal/focus" guidance/portal-system-guidance))
   (is (re-find #"(?i)mandatory|MUST" guidance/portal-system-guidance))
-  (is (re-find #"(?i)HTML/CSS|optimistically" guidance/portal-system-guidance)))
+  (is (re-find #"(?i)HTML/SVG|:cite|optimistically" guidance/portal-system-guidance))
+  (is (re-find #"(?i)Never invent|exact `:cite`" guidance/portal-system-guidance)))
 
 (deftest submit-tool-description-stresses-portal-channel
   (let [wb (reify proto/Workbench
@@ -27,5 +28,5 @@
         t (get (tools/registry wb) "portal/submit")
         d (tool/-description t)]
     (is (re-find #"PRIMARY visualization" d))
-    (is (re-find #"(?i)HTML/CSS|optimistically" d))
-    (is (re-find #"(?i)Prefer this over pasting" d))))
+    (is (re-find #"(?i):cite|HTML/SVG|optimistically" d))
+    (is (re-find #"(?i)Never invent" d))))

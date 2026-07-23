@@ -236,7 +236,10 @@
       (is (= 15000   (:timeout-ms cfg))))
     (testing "Allow-lists are empty by default"
       (is (empty? (:url-allow-list cfg)))
-      (is (empty? (:url-block-list cfg))))))
+      (is (empty? (:url-block-list cfg))))
+    (testing "Provider-specific keys stay out of shared defaults"
+      (is (nil? (:base-url cfg)))
+      (is (nil? (:user-agent cfg))))))
 
 ;; ---------------------------------------------------------------------------
 ;; guard-results

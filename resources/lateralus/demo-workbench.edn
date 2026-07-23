@@ -1,8 +1,9 @@
 ;; Interactive local Ollama + CHAT | Portal workbench plugin.
-;; Requires the :workbench deps alias (portal + http-kit):
-;;   clojure -J--add-modules=jdk.incubator.vector -J--enable-native-access=ALL-UNNAMED \
-;;     -M:workbench:run -i --config resources/lateralus/demo-workbench.edn \
+;; Requires the :workbench deps alias (portal + http-kit; JVM flags baked in):
+;;   clojure -M:workbench:run -i --config resources/lateralus/demo-workbench.edn \
 ;;     --base-url http://localhost:11434/v1 --model laguna-s-2.1:latest
+;; Or omit --config and use the profile gate:
+;;   clojure -M:workbench:run -i
 {:lateralus/llm-client     {:impl :http
                             :base-url "http://localhost:11434/v1"}
  :lateralus/llm-config     {:base-url "http://localhost:11434/v1"}

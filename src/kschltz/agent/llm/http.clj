@@ -114,6 +114,84 @@
        :else
        (throw (error-response :http-error response))))))
 
+(def ^:private ollama-cloud-base-url
+  "OpenAI-compatible Ollama Cloud base URL."
+  "https://ollama.com/v1")
+
+(defn- local-ollama-base?
+  [base-url]
+  (boolean (re-find #"(?i)(localhost|127\.0\.0\.1):11434" (str base-url))))
+
+(defn- ollama-cloud-base?
+  [base-url]
+  (boolean (re-find #"(?i)(?:^https?://)?(?:www\.)?ollama\.com(?:/|$)" (str base-url))))
+
+(defn- resolve-ollama-api-key
+  [api-key]
+  (or (when-not (str/blank? (str api-key)) (str api-key))
+      (System/getenv "OLLAMA_API_KEY")))
+
+(defn- as-local-cloud-id
+  "Local Ollama gateway expects cloud models as `name:cloud`."
+  [id]
+  (let [s (str id)]
+    (if (str/ends-with? s ":cloud") s (str s ":cloud"))))
+
+(defn- model-menu-key
+  "Sort key for the CLI picker: local chat models first, then `:cloud`
+   ids, then embedders — so Enter does not default to a remote model
+   that may be unavailable when Ollama Cloud is disabled."
+  [id]
+  (let [s (str id)]
+    [(cond
+       (re-find #"(?i)embed" s) 2
+       (str/ends-with? s ":cloud") 1
+       :else 0)
+     s]))
+
+(defn merge-ollama-model-lists
+  "Merge local + cloud model ids. When `cloud-suffix?` is true, cloud-only
+   ids are rewritten to `name:cloud` for the local Ollama gateway.
+   Ordering prefers local non-cloud chat models first."
+  [local-ids cloud-ids {:keys [cloud-suffix?] :or {cloud-suffix? false}}]
+  (let [local  (filter string? local-ids)
+        cloud  (filter string? cloud-ids)
+        tagged (if cloud-suffix? (map as-local-cloud-id cloud) cloud)]
+    (->> (concat local tagged)
+         distinct
+         (sort-by model-menu-key)
+         vec)))
+
+(defn preferred-default-model
+  "Default Enter selection: first non-`:cloud`, non-embedder id when present."
+  [ids]
+  (let [xs (filter string? ids)]
+    (or (first (remove #(or (str/ends-with? % ":cloud")
+                            (re-find #"(?i)embed" %))
+                       xs))
+        (first (remove #(re-find #"(?i)embed" %) xs))
+        (first xs))))
+
+(defn list-models-thorough
+  "Like `list-models`, but when `base-url` is a local Ollama gateway and an
+   Ollama Cloud API key is available (`api-key` or env `OLLAMA_API_KEY`),
+   also merges the full cloud catalog as `name:cloud` ids.
+
+   Local `/v1/models` only returns pulled models (often a handful). Cloud
+   `/v1/models` returns the whole hosted catalog — this makes the CLI
+   picker useful for Ollama Cloud without forcing `--base-url https://ollama.com/v1`."
+  ([base-url] (list-models-thorough base-url nil))
+  ([base-url api-key]
+   (let [primary (list-models base-url api-key)
+         key     (resolve-ollama-api-key api-key)]
+     (if (or (ollama-cloud-base? base-url)
+             (not (local-ollama-base? base-url))
+             (str/blank? key))
+       (->> primary (sort-by model-menu-key) vec)
+       (let [cloud (try (list-models ollama-cloud-base-url key)
+                        (catch Throwable _ []))]
+         (merge-ollama-model-lists primary cloud {:cloud-suffix? true}))))))
+
 (defn- post-chat
   "POST a chat-completions request to the given base URL. Returns
    the parsed JSON body. Throws ex-info on transport / HTTP errors."

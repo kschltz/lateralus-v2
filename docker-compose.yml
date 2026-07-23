@@ -1,0 +1,64 @@
+# lateralus + local Ollama
+#
+#   ./scripts/start-workbench
+#   # or:
+#   docker compose up -d ollama
+#   docker compose --profile setup run --rm pull-model
+#   docker compose run --rm --service-ports lateralus
+#
+# Workbench: http://localhost:7860  |  Portal iframe: http://localhost:7870
+#
+# Ollama Cloud (do NOT set LATERALUS_BASE_URL — pick cloud in the profile gate):
+#   OLLAMA_API_KEY=… docker compose run --rm --service-ports lateralus
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+
+  pull-model:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull $${LATERALUS_MODEL:-llama3.2}"]
+    profiles: ["setup"]
+
+  lateralus:
+    build: .
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      # Bind inside the container; PUBLIC_HOST is what we print / put in the UI.
+      LATERALUS_WORKBENCH_HOST: "0.0.0.0"
+      LATERALUS_WORKBENCH_PUBLIC_HOST: localhost
+      LATERALUS_PORTAL_PORT: "7870"
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      LATERALUS_CONFIG_HOME: /data/config
+      # Optional overrides (only used when seeding a fresh volume, or if you
+      # deliberately want env to fill blank profile fields — profile wins):
+      # LATERALUS_BASE_URL: http://ollama:11434/v1
+      # LATERALUS_MODEL: llama3.2
+    volumes:
+      - lateralus-config:/data/config
+    ports:
+      - "7860:7860"
+      - "7870:7870"
+    stdin_open: true
+    tty: true
+    command: ["-i"]
+
+volumes:
+  ollama-data:
+  lateralus-config:

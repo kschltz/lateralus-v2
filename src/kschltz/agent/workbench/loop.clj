@@ -5,6 +5,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [kschltz.agent.runtime :as runtime]
+            [kschltz.agent.workbench.cite :as cite]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.protocol :as wb]))
 
@@ -17,17 +18,78 @@
                              ": " (pr-str result)))
                       tools))))
 
-(defn- assistant-event
+(defn- tool-results
   [result]
-  (let [text     (or (:exchange/response result) "")
-        thinking (:exchange/thinking result)
-        tools    (or (:agent/all-tool-results result) (:tool/results result) [])
-        body     (cond
-                   (seq text)  text
-                   (seq tools) (tool-summary tools)
-                   :else       "The assistant produced no response for this turn.")]
-    (cond-> {:role :assistant :text body}
-      (seq thinking) (assoc :thinking thinking))))
+  (or (:agent/all-tool-results result) (:tool/results result) []))
+
+(defn- raised-error-text
+  "Human-readable text when the chain handled an LLM/tool throw via
+   `:error/raised` (e.g. Ollama Cloud 403) — otherwise workbench looked
+   like a silent empty reply."
+  [result]
+  (when-let [raised (:error/raised result)]
+    (let [ex   (:exception raised)
+          data (when (instance? clojure.lang.ExceptionInfo ex) (ex-data ex))
+          body (:body data)
+          detail (cond
+                   (and (map? body) (:error body)) (str (:error body))
+                   (string? body) body
+                   (ex-message ex) (ex-message ex)
+                   :else "unknown error")]
+      (str "Exchange failed: " detail
+           (when (:status data) (str " (HTTP " (:status data) ")"))))))
+
+(defn- raw-assistant-text
+  [result]
+  (let [text  (or (:exchange/response result) "")
+        tools (tool-results result)
+        err   (raised-error-text result)]
+    (cond
+      (seq text)  text
+      (seq tools) (tool-summary tools)
+      (seq err)   err
+      (:agent/empty-retry-failed? result)
+      "The model returned empty replies after retries. Check --model (cloud models need Ollama Cloud enabled / --base-url https://ollama.com/v1)."
+      :else       "The assistant produced no response for this turn.")))
+
+(defn guard-assistant-event
+  "Sanitize @portal cites against hub refs; flag missing submits.
+   Surfaces `:error/raised` as an `:error` turn instead of a fake empty assistant."
+  [result workbench]
+  (if-let [err (raised-error-text result)]
+    {:role :error
+     :text err
+     ::needs-repair? false
+     ::repaired? false}
+    (let [text     (raw-assistant-text result)
+          tools    (tool-results result)
+          thinking (:exchange/thinking result)
+          ids      (cite/known-ids-from-snapshot (wb/snapshot workbench))
+          guard    (cite/assistant-text-guard text tools ids)]
+      (cond-> {:role :assistant
+               :text (:text guard)
+               ::needs-repair? (:needs-repair? guard)
+               ::repaired? (:repaired? guard)}
+        (seq thinking) (assoc :thinking thinking)))))
+
+(defn- public-event
+  [event]
+  (dissoc event ::needs-repair? ::repaired?))
+
+(defn- run-exchange!
+  [runtime workbench prompt]
+  (let [result (runtime/send-message runtime prompt)
+        event  (guard-assistant-event result workbench)]
+    (if-not (::needs-repair? event)
+      (public-event event)
+      (do
+        (wb/publish! workbench
+                     {:role :system
+                      :text (str "Portal guard: claimed a viz without a successful "
+                                 "portal/submit (or used a fake @portal id). Retrying once…")})
+        (let [repair (runtime/send-message runtime cite/repair-prompt)
+              fixed  (guard-assistant-event repair workbench)]
+          (public-event fixed))))))
 
 (defn- start-stdin-feeder!
   "Background thread: each stdin line is enqueued as a human message."
@@ -62,7 +124,7 @@
                  :text (str "lateralus workbench — open "
                             (wb/url workbench)
                             " (CHAT | Portal). Prefer portal/submit for rich "
-                            "visuals (HTML, tables, charts); /quit to exit.")})
+                            "visuals (HTML/SVG charts, tables); /quit to exit.")})
    (let [feeder (when stdin-feeder? (start-stdin-feeder! workbench in))]
      (try
        (loop []
@@ -78,8 +140,8 @@
              (let [h (:hub workbench)]
                (hub/set-status! h :running "model working…")
                (try
-                 (let [result (runtime/send-message runtime prompt)]
-                   (wb/publish! workbench (assistant-event result))
+                 (let [event (run-exchange! runtime workbench prompt)]
+                   (wb/publish! workbench event)
                    (hub/set-status! h :waiting "ready for your next message"))
                  (catch Throwable t
                    (wb/publish! workbench

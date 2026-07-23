@@ -45,7 +45,11 @@
  ;; No Datalevin in MVP — session memory is a noop impl of the
  ;; MemoryBackend protocol. A real persistent store is a follow-up.
  :aliases
- {:run {:main-opts ["-m" "kschltz.lateralus"]}
+ {;; Proximum + LangChain4j need Vector API / FFM. Baked into :run so
+  ;; `clojure -M:run` / `-M:workbench:run` never need manual -J flags.
+  :run {:main-opts ["-m" "kschltz.lateralus"]
+        :jvm-opts ["--add-modules=jdk.incubator.vector"
+                   "--enable-native-access=ALL-UNNAMED"]}
   :build {:deps {io.github.clojure/tools.build
                   {:mvn/version "0.10.13"}}
            :ns-default build}
@@ -101,9 +105,13 @@
         :main-opts ["-m" "cognitect.test-runner" "-i" ":e2e"]}
   :examples {:extra-paths []}
   ;; Optional Portal sticky-composer UI. Pair with demo-portal.edn:
-  ;;   clojure -M:portal:run -i --config resources/lateralus/demo-portal.edn ...
-  :portal {:extra-deps {djblue/portal {:mvn/version "0.67.1"}}}
-  ;; CHAT | Portal workbench plugin (http-kit + portal). Pair with demo-workbench.edn:
-  ;;   clojure -M:workbench:run -i --config resources/lateralus/demo-workbench.edn ...
+  ;;   clojure -M:portal:run -i --config resources/lateralus/demo-portal.edn
+  :portal {:extra-deps {djblue/portal {:mvn/version "0.67.1"}}
+           :jvm-opts ["--add-modules=jdk.incubator.vector"
+                      "--enable-native-access=ALL-UNNAMED"]}
+  ;; CHAT | Portal workbench. Profile gate (no --config) or demo EDN:
+  ;;   clojure -M:workbench:run -i
   :workbench {:extra-deps {djblue/portal {:mvn/version "0.67.1"}
-                           http-kit/http-kit {:mvn/version "2.8.0"}}}}}
+                           http-kit/http-kit {:mvn/version "2.8.0"}}
+              :jvm-opts ["--add-modules=jdk.incubator.vector"
+                         "--enable-native-access=ALL-UNNAMED"]}}}

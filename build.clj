@@ -26,7 +26,9 @@
   (assoc opts
          :lib lib :main main
          :uber-file uber-file
-         :basis (b/create-basis {})
+         ;; Include :workbench so the distributable JAR (and Docker image)
+         ;; can run CHAT | Portal without a separate classpath.
+         :basis (b/create-basis {:aliases [:workbench]})
          :class-dir class-dir
          :src-dirs ["src" "resources"]
          :ns-compile [main]

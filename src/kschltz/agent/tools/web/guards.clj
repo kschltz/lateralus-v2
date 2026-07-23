@@ -57,13 +57,15 @@
 
    `allowed-schemes` is `#{\"http\" \"https\"}`.
    `allowed-ports` is `#{80 443}`."
+  ;; NOTE: do NOT put provider-specific keys here (`:base-url`, `:user-agent`).
+  ;; `web/search` merges this map into provider opts; a shared Mojeek `:base-url`
+  ;; previously made `:provider :ddg` hit `https://www.mojeek.com/html/...` (404).
+  ;; Each provider owns its own default base URL / browser UA.
   {:max-query-length            400
    :max-result-count            20
    :max-page-bytes              2097152   ;; 2 MiB
    :max-snippet-bytes           16384     ;; 16 KiB
    :timeout-ms                  15000
-   :user-agent                  "lateralus-web/0.1 (+https://github.com/kschltz/lateralus)"
-   :base-url                    "https://www.mojeek.com"
    :block-private-ips?          true
    :block-loopback?             true
    :block-metadata-endpoints?   true

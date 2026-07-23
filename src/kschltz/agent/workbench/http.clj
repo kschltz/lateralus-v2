@@ -159,8 +159,22 @@
         (catch Throwable t
           (json-response 500 {:error (ex-message t)}))))))
 
+(defn- advertise-host
+  "Host shown in URLs / UI. Bind may be 0.0.0.0 in Docker; browsers need
+   localhost (or LATERALUS_WORKBENCH_PUBLIC_HOST)."
+  [bind-host]
+  (or (not-empty (System/getenv "LATERALUS_WORKBENCH_PUBLIC_HOST"))
+      (when (#{"0.0.0.0" "::" "[::]"} (str bind-host)) "localhost")
+      bind-host))
+
+(defn public-url
+  "Build a browser-reachable URL for a bind host/port."
+  [bind-host port]
+  (str "http://" (advertise-host bind-host) ":" port))
+
 (defn start-server!
-  "Start http-kit on host/port. Returns {:server :url :port :host}."
+  "Start http-kit on host/port. Returns {:server :url :port :host}.
+   `:url` uses the public/advertise host (not 0.0.0.0)."
   [{:keys [host port handler]
     :or   {host "127.0.0.1" port 0}}]
   (let [run-server (requiring-resolve 'org.httpkit.server/run-server)
@@ -174,7 +188,7 @@
     {:server stop!
      :host   host
      :port   port*
-     :url    (str "http://" host ":" port*)}))
+     :url    (public-url host port*)}))
 
 (defn stop-server!
   [server]

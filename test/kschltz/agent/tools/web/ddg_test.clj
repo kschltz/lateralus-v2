@@ -94,6 +94,18 @@
         (is (str/includes? (get hdrs "User-Agent") "Chrome"))
         (is (str/includes? (get hdrs "Accept-Language") "en"))))))
 
+(deftest search-ignores-leaked-mojeek-base-url
+  (testing "shared guard defaults used to inject :base-url https://www.mojeek.com;
+            DDG must still hit html.duckduckgo.com (regression for HTTP 404)"
+    (let [[http-fn reqs] (make-stub-http {:status 200 :body fixture-html})
+          provider (web.ddg/provider {:http-fn http-fn})
+          _ (protocol/-search provider "clojure"
+                              {:base-url "https://www.mojeek.com"
+                               :user-agent "lateralus-web/0.1"})]
+      (is (= "https://html.duckduckgo.com/html/?q=clojure"
+             (:url (first @reqs))))
+      (is (not (str/includes? (:url (first @reqs)) "mojeek"))))))
+
 (deftest search-passes-impersonate-through-to-http-fn
   (testing "the :impersonate config key flows into the http-fn request map"
     (let [[http-fn reqs] (make-stub-http {:status 200 :body fixture-html})

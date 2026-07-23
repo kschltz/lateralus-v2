@@ -7,7 +7,12 @@
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [kschltz.agent.workbench.schemas :as schemas]))
+
+(def max-value-chars
+  "Soft cap so models retry smaller payloads instead of bleeding tool XML."
+  100000)
 
 (defn available?
   "True when djblue/portal is on the classpath."
@@ -24,6 +29,29 @@
       (str (subs s 0 157) "...")
       s)))
 
+(defn- stringify-keys
+  [x]
+  (walk/postwalk
+   (fn [node]
+     (if (map? node)
+       (into {}
+             (map (fn [[k v]]
+                    [(cond
+                       (keyword? k) (name k)
+                       (string? k)  k
+                       :else        (str k))
+                     v]))
+             node)
+       node))
+   x))
+
+(defn- esc-html
+  [s]
+  (-> (str s)
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")))
+
 (defn coerce-value
   "Turn LLM tool args into visualizable Clojure data.
    Models often pass JSON as a string; parse it when possible.
@@ -35,7 +63,6 @@
     :else
     (let [s (str/trim value)]
       (cond
-        ;; Keep HTML/markdown/code as strings for viewer selection.
         (re-find #"(?i)^<!DOCTYPE\s+html|^<html[\s>]|^<(div|section|main|article|style|body|svg|pre|code)\b" s)
         value
 
@@ -51,7 +78,6 @@
         :else value))))
 
 (defn- tableish?
-  "True when `value` looks like rows suitable for Portal's table viewer."
   [value]
   (and (sequential? value)
        (seq value)
@@ -80,14 +106,17 @@
   (and (vector? value)
        (keyword? (first value))))
 
-(defn- vega-lite-spec?
+(defn vega-lite-spec?
+  "True for maps that look like Vega-Lite (keyword or string keys)."
   [value]
   (and (map? value)
-       (or (some-> (:$schema value) str (str/includes? "vega-lite"))
-           (and (contains? value :mark) (contains? value :encoding)))))
+       (let [schema (or (get value :$schema) (get value "$schema"))
+             mark   (or (get value :mark) (get value "mark"))
+             enc    (or (get value :encoding) (get value "encoding"))]
+         (or (some-> schema str (str/includes? "vega-lite"))
+             (and (some? mark) (some? enc))))))
 
 (defn- codeish?
-  "Heuristic for multi-line source that is not HTML/markdown."
   [value]
   (and (string? value)
        (not (htmlish? value))
@@ -98,13 +127,45 @@
                   (re-find #"(?m)^\s*[{};]\s*$" s)
                   (re-find #"(?i)^(css|scss|html|js|ts|clj|edn):\n" s))))))
 
+(defn vega-lite->html-doc
+  "Wrap a Vega-Lite spec in a self-contained HTML page (Portal html viewer).
+   Native `:portal.viewer/vega-lite` is unreliable with keywordized maps."
+  [spec]
+  (let [payload (json/generate-string (stringify-keys spec))]
+    (str "<!DOCTYPE html>\n"
+         "<html lang=\"en\"><head><meta charset=\"utf-8\"/>"
+         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>"
+         "<script src=\"https://cdn.jsdelivr.net/npm/vega@5\"></script>"
+         "<script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5\"></script>"
+         "<script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6\"></script>"
+         "<style>html,body{margin:0;background:#111;color:#eee;"
+         "font-family:system-ui,sans-serif}#vis{padding:12px}</style>"
+         "</head><body><div id=\"vis\"></div><script>"
+         "vegaEmbed('#vis'," payload ",{actions:false}).catch(console.error);"
+         "</script></body></html>")))
+
 (defn- portal-view
-  "Apply portal.viewer/* so strings (no metadata) still get the right UI."
   [viewer-sym value]
   (try
     ((requiring-resolve viewer-sym) value)
     (catch Throwable _
       value)))
+
+(defn detect-viewer
+  "Logical viewer name for tool results / UI hints."
+  [value]
+  (cond
+    (htmlish? value)        "html"
+    (markdownish? value)    "markdown"
+    (hiccupish? value)      "hiccup"
+    (vega-lite-spec? value) "vega-html"
+    (tableish? value)       "table"
+    (and (map? value)
+         (sequential? (:data value))
+         (every? map? (:data value)))
+    "table"
+    (codeish? value)        "code"
+    :else                   "inspector"))
 
 (defn with-default-viewer
   "Pick a Portal default viewer for rich artifacts (html, table, etc.)."
@@ -119,9 +180,6 @@
     (hiccupish? value)
     (portal-view 'portal.viewer/hiccup value)
 
-    (vega-lite-spec? value)
-    (portal-view 'portal.viewer/vega-lite value)
-
     (tableish? value)
     (portal-view 'portal.viewer/table value)
 
@@ -135,23 +193,114 @@
 
     :else value))
 
+(defn- normalize-kind
+  [kind]
+  (when kind
+    (-> (cond
+          (keyword? kind) (name kind)
+          (string? kind)  kind
+          :else           (str kind))
+        str/lower-case
+        keyword)))
+
+(defn prepare-value
+  "Coerce + normalize a tool `value` before Portal submit.
+   Returns {:value :viewer} or {:error {:ok false :error ...}}."
+  ([value] (prepare-value value nil))
+  ([value {:keys [kind]}]
+   (let [kind*   (normalize-kind kind)
+         coerced (coerce-value value)
+         prepared
+         (case kind*
+           :html
+           (cond
+             (string? coerced) coerced
+             (hiccupish? coerced) coerced
+             :else (str "<!DOCTYPE html><html><body><pre>"
+                        (esc-html (pr-str coerced))
+                        "</pre></body></html>"))
+
+           :markdown
+           (str (if (string? coerced) coerced (pr-str coerced)))
+
+           :table
+           coerced
+
+           :vega
+           (cond
+             (vega-lite-spec? coerced)
+             (vega-lite->html-doc coerced)
+
+             (and (string? coerced)
+                  (vega-lite-spec? (coerce-value coerced)))
+             (vega-lite->html-doc (coerce-value coerced))
+
+             :else coerced)
+
+           :code
+           (str (if (string? coerced) coerced (pr-str coerced)))
+
+           ;; :auto / nil — charts as HTML; never leave bare vega maps
+           (cond
+             (vega-lite-spec? coerced) (vega-lite->html-doc coerced)
+             :else coerced))
+         viewer (detect-viewer prepared)
+         size   (count (if (string? prepared) prepared (pr-str prepared)))]
+     (if (> size max-value-chars)
+       {:error {:ok false
+                :error "portal value too large"
+                :max-chars max-value-chars
+                :chars size
+                :hint "Submit a smaller HTML/SVG doc, or one chart per call."}}
+       {:value prepared
+        :viewer viewer}))))
+
+(defn- env-int
+  [name]
+  (try
+    (some-> (System/getenv name) not-empty Integer/parseInt)
+    (catch Exception _ nil)))
+
+(defn- advertise-host
+  [bind-host]
+  (or (not-empty (System/getenv "LATERALUS_WORKBENCH_PUBLIC_HOST"))
+      (when (#{"0.0.0.0" "::" "[::]"} (str bind-host)) "localhost")
+      (not-empty (str bind-host))
+      "localhost"))
+
 (defn open!
   "Open a Portal session for visualization (no sticky composer).
-   Returns {:portal :url :viz-atom}. opts keys validated as WorkbenchConfig subset."
+   Returns {:portal :url :viz-atom}. opts keys validated as WorkbenchConfig subset.
+
+   In Docker, set `LATERALUS_PORTAL_PORT` (and publish it) plus
+   `LATERALUS_WORKBENCH_PUBLIC_HOST=localhost` so the iframe is reachable
+   from the host browser."
   [opts]
   (schemas/decode-config (select-keys (or opts {})
-                                      [:enabled? :host :port :portal? :open-browser?
+                                      [:enabled? :host :port :portal-port :portal-host
+                                       :portal? :open-browser?
                                        :app :window-title :open?]))
   (let [open     (requiring-resolve 'portal.api/open)
         url      (requiring-resolve 'portal.api/url)
         viz-atom (atom {:lateralus/workbench "ready"
-                        :hint "Use portal/submit for HTML, tables, charts, code — chat stays thin."})
+                        :hint "Use portal/submit for HTML/SVG charts, tables, demos — chat stays thin."})
+        portal-port (or (:portal-port opts) (env-int "LATERALUS_PORTAL_PORT"))
+        portal-host (or (not-empty (:portal-host opts))
+                        (not-empty (System/getenv "LATERALUS_WORKBENCH_HOST"))
+                        "127.0.0.1")
         p        (open (cond-> {:window-title (or (:window-title opts) "lateralus portal")
                                 :value        viz-atom}
                          (contains? opts :app) (assoc :app (:app opts))
-                         (:theme opts)         (assoc :theme (:theme opts))))]
+                         (:theme opts)         (assoc :theme (:theme opts))
+                         portal-port           (assoc :port portal-port)
+                         portal-host           (assoc :host portal-host)))
+        raw-url  (try (url p) (catch Throwable _ nil))
+        pub-url  (cond
+                   portal-port (str "http://" (advertise-host portal-host) ":" portal-port)
+                   raw-url     raw-url
+                   :else       nil)]
     {:portal   p
-     :url      (try (url p) (catch Throwable _ nil))
+     :url      pub-url
      :viz-atom viz-atom}))
 
 (defn close!
@@ -163,23 +312,30 @@
 
 (defn submit!
   "Push `value` into Portal's watched viz atom and also `portal.api/submit`.
-   Returns {:ok true :preview ...}.
-   Rich visuals (html/table/…) become the atom root so viewers apply fully."
-  [portal viz-atom label value]
-  (when-not portal
-    (throw (ex-info "Portal is not open" {:label label})))
-  (let [coerced    (coerce-value value)
-        decorated  (with-default-viewer coerced)
-        ;; Root = decorated value so html/table/vega viewers win (not buried under :data).
-        root       decorated]
-    (when viz-atom
-      (reset! viz-atom root))
-    (try
-      ((requiring-resolve 'portal.api/submit) decorated)
-      (catch Throwable _))
-    {:ok true
-     :label (or label "value")
-     :preview (preview-of coerced)}))
+   Returns {:ok true :preview :viewer} or an error map.
+   opts: :kind (html|table|vega|…) and/or :prepared? true to skip prepare."
+  ([portal viz-atom label value]
+   (submit! portal viz-atom label value nil))
+  ([portal viz-atom label value {:keys [kind prepared?] :as opts}]
+   (when-not portal
+     (throw (ex-info "Portal is not open" {:label label})))
+   (let [prep (if prepared?
+                {:value value :viewer (detect-viewer value)}
+                (prepare-value value {:kind kind}))]
+     (if-let [err (:error prep)]
+       err
+       (let [prepared  (:value prep)
+             viewer    (:viewer prep)
+             decorated (with-default-viewer prepared)]
+         (when viz-atom
+           (reset! viz-atom decorated))
+         (try
+           ((requiring-resolve 'portal.api/submit) decorated)
+           (catch Throwable _))
+         {:ok true
+          :label (or label "value")
+          :viewer viewer
+          :preview (preview-of prepared)})))))
 
 (defn clear!
   [portal viz-atom]
@@ -189,7 +345,7 @@
       (catch Throwable _)))
   (when viz-atom
     (reset! viz-atom {:lateralus/workbench "ready"
-                      :hint "Use portal/submit for HTML, tables, charts, code — chat stays thin."}))
+                      :hint "Use portal/submit for HTML/SVG charts, tables, demos — chat stays thin."}))
   {:ok true})
 
 (defn selected

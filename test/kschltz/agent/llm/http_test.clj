@@ -145,3 +145,19 @@
                                        {:model    "m"
                                         :messages [{:role "user" :content "ok"}]})]
           (is (= "ok" (schemas/extract-text resp))))))))
+(deftest merge-ollama-model-lists-tags-cloud-for-local-gateway
+  (is (= ["laguna-s-2.1:latest" "ornith:35b" "deepseek-v4-flash:cloud" "glm-5.2:cloud"]
+         (lcm-http/merge-ollama-model-lists
+          ["laguna-s-2.1:latest" "ornith:35b" "deepseek-v4-flash:cloud"]
+          ["deepseek-v4-flash" "glm-5.2"]
+          {:cloud-suffix? true})))
+  (is (= ["deepseek-v4-flash" "glm-5.2"]
+         (lcm-http/merge-ollama-model-lists
+          []
+          ["glm-5.2" "deepseek-v4-flash"]
+          {:cloud-suffix? false}))))
+
+(deftest preferred-default-model-skips-cloud-and-embed
+  (is (= "laguna-s-2.1:latest"
+         (lcm-http/preferred-default-model
+          ["deepseek-v4-flash:cloud" "nomic-embed-text:latest" "laguna-s-2.1:latest"]))))

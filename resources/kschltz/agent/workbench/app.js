@@ -7,6 +7,7 @@
   const attachBtn = document.getElementById("attach");
   const portalFrame = document.getElementById("portal-frame");
   const portalLink = document.getElementById("portal-link");
+  const portalReloadBtn = document.getElementById("portal-reload");
   const portalFallback = document.getElementById("portal-fallback");
 
   let attached = [];
@@ -15,6 +16,7 @@
   let lastStatus = "connecting";
   let pollTimer = null;
   let stickToBottom = true;
+  let lastPortalUrl = null;
   const STICK_THRESHOLD_PX = 64;
 
   function nearBottom() {
@@ -69,6 +71,30 @@
       clearInterval(pollTimer);
       pollTimer = null;
     }
+  }
+
+  function bustPortalUrl(url) {
+    if (!url) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}_wb=${Date.now()}`;
+  }
+
+  function setPortalUrl(url, { forceReload = false } = {}) {
+    if (!url) {
+      lastPortalUrl = null;
+      portalFallback.classList.remove("hidden");
+      return;
+    }
+    portalLink.href = url;
+    portalFallback.classList.add("hidden");
+    if (forceReload || lastPortalUrl !== url || !portalFrame.src) {
+      portalFrame.src = bustPortalUrl(url);
+      lastPortalUrl = url;
+    }
+  }
+
+  function reloadPortal() {
+    if (lastPortalUrl) setPortalUrl(lastPortalUrl, { forceReload: true });
   }
 
   function renderChips() {
@@ -133,6 +159,8 @@
     // Drop stale snapshots — overlapping SSE/poll can reorder.
     if (lastRev !== -1 && rev < lastRev) return;
     if (lastRev !== -1 && rev === lastRev && nextStatus === lastStatus) return;
+
+    const wasBusy = isBusy(lastStatus);
     lastRev = rev;
     lastStatus = nextStatus;
     busy = isBusy(lastStatus);
@@ -143,15 +171,9 @@
     else stopBusyPollerIfIdle();
 
     const portalUrl = state["portal-url"];
-    if (portalUrl) {
-      if (portalFrame.src !== portalUrl) {
-        portalFrame.src = portalUrl;
-      }
-      portalLink.href = portalUrl;
-      portalFallback.classList.add("hidden");
-    } else {
-      portalFallback.classList.remove("hidden");
-    }
+    // After a turn finishes, force-reload iframe — recovers dead Portal websockets.
+    const forceReload = wasBusy && !busy && !!portalUrl;
+    setPortalUrl(portalUrl, { forceReload });
   }
 
   async function refresh() {
@@ -254,6 +276,7 @@
 
   sendBtn.addEventListener("click", send);
   attachBtn.addEventListener("click", attachSelection);
+  portalReloadBtn.addEventListener("click", reloadPortal);
   inputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -261,7 +284,10 @@
     }
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") refresh();
+    if (document.visibilityState === "visible") {
+      refresh();
+      reloadPortal();
+    }
   });
 
   // Always keep a slow heartbeat — SSE alone proved unreliable mid-turn.

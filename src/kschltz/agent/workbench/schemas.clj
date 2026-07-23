@@ -16,7 +16,8 @@
    [:id :string]
    [:preview :string]
    [:path {:optional true} :string]
-   [:label {:optional true} :string]])
+   [:label {:optional true} :string]
+   [:viewer {:optional true} :string]])
 
 (def Turn
   [:map
@@ -39,16 +40,23 @@
    [:enabled? {:optional true} :boolean]
    [:host {:optional true} :string]
    [:port {:optional true} [:int {:min 0 :max 65535}]]
+   [:portal-port {:optional true} [:int {:min 0 :max 65535}]]
+   [:portal-host {:optional true} :string]
    [:portal? {:optional true} :boolean]
    [:open-browser? {:optional true} :boolean]
    [:app {:optional true} :boolean]
    [:window-title {:optional true} :string]
    [:open? {:optional true} :boolean]])
 
+(def PortalSubmitKind
+  [:enum "html" "table" "vega" "markdown" "code" "auto"
+   :html :table :vega :markdown :code :auto])
+
 (def PortalSubmitInput
   [:map
    [:value :any]
-   [:label {:optional true} :string]])
+   [:label {:optional true} :string]
+   [:kind {:optional true} PortalSubmitKind]])
 
 (def PortalClearInput
   [:map {:closed true}])

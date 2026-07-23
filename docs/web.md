@@ -32,7 +32,7 @@ provider call.
 |---|---|---|
 | `:none` (default) | none required | Zero I/O. `web/extract` still works via a zero-dep regex stripper. |
 | `:mojeek` | none required | JVM-only. Uses `hickory` to parse Mojeek's public HTML result pages. **Opt-in** because HTML scraping can break if markup changes. |
-| `:ddg` | none required | JVM-only. Keyless DuckDuckGo search via `html.duckduckgo.com/html`, reached with a browser JA3/JA4 + HTTP/2 fingerprint (`impersonator-okhttp`) so DDG returns real HTML instead of a CAPTCHA page. Default preset is `android` (only preset that completes the TLS handshake with this bctls version); override via `:impersonate` in config. **Opt-in**. |
+| `:ddg` | none required | JVM-only. **Recommended live provider.** Keyless DuckDuckGo search via `html.duckduckgo.com/html`, reached with a browser JA3/JA4 + HTTP/2 fingerprint (`impersonator-okhttp`) so DDG returns real HTML instead of a CAPTCHA page. Default preset is `android` (only preset that completes the TLS handshake with this bctls version); override via `:impersonate` in config. **Opt-in**. Provider owns its own base URL — shared guard defaults must not set `:base-url`. |
 | `:searxng` | not shipped | Planned self-hosted follow-up. |
 
 `:mojeek` and `:ddg` are **excluded from the native-image classpath**: `:mojeek`

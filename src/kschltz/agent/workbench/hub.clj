@@ -47,11 +47,12 @@
 
 (defn put-ref!
   "Store a portal ref chip; returns the public ref map (no :value)."
-  [hub {:keys [id preview path label value]}]
+  [hub {:keys [id preview path label value viewer]}]
   (let [id  (or id (new-id))
         ref (cond-> {:id id :preview (str (or preview (pr-str value)))}
-              path  (assoc :path (str path))
-              label (assoc :label (str label)))]
+              path   (assoc :path (str path))
+              label  (assoc :label (str label))
+              viewer (assoc :viewer (str viewer)))]
     (bump! (:state hub)
            (fn [s]
              (assoc-in s [:refs id]

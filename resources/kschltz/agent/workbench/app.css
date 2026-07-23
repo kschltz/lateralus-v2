@@ -63,6 +63,23 @@ html, body {
   color: var(--muted);
 }
 .meta { color: var(--muted); font-size: 12px; text-decoration: none; }
+.portal-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.meta-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.meta-btn:hover { color: var(--ink); border-color: var(--muted); }
 
 #status {
   display: inline-flex;

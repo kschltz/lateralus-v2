@@ -1,5 +1,6 @@
 (ns kschltz.agent.workbench.tools-test
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.workbench.hub :as hub]
@@ -22,7 +23,7 @@
       (-tools [_] {})
       (-close! [_] nil))))
 
-(deftest portal-submit-and-focus
+(deftest portal-submit-returns-cite
   (let [wb  (fake-wb)
         reg (tools/registry wb)
         out (tool/invoke-tool (get reg "portal/submit")
@@ -35,8 +36,25 @@
                true)]
     (is (true? (:ok parsed)))
     (is (string? id))
+    (is (= (str "@portal/" id) (:cite parsed)))
+    (is (str/includes? (:hint parsed) "Cite ONLY"))
     (is (true? (:ok focus)))
     (is (= id (get-in focus [:ref :id])))))
+
+(deftest portal-submit-vega-becomes-html-viewer
+  (let [reg (tools/registry (fake-wb))
+        spec {:$schema "https://vega.github.io/schema/vega-lite/v5.json"
+              :mark "arc"
+              :encoding {:theta {:field "v" :type "quantitative"}}
+              :data {:values [{:v 1}]}}
+        parsed (json/parse-string
+                (tool/invoke-tool (get reg "portal/submit")
+                                  {:value spec :label "pie" :kind "vega"}
+                                  {})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "html" (:viewer parsed)))
+    (is (str/starts-with? (:cite parsed) "@portal/"))))
 
 (deftest portal-clear
   (let [reg (tools/registry (fake-wb))

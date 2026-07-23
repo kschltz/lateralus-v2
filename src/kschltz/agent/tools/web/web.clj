@@ -96,10 +96,10 @@
           :else :unknown))))
 
 (defn- effective-config
-  "Merge `default-guard-config` into the tool `config` so every guard
-   has its toggle even when the operator did not set it explicitly.
-   Returned by value — callers may mutate it."
-  [config]
+  "Return shared guard defaults. Callers merge operator `config` on top
+   (`(merge (effective-config config) config)`). Provider-specific keys
+   like `:base-url` / `:user-agent` must NOT live in the shared defaults."
+  [_config]
   (guards/default-guard-config))
 
 (defn- envelope
@@ -140,7 +140,7 @@
   (-name [_]
     "web/search")
   (-description [_]
-    "Search the public web. Returns a JSON envelope. Default provider (:none) does no network I/O; configure :mojeek for live results. Arguments: query (string, required), result-count (int, default 5, max 20).")
+    "Search the public web. Returns a JSON envelope with :results [{title,url,snippet}]. Default provider (:none) does no network I/O; configure :ddg (recommended) or :mojeek for live results. Arguments: query (string, required), result-count (int, default 5, max 20). On success, follow interesting URLs with web/fetch.")
   (-input-schema [_] schemas/WebSearchInput)
   (-output-schema [_] schemas/WebSearchOutput)
   (-invoke [_ args _ctx]
@@ -184,7 +184,7 @@
   (-name [_]
     "web/fetch")
   (-description [_]
-    "Fetch a URL and return the body as plain text. Default provider (:none) returns a disabled envelope. Configure :mojeek to enable. Arguments: url (string, required), max-bytes (int, optional override).")
+    "Fetch a URL and return the body as plain text. Default provider (:none) returns a disabled envelope. Configure :ddg or :mojeek to enable. Arguments: url (string, required), max-bytes (int, optional override).")
   (-input-schema [_] schemas/WebFetchInput)
   (-output-schema [_] schemas/WebFetchOutput)
   (-invoke [_ args _ctx]

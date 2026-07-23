@@ -1,0 +1,12 @@
+.git
+.clerk
+.clj-kondo
+.cpcache
+.lsp
+.nrepl-port
+target
+local-ai
+notebooks
+**/node_modules
+*.log
+.DS_Store

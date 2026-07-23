@@ -7,10 +7,9 @@
 ;;
 ;; Requirements for this default:
 ;;   - Java 22+
-;;   - JVM flags: --add-modules=jdk.incubator.vector
-;;                --enable-native-access=ALL-UNNAMED
-;;     (included in the ./target/lateralus-v2 uberjar launcher;
-;;      pass them manually when running via clojure -M:run)
+;;   - JVM flags for Proximum/LangChain4j (Vector API + FFM) are baked
+;;     into the :run / :workbench / :test aliases in deps.edn — just use
+;;     `clojure -M:run` (or the uberjar launcher).
 ;;
 ;; Override examples:
 ;;   :lateralus/llm-client     {:impl :http :base-url "..." :api-key "..." :model "gpt-4"}

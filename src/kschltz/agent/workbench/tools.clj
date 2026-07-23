@@ -4,7 +4,9 @@
    Portal is the sole data/visualization channel for the workbench —
    see `kschltz.agent.workbench.guidance`."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.workbench.portal :as portal]
             [kschltz.agent.workbench.protocol :as wb]
             [kschltz.agent.workbench.schemas :as schemas]))
 
@@ -15,22 +17,35 @@
     (instance? clojure.lang.IDeref workbench) @workbench
     :else workbench))
 
+(defn- submit-payload
+  [workbench {:keys [value label kind]}]
+  (let [prep (portal/prepare-value value {:kind kind})]
+    (if-let [err (:error prep)]
+      err
+      (let [ref  (wb/submit-portal! (resolve-wb workbench)
+                                    (or label "value")
+                                    (:value prep))
+            cite (str "@portal/" (:id ref))]
+        {:ok true
+         :cite cite
+         :ref ref
+         :viewer (:viewer prep)
+         :hint "Cite ONLY the :cite string in chat. Do not invent portal ids."}))))
+
 (defrecord PortalSubmitTool [workbench]
   tool/Tool
   (-name [_] "portal/submit")
   (-description [_]
     "PRIMARY visualization tool — use optimistically. Push rich artifacts into
-     the Portal pane (right side): HTML/CSS demos, hiccup UI, markdown, code,
-     tables (array of maps), vega-lite charts, maps/nested data.
-     Prefer this over pasting HTML, CSS, code, or datasets into chat.
-     `value` should be the artifact itself (HTML string, JSON array/object,
-     hiccup vector). Stringified JSON is ok (host coerces). Always set `label`.
-     Returns a portal ref id — cite as @portal/<id> in a short chat reply.")
+     the Portal pane (right side): HTML/CSS demos (preferred for charts — one
+     HTML/SVG doc, multi-chart = one page), tables (array of maps), markdown,
+     code, hiccup. Optional kind: html|table|vega|markdown|code|auto.
+     Returns JSON with :cite \"@portal/<full-uuid>\" — paste that exact cite
+     in a short chat reply. Never invent ids. Prefer this over pasting into chat.")
   (-input-schema [_] schemas/PortalSubmitInput)
   (-output-schema [_] :string)
-  (-invoke [_ {:keys [value label]} _ctx]
-    (let [ref (wb/submit-portal! (resolve-wb workbench) (or label "value") value)]
-      (json/generate-string {:ok true :ref ref}))))
+  (-invoke [_ args _ctx]
+    (json/generate-string (submit-payload workbench args))))
 
 (defrecord PortalClearTool [workbench]
   tool/Tool
@@ -57,10 +72,15 @@
     (let [snap (wb/snapshot (resolve-wb workbench))
           refs (vals (:refs snap))
           hit  (or (when id (get (:refs snap) id))
+                   (when (and id (not (get (:refs snap) id)))
+                     (first (filter #(or (= id (:id %))
+                                         (str/starts-with? (str (:id %)) (str id)))
+                                    refs)))
                    (when label
                      (first (filter #(= label (:label %)) refs))))]
       (if hit
-        (json/generate-string {:ok true :ref hit})
+        (json/generate-string {:ok true :ref hit
+                               :cite (str "@portal/" (:id hit))})
         (json/generate-string {:ok false
                                :error "portal ref not found"
                                :id id

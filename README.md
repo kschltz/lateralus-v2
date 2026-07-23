@@ -7,35 +7,35 @@ Greenfield rewrite of [Lateralus](../lateralus) (v1 archive). A Clojure LLM agen
 
 ## Quick start
 
+**Docker (recommended for a full workbench):** Java/Ollama packaged; interactive profile gate + CHAT | Portal UI.
+
+```bash
+./scripts/start-workbench                  # macOS / Linux / WSL / Git Bash
+# .\scripts\start-workbench.ps1            # Windows PowerShell
+```
+
+Open **http://localhost:7860** (Portal iframe on **:7870**). Details: [`docker/README.md`](docker/README.md).
+
+**Local Clojure** (Java 22+; JVM flags are baked into `:run` / `:workbench`):
+
 ```bash
 cd lateralus-v2
 
-# Run the default test suite (excludes slow ^:e2e tests)
-clojure -M:test
+# Interactive workbench — no --config opens the AWS-style profile gate
+clojure -M:workbench:run -i
 
-# Run the end-to-end memory tests (requires a local Ollama instance or
-# LATERALUS_E2E_FAKE=true for the deterministic fake-server mode)
-clojure -M:e2e
-LATERALUS_E2E_FAKE=true clojure -M:e2e
-
-# One-shot from stdin (default LLM is the stub, so override --model/--base-url for a real response;
-# default memory is Proximum in-memory + LangChain4j ONNX embedder)
-echo "What is the capital of France?" | clojure -M:run
-
-# Note: `clojure -M:run` needs the same JVM flags the uberjar launcher provides:
-#   -J--add-modules=jdk.incubator.vector -J--enable-native-access=ALL-UNNAMED
-
-# One-shot from a positional argument
+# One-shot / help
+clojure -M:run -h
 clojure -M:run "Explain recursion"
 
-# Help
-clojure -M:run -h
-
-# Note: the default runtime config loads Proximum + LangChain4j, which need
-#   --add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED
-# The uberjar launcher already includes these flags; pass them manually with
-#   clojure -J--add-modules=jdk.incubator.vector -J--enable-native-access=ALL-UNNAMED -M:run ...
+# Tests
+clojure -M:test
+clojure -M:e2e
+LATERALUS_E2E_FAKE=true clojure -M:e2e
 ```
+
+Profiles are saved under `~/.config/lateralus/` (override with `LATERALUS_CONFIG_HOME`).
+Secrets are never written to profile files — use `OLLAMA_API_KEY` for Ollama Cloud.
 
 ## CLI
 
@@ -48,26 +48,34 @@ Flags:
   -i, --interactive        read prompts from stdin, line-by-line
   --no-interactive         force one-shot mode (default)
   -s, --session ID         session id (default: random-uuid)
-  --config PATH            Integrant EDN config (default: built-in)
-  --model NAME             LLM model name (overrides config)
-  --base-url URL           LLM base URL (overrides config)
-  --api-key KEY            LLM API key (overrides config; env support is a follow-up)
+  --config PATH            Integrant EDN config (skips the profile gate)
+  --model NAME             LLM model name (overrides config / profile)
+  --base-url URL           LLM base URL (overrides config / profile)
+  --api-key KEY            LLM API key (overrides config; else OLLAMA_API_KEY)
 ```
+
+When `--config` is omitted on a TTY, lateralus always opens the **profile gate**
+(pick / create / edit a saved profile; Enter keeps current values). Model prompts
+accept `?` (list catalog) and `/term` (filter), backed by the endpoint’s `/v1/models`
+(and Ollama Cloud when keyed).
 
 Examples:
 
 ```bash
-# Named session (memory is now enabled by default)
-clojure -M:run -s my-session "Hello"
+# Workbench + profile gate
+clojure -M:workbench:run -i
 
-# Use a real HTTP-backed LLM
+# Named session with an explicit EDN config
+clojure -M:run -s my-session --config resources/lateralus/demo-ollama.edn "Hello"
+
+# OpenAI-compatible HTTP LLM via flags
 clojure -M:run \
   --model gpt-4 \
   --base-url https://api.openai.com/v1 \
   --api-key "$OPENAI_API_KEY" \
   "Hello"
 
-# Persistent memory: file-backed Proximum + LangChain4j embedder
+# Persistent memory example
 clojure -M:run \
   --config resources/lateralus/proximum-example.edn \
   -s my-session \
@@ -154,23 +162,39 @@ See [`docs/memory-v2.md`](docs/memory-v2.md) for the full configuration referenc
 
 Requirements:
 - Java 22+
-- JVM flags `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED` (included in the uberjar launcher; pass them manually when running via `clojure -M:run`).
+- JVM flags `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED` (baked into the `:run`, `:workbench`, `:test`, and uberjar launcher — no manual `-J` flags needed)
 
 **Note:** LangChain4j in-process embedding uses ONNX and native tokenizer libraries, so it is **not compatible with GraalVM native-image**. For native-image, switch to an HTTP embedder.
 
+## Docker
+
+See [`docker/README.md`](docker/README.md). Summary:
+
+| Item | Value |
+|------|--------|
+| One-liner | `./scripts/start-workbench` |
+| Workbench | http://localhost:7860 |
+| Portal iframe | http://localhost:7870 |
+| Config volume | `lateralus-config` → `/data/config` |
+| Local LLM | compose `ollama` service |
+| Cloud | `OLLAMA_API_KEY=…` and pick **ollama-cloud** in the profile gate (do not force `LATERALUS_BASE_URL` to the local Ollama service) |
+
+The uberjar build includes the `:workbench` alias (portal + http-kit).
 
 ## Build
 
 ```bash
 clojure -T:build test   # default suite, no e2e
-clojure -T:build uber
+clojure -T:build uber   # workbench deps included
 ./target/lateralus-v2 -h
 echo "ping" | ./target/lateralus-v2
+docker compose build lateralus
 ```
 
 This produces:
 - `target/net.clojars.kschltz/lateralus-v2-0.1.0-SNAPSHOT.jar`
 - `target/lateralus-v2` — executable launcher script
+- Docker image `lateralus-v2-lateralus` via compose
 
 ### End-to-end memory tests
 

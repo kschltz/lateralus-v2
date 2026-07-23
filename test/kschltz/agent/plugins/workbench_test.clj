@@ -34,7 +34,8 @@
       (is (= wb (:agent/workbench ctx2)))
       (is (= "portal/submit" (first (keys (:agent/tool-registry ctx2)))))
       (is (string? (:agent/system-append ctx2)))
-      (is (re-find #"PORTAL IS THE RICH" (:agent/system-append ctx2))))))
+      (is (re-find #"PORTAL IS THE RICH" (:agent/system-append ctx2)))
+      (is (re-find #":cite" (:agent/system-append ctx2))))))
 
 (deftest portal-guidance-lands-in-system-message
   (testing "enrich guidance is concatenated by compose-context"

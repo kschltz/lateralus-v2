@@ -49,12 +49,15 @@
                            :preview (preview-of sel)
                            :value   sel}))))
   (-submit-portal! [_ label value]
-    (let [coerced (portal/coerce-value value)
-          _       (when portal
-                    (portal/submit! portal viz-atom label coerced))
-          ref     (hub/put-ref! hub {:label   label
-                                     :preview (preview-of coerced)
-                                     :value   coerced})]
+    ;; `value` is expected pre-prepared by portal tools (kind applied).
+    (when portal
+      (let [sub (portal/submit! portal viz-atom label value {:prepared? true})]
+        (when-not (:ok sub)
+          (throw (ex-info (str (:error sub)) sub)))))
+    (let [ref (hub/put-ref! hub {:label   label
+                                 :preview (preview-of value)
+                                 :value   value
+                                 :viewer  (portal/detect-viewer value)})]
       (hub/publish-turn! hub {:role :portal-ref
                               :text (str "portal/" (:id ref)
                                          (when label (str " " label)))
@@ -111,8 +114,9 @@
                         :text (str "Workbench ready — CHAT left | PORTAL right ("
                                    (:url server)
                                    "). Agents should optimistically use "
-                                   "portal/submit for HTML, tables, charts, "
-                                   "and other rich visuals (chat stays thin).")})
+                                   "portal/submit for HTML/SVG charts, tables, "
+                                   "and other rich visuals; cite only :cite "
+                                   "from the tool (chat stays thin).")})
     (binding [*out* *err*]
       (println "lateralus workbench:" (:url server))
       (when portal-url

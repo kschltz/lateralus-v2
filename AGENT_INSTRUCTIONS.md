@@ -5,9 +5,11 @@
 - **Active goal:** `goals/lateralus-v2-rewrite/goal.md` → `facts.md` → `plan.md`
 - **Architecture overview:** `docs/architecture.md`
 - **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
-- **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek` opt-in, `:lateralus/web-tools` Integrant key)
+- **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek`/`:ddg` opt-in, `:lateralus/web-tools` Integrant key)
 - **Runtime-eval tool:** `docs/runtime-eval.md` (`tools.runtime`, `clojure/eval` + `clojure/add-lib` + `clojure/loaded-libs`, `ClojureRuntime` protocol, `:lateralus/runtime-tools` Integrant key)
 - **Memory v2 schema:** `docs/memory-v2.md`
+- **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)
+- **CLI profiles:** `~/.config/lateralus/` via `kschltz.agent.cli.profile.*` (no `--config` → interactive gate; secrets via `OLLAMA_API_KEY` only)
 - **v1 reference (archive):** sibling repo `../lateralus/` — port seed code only, do not copy `core.clj` or `loop.clj`
 - **Historical goals/plans (archived):** `goals/lateralus-file-editing/`, `docs/archive/arch-remediation-plan.md`, `docs/archive/clj-edit-implementation-plan.md`, `docs/archive/memory-system-mvi.md`
 
@@ -37,8 +39,10 @@ clojure -M:test                                 # default suite (excludes ^:e2e)
 clojure -T:build test                           # same suite via tools.build
 clojure -M:e2e                                  # end-to-end memory tests
 LATERALUS_E2E_FAKE=true clojure -M:e2e          # deterministic fake-server e2e
-clojure -T:build uber                           # JVM distributable
-./target/lateralus-v2 -h                      # smoke-test launcher
+clojure -T:build uber                           # JVM distributable (includes :workbench)
+./target/lateralus-v2 -h                        # smoke-test launcher
+./scripts/start-workbench                       # Docker: Ollama + profile gate + workbench
+clojure -M:workbench:run -i                     # local workbench (JVM flags in alias)
 rg 'add-.*-tool!' src/                          # no matches
 rg 'http/completion' src/                       # only in llm/http.clj
 rg 'agent\.loop' src/                            # no loop.clj dependency in interceptors

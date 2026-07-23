@@ -13,14 +13,31 @@
    We do not test -main directly. We do not load Integrant or
    talk to a real LLM in these tests. The :system-fn and
    :runner-fn callbacks are the test seam."
-  (:require [clojure.set :as set]
+  (:require [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
             [kschltz.agent.cli :as cli]
             [kschltz.agent.cli.ui :as ui]
             [kschltz.agent.llm.http :as llm-http])
-  (:import [java.io File]))
+  (:import [java.io File]
+           [java.util UUID]))
+
+;; Isolate profile I/O from the developer's real ~/.config/lateralus.
+(use-fixtures :each
+  (fn [f]
+    (let [dir (str (System/getProperty "java.io.tmpdir")
+                   "/lateralus-cli-test-" (UUID/randomUUID))
+          prev (System/getProperty "lateralus.config.home")]
+      (.mkdirs (io/file dir))
+      (System/setProperty "lateralus.config.home" dir)
+      (try
+        (f)
+        (finally
+          (if prev
+            (System/setProperty "lateralus.config.home" prev)
+            (System/clearProperty "lateralus.config.home")))))))
 
 ;; ---- capture helpers ----
 
@@ -309,6 +326,7 @@
                           {:in        *in*
                            :out       *out*
                            :exit      (silent-exit captured)
+                           :tty?      false
                            :system-fn system-fn}))]
           (is (= 0 rv))
           (is (= 0 @captured))
@@ -337,6 +355,7 @@
                           {:in        *in*
                            :out       *out*
                            :exit      (silent-exit captured)
+                           :tty?      false
                            :system-fn system-fn}))]
           (is (= 0 rv))
           (is (str/includes? out "thinking"))
@@ -463,6 +482,7 @@
                          {:in *in*
                           :out *out*
                           :exit (silent-exit captured)
+                          :tty? false
                           :system-fn system-fn}))]
           (is (str/includes? out "lateralus>"))
           (is (str/includes? out "\u001b[")
@@ -541,7 +561,7 @@
                   :read-line-fn   (scripted-reader ["2"])})
         s (str out)]
     (is (= "b" chosen))
-    (is (str/includes? s "Models available"))
+    (is (str/includes? s "models available"))
     (is (str/includes? s "1) a"))
     (is (str/includes? s "2) b"))
     (is (str/includes? s "3) c"))
@@ -671,11 +691,38 @@
                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
                      :out    (java.io.StringWriter.)
                      :exit   (fn [_] nil)
+                     :tty?   false
                      :model-selector (fn [_] (reset! called true) "nope")
                      :system-fn (fn [_] [{} "s" (fn [])])
                      :runner-fn (fn [_] {:exchange/response "ok"})})]
       (is (= 0 code))
       (is (false? @called)))))
+
+(deftest run-cli-profile-gate-on-tty-without-config
+  (testing "no --config on a TTY runs the profile wizard before the system builds"
+    (let [sys-opts (atom nil)
+          out      (java.io.StringWriter.)
+          ;; first-run: starter 1, keep all field defaults, save as default
+          lines    (atom ["1" "" "" "" "" "" "default"])
+          opts     (cli/parse-args ["hi"])
+          code     (cli/run-cli opts
+                     {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))
+                      :out    out
+                      :exit   (fn [_] nil)
+                      :tty?   true
+                      :read-line-fn (fn []
+                                      (let [l (first @lines)]
+                                        (swap! lines rest)
+                                        l))
+                      :list-models-fn (fn [_ _] [])
+                      :system-fn (fn [o] (reset! sys-opts o)
+                                  [{} "s" (fn [])])
+                      :runner-fn (fn [_] {:exchange/response "ok"})})]
+      (is (= 0 code))
+      (is (some? (:profile-edn @sys-opts)))
+      (is (= :http (get-in (cli/build-system @sys-opts)
+                           [:lateralus/llm-client :impl])))
+      (is (str/includes? (str out) "never saved")))))
 
 (deftest run-cli-uses-default-selector-when-seam-omitted
   (testing "omitting :model-selector still works via the :or default (the -main path)"

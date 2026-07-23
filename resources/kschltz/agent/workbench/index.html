@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>lateralus workbench</title>
-  <link rel="stylesheet" href="/app.css?v=7" />
+  <link rel="stylesheet" href="/app.css?v=8" />
 </head>
 <body>
   <div id="shell">
@@ -26,12 +26,15 @@
     <section id="portal" aria-label="Portal">
       <header class="pane-head">
         <h1>PORTAL</h1>
-        <a id="portal-link" class="meta" href="#" target="_blank" rel="noreferrer">open ↗</a>
+        <div class="portal-actions">
+          <button type="button" id="portal-reload" class="meta-btn" title="Reload Portal iframe">reload</button>
+          <a id="portal-link" class="meta" href="#" target="_blank" rel="noreferrer">open ↗</a>
+        </div>
       </header>
       <iframe id="portal-frame" title="Portal visualizer"></iframe>
       <p id="portal-fallback" class="fallback hidden">Portal URL not available yet.</p>
     </section>
   </div>
-  <script src="/app.js?v=7"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>

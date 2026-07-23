@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Multi-OS launcher: delegates to .sh (Unix/WSL/Git Bash) or prints PowerShell hint.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*)
+    if command -v powershell.exe >/dev/null 2>&1; then
+      exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$DIR/start-workbench.ps1" "$@"
+    fi
+    ;;
+esac
+exec "$DIR/start-workbench.sh" "$@"

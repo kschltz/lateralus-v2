@@ -117,11 +117,22 @@
 ;; URL helpers
 ;; ---------------------------------------------------------------------------
 
+(def ^:private default-base-url "https://html.duckduckgo.com")
+
+(defn- resolve-base-url
+  "Provider-owned base URL. Ignores unrelated `:base-url` values (e.g. the
+   historical Mojeek default that used to leak in via shared guard config)."
+  [cfg]
+  (let [u (or (:ddg/base-url cfg) (:base-url cfg))]
+    (if (and (string? u) (str/includes? (str/lower-case u) "duckduckgo"))
+      u
+      default-base-url)))
+
 (defn- build-search-url
   "Build `https://html.duckduckgo.com/html/?q=<encoded>`. DDG's HTML
    endpoint is keyless and requires no API key."
   ^String [base-url ^String q]
-  (str (or base-url "https://html.duckduckgo.com")
+  (str (or base-url default-base-url)
        "/html/?q=" (URLEncoder/encode (or q "") "UTF-8")))
 
 (defn- decode-uddg
@@ -253,7 +264,7 @@
 
   (-search [_ query opts]
     (let [cfg           (merge config opts)
-          base-url      (or (:base-url cfg) "https://html.duckduckgo.com")
+          base-url      (resolve-base-url cfg)
           user-agent    (or (:user-agent cfg) default-user-agent)
           timeout-ms    (or (:timeout-ms cfg) 15000)
           max-results   (or (:max-result-count cfg) 10)
