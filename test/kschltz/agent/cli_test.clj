@@ -13,10 +13,12 @@
    We do not test -main directly. We do not load Integrant or
    talk to a real LLM in these tests. The :system-fn and
    :runner-fn callbacks are the test seam."
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
             [kschltz.agent.cli :as cli]
+            [kschltz.agent.cli.ui :as ui]
             [kschltz.agent.llm.http :as llm-http])
   (:import [java.io File]))
 
@@ -253,13 +255,14 @@
    with Integrant tag support and merges it over default-config"
     (let [config (cli/build-system {})]
       (is (contains? config :lateralus/agent))
-      (is (= #{:plugins :llm-client :llm-config :embedder :memory-backend :loop-opts}
-             (set (keys (:lateralus/agent config)))))
+      (is (set/subset?
+           #{:plugins :llm-client :llm-config :embedder :memory-backend :loop-opts :cli-ui}
+           (set (keys (:lateralus/agent config)))))
       ;; Pin that #ig/ref tags were resolved (not left as raw symbols).
       (is (every? ig/reflike?
                   (vals (select-keys (:lateralus/agent config)
                                      [:plugins :llm-client :llm-config
-                                      :embedder :memory-backend])))
+                                      :embedder :memory-backend :cli-ui])))
           "all agent refs are Integrant refs"))))
 
 (deftest build-system-merges-custom-config
@@ -340,6 +343,131 @@
           (is (str/includes? out "done"))
           (is (re-find #"\rthinking\.\..*\r" out)
               "spinner line is cleared before the response is printed"))))))
+
+(deftest run-cli-applies-cli-ui-colors-when-enabled
+  (testing "one-shot response is ANSI-styled when agent carries an enabled CliRenderer"
+    (let [renderer (ui/build-renderer {:enabled? true :theme :default})
+          system-fn (fn [_]
+                      [{:agent/cli-ui renderer} "sid" (constantly nil)])
+          runner-fn (fn [_] {:exchange/response "colored-answer"})
+          captured (atom nil)
+          [_ out] (capture-out
+                   #(cli/run-cli
+                     {:action :one-shot :prompt "hi"}
+                     {:out *out*
+                      :exit (silent-exit captured)
+                      :system-fn system-fn
+                      :runner-fn runner-fn}))]
+      (is (= 0 @captured))
+      (is (str/includes? out "colored-answer"))
+      (is (str/includes? out "\u001b[")
+          "assistant response carries ANSI when cli-ui is enabled")
+      (is (str/includes? out "\u001b[0m")
+          "styled output resets SGR"))))
+
+(deftest run-cli-plain-when-cli-ui-disabled
+  (testing "no ANSI when agent has a plain/disabled renderer"
+    (let [system-fn (fn [_]
+                      [{:agent/cli-ui (ui/build-renderer {:enabled? false})}
+                       "sid" (constantly nil)])
+          runner-fn (fn [_] {:exchange/response "plain-answer"})
+          captured (atom nil)
+          [_ out] (capture-out
+                   #(cli/run-cli
+                     {:action :one-shot :prompt "hi"}
+                     {:out *out*
+                      :exit (silent-exit captured)
+                      :system-fn system-fn
+                      :runner-fn runner-fn}))]
+      (is (str/includes? out "plain-answer"))
+      (is (not (str/includes? out "\u001b["))
+          "disabled cli-ui emits no ANSI"))))
+
+(deftest run-cli-thinking-full-prints-before-response
+  (let [system-fn (fn [_]
+                    [{:agent/cli-ui (ui/plain-renderer)
+                      :agent/thinking {:mode :full}}
+                     "sid" (constantly nil)])
+        runner-fn (fn [_] {:exchange/response "answer"
+                           :exchange/thinking "I reasoned carefully"
+                           :exchange/session-id "sid"
+                           :exchange/user-text "hi"})
+        captured (atom nil)
+        [_ out] (capture-out
+                 #(cli/run-cli
+                   {:action :one-shot :prompt "hi"}
+                   {:out *out*
+                    :exit (silent-exit captured)
+                    :system-fn system-fn
+                    :runner-fn runner-fn}))]
+    (is (= 0 @captured))
+    (is (str/includes? out "[thinking]"))
+    (is (str/includes? out "I reasoned carefully"))
+    (is (str/includes? out "answer"))
+    (is (< (str/index-of out "I reasoned carefully")
+           (str/index-of out "answer"))
+        "thinking block prints before assistant body")))
+
+(deftest run-cli-thinking-off-hides-reasoning
+  (let [system-fn (fn [_]
+                    [{:agent/cli-ui (ui/plain-renderer)
+                      :agent/thinking {:mode :off}}
+                     "sid" (constantly nil)])
+        runner-fn (fn [_] {:exchange/response "answer"
+                           :exchange/thinking "secret thoughts"})
+        captured (atom nil)
+        [_ out] (capture-out
+                 #(cli/run-cli
+                   {:action :one-shot :prompt "hi"}
+                   {:out *out*
+                    :exit (silent-exit captured)
+                    :system-fn system-fn
+                    :runner-fn runner-fn}))]
+    (is (str/includes? out "answer"))
+    (is (not (str/includes? out "secret thoughts")))
+    (is (not (str/includes? out "[thinking]")))))
+
+(deftest run-cli-thinking-preview-truncates
+  (let [system-fn (fn [_]
+                    [{:agent/cli-ui (ui/plain-renderer)
+                      :agent/thinking {:mode :preview :preview-chars 8}}
+                     "sid" (constantly nil)])
+        runner-fn (fn [_] {:exchange/response "ok"
+                           :exchange/thinking "abcdefghijklmnop"})
+        captured (atom nil)
+        [_ out] (capture-out
+                 #(cli/run-cli
+                   {:action :one-shot :prompt "hi"}
+                   {:out *out*
+                    :exit (silent-exit captured)
+                    :system-fn system-fn
+                    :runner-fn runner-fn}))]
+    (is (str/includes? out "abcdefgh…"))
+    (is (not (str/includes? out "ijklmnop")))))
+
+(deftest run-cli-interactive-styles-prompt-with-cli-ui
+  (testing "interactive prompt uses :prompt role styling when enabled"
+    (let [renderer (ui/build-renderer {:enabled? true :theme :default})
+          system-fn (fn [_]
+                      [{:agent/cli-ui renderer
+                        :exchange-chain [{:name ::echo
+                                          :enter (fn [ctx]
+                                                   (assoc ctx :exchange/response "ok"))}]}
+                       "sid"
+                       (constantly nil)])
+          captured (atom nil)]
+      (with-in-str "/quit\n"
+        (let [[_ out] (capture-out
+                       #(cli/run-cli
+                         {:action :interactive}
+                         {:in *in*
+                          :out *out*
+                          :exit (silent-exit captured)
+                          :system-fn system-fn}))]
+          (is (str/includes? out "lateralus>"))
+          (is (str/includes? out "\u001b[")
+              "styled prompt emits ANSI")
+          (is (str/includes? out "Goodbye.")))))))
 
 ;; ---- model selection: pure parser ----
 

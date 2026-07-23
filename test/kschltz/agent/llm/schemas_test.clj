@@ -72,6 +72,30 @@
                                    :tool_calls [{:id "t1"}]}}]})))
   (is (= "" (schemas/extract-text {}))))
 
+(deftest extract-thinking
+  (is (= "because"
+         (schemas/extract-thinking
+          {:choices [{:message {:role "assistant"
+                                :content "hi"
+                                :reasoning "because"}}]})))
+  (is (= "deep"
+         (schemas/extract-thinking
+          {:choices [{:message {:role "assistant"
+                                :content "hi"
+                                :reasoning_content "deep"}}]})))
+  (is (= "think"
+         (schemas/extract-thinking
+          {:choices [{:message {:role "assistant"
+                                :content "hi"
+                                :thinking "think"}}]})))
+  (is (nil? (schemas/extract-thinking
+             {:choices [{:message {:role "assistant" :content "hi"}}]})))
+  (is (nil? (schemas/extract-thinking
+             {:choices [{:message {:role "assistant"
+                                   :content "hi"
+                                   :reasoning "  "}}]})))
+  (is (nil? (schemas/extract-thinking {}))))
+
 (deftest extract-tool-calls
   (is (= [] (schemas/extract-tool-calls
             {:choices [{:message {:role "assistant" :content "hi"}}]})))

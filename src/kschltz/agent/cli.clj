@@ -33,6 +33,8 @@
             [clojure.tools.cli :as cli]
             [integrant.core :as ig]
             [kschltz.agent.cli.spinner :as spinner]
+            [kschltz.agent.cli.ui :as ui]
+            [kschltz.agent.cli.thinking :as thinking]
             [kschltz.agent.llm.http :as llm-http]
             [kschltz.agent.memory.http-embedding]
             [kschltz.agent.runtime :as runtime]
@@ -389,23 +391,42 @@
    final answer' message, with the tool results it did produce appended
    as a reference so the REPL is not blank. :agent/empty-retry-failed?
    (no tools ran and the model stayed blank across retries) gets a
-   'model produced no response' breadcrumb for the same reason."
-  [^java.io.PrintWriter out result]
-  (let [response (:exchange/response result)
-        prefix  (cond
-                 (:agent/tool-cap-hit result)
-                 "[lateralus: hit the per-exchange tool-call cap; showing tool results instead]\n\n"
-                 (:agent/summary-failed? result)
-                 "[lateralus: the agent did not produce a final answer for this turn (the model kept emitting tool calls on the summary turn despite tool_choice:none). Tool results produced, for reference:]\n\n"
-                 (:agent/empty-retry-failed? result)
-                 "[lateralus: model produced no response after retries]\n\n"
-                 :else "")
-        text (if (seq response)
-               response
-               (or (tool-result-summary result)
-                   (str "lateralus: no response (chain returned: "
-                        (pr-str result) ")")))]
-    (.println out (str prefix text))))
+   'model produced no response' breadcrumb for the same reason.
+
+   `renderer` (optional) is a `CliRenderer` from `:agent/cli-ui`; system
+   breadcrumbs use `:system`, the body uses `:assistant`. Optional
+   `thinking-cfg` (from `:agent/thinking`) controls whether provider
+   reasoning is printed (`:preview`/`:full`), written to a file
+   (`:log`), or hidden (`:off`, default)."
+  ([^java.io.PrintWriter out result]
+   (print-response out result (ui/plain-renderer) (thinking/normalize {:mode :off})))
+  ([^java.io.PrintWriter out result renderer]
+   (print-response out result renderer (thinking/normalize {:mode :off})))
+  ([^java.io.PrintWriter out result renderer thinking-cfg]
+   (let [thinking-block (thinking/apply-thinking!
+                         thinking-cfg
+                         {:thinking   (:exchange/thinking result)
+                          :session-id (:exchange/session-id result)
+                          :user-text  (:exchange/user-text result)})
+         _ (when (seq thinking-block)
+             (.println out (ui/style renderer :thinking thinking-block)))
+         response (:exchange/response result)
+         prefix  (cond
+                  (:agent/tool-cap-hit result)
+                  "[lateralus: hit the per-exchange tool-call cap; showing tool results instead]\n\n"
+                  (:agent/summary-failed? result)
+                  "[lateralus: the agent did not produce a final answer for this turn (the model kept emitting tool calls on the summary turn despite tool_choice:none). Tool results produced, for reference:]\n\n"
+                  (:agent/empty-retry-failed? result)
+                  "[lateralus: model produced no response after retries]\n\n"
+                  :else "")
+         text (if (seq response)
+                response
+                (or (tool-result-summary result)
+                    (str "lateralus: no response (chain returned: "
+                         (pr-str result) ")")))
+         styled (str (when (seq prefix) (ui/style renderer :system prefix))
+                     (ui/style renderer :assistant text))]
+     (.println out styled))))
 
 (defn- default-system-fn
   "Production :system-fn. Builds and starts an Integrant system
@@ -434,35 +455,57 @@
   (.readLine rdr))
 
 (defn- interactive-runner-fn
-  "Production interactive runner. Builds one runtime, then reads lines
-   from stdin, sends each to the runtime, and prints responses until
-   EOF or the user types `/quit` or `/exit`."
+  "Production interactive runner. Builds one runtime, then parks on
+   `:agent/workbench` (CHAT|Portal), else `:agent/portal` (legacy sticky
+   composer), else stdin until `/quit` / `/exit` / EOF. UI session loops
+   never park the exchange chain."
   [{:keys [agent-map session-id halt-fn]} ^java.io.PrintWriter out]
-  (let [runtime (runtime/start agent-map session-id)
-        rdr    (java.io.BufferedReader. (io/reader *in*))]
+  (let [runtime    (runtime/start agent-map session-id)
+        renderer   (ui/renderer-from-agent agent-map)
+        workbench  (:agent/workbench agent-map)
+        portal     (:agent/portal agent-map)]
     (try
-      (.println out "lateralus-v2 interactive mode (type /quit to exit)")
-      (loop []
-        (.print out "lateralus> ")
-        (.flush out)
-        (if-let [line (read-line-or-nil rdr)]
-          (let [trimmed (str/trim line)]
-            (cond
-              (#{"/quit" "/exit"} trimmed)
-              (.println out "Goodbye.")
+      (cond
+        workbench
+        (do
+          (ui/println-role out renderer :system
+                           (str "lateralus workbench session — "
+                                ((requiring-resolve 'kschltz.agent.workbench.protocol/url) workbench)
+                                " (CHAT | Portal; type here or in the web UI; /quit to exit)"))
+          ((requiring-resolve 'kschltz.agent.workbench.loop/run-session!)
+           runtime workbench {:in *in*}))
 
-              (seq trimmed)
-              (let [spinner (spinner/start! out "thinking")
-                    result  (try
-                              (runtime/send-message runtime trimmed)
-                              (finally
-                                (spinner/stop! spinner)))]
-                (print-response out result)
-                (recur))
+        portal
+        (do
+          (ui/println-role out renderer :system
+                           "lateralus portal UI session (composer in Portal, or type here; /quit to exit)")
+          ((requiring-resolve 'kschltz.agent.portal.loop/run-session!)
+           runtime portal {:in *in*}))
 
-              :else
-              (recur)))
-          (.println out "\nEOF")))
+        :else
+        (let [rdr (java.io.BufferedReader. (io/reader *in*))]
+          (ui/println-role out renderer :system
+                           "lateralus-v2 interactive mode (type /quit to exit)")
+          (loop []
+            (ui/print-role out renderer :prompt "lateralus> ")
+            (if-let [line (read-line-or-nil rdr)]
+              (let [trimmed (str/trim line)]
+                (cond
+                  (#{"/quit" "/exit"} trimmed)
+                  (ui/println-role out renderer :system "Goodbye.")
+
+                  (seq trimmed)
+                  (let [spinner (spinner/start! out (ui/style renderer :spinner "thinking"))
+                        result  (try
+                                  (runtime/send-message runtime trimmed)
+                                  (finally
+                                    (spinner/stop! spinner)))]
+                    (print-response out result renderer (thinking/from-agent agent-map))
+                    (recur))
+
+                  :else
+                  (recur)))
+              (ui/println-role out renderer :system "\nEOF")))))
       (finally
         (halt-fn)))))
 
@@ -530,7 +573,9 @@
                                      :agent-map  agent-map
                                      :session-id session-id
                                      :halt-fn    halt-fn})]
-             (print-response o result)
+             (print-response o result
+                             (ui/renderer-from-agent agent-map)
+                             (thinking/from-agent agent-map))
              0)
 
            :interactive

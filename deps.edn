@@ -80,7 +80,9 @@
                       ;; Not on the production classpath; the runtime
                       ;; build doesn't need it.
                       ring/ring-core {:mvn/version "1.13.0"}
-                      ring/ring-jetty-adapter {:mvn/version "1.13.0"}}
+                      ring/ring-jetty-adapter {:mvn/version "1.13.0"}
+                      ;; Workbench HTTP unit tests (CHAT | Portal plugin).
+                      http-kit/http-kit {:mvn/version "2.8.0"}}
          ;; Proximum + LangChain4j tests need the Vector API, FFM, and
          ;; ONNX tokenizer native extraction.
          :jvm-opts ["--add-modules=jdk.incubator.vector"
@@ -97,4 +99,11 @@
         :jvm-opts ["--add-modules=jdk.incubator.vector"
                    "--enable-native-access=ALL-UNNAMED"]
         :main-opts ["-m" "cognitect.test-runner" "-i" ":e2e"]}
-  :examples {:extra-paths []}}}
+  :examples {:extra-paths []}
+  ;; Optional Portal sticky-composer UI. Pair with demo-portal.edn:
+  ;;   clojure -M:portal:run -i --config resources/lateralus/demo-portal.edn ...
+  :portal {:extra-deps {djblue/portal {:mvn/version "0.67.1"}}}
+  ;; CHAT | Portal workbench plugin (http-kit + portal). Pair with demo-workbench.edn:
+  ;;   clojure -M:workbench:run -i --config resources/lateralus/demo-workbench.edn ...
+  :workbench {:extra-deps {djblue/portal {:mvn/version "0.67.1"}
+                           http-kit/http-kit {:mvn/version "2.8.0"}}}}}

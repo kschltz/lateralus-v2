@@ -33,6 +33,7 @@
               [kschltz.agent.chain :as chain]
               [kschltz.agent.interceptors.schema :as schema]
               [kschltz.agent.llm.client :as llm-client]
+              [kschltz.agent.llm.schemas :as schemas]
               [malli.core :as m]))
 
 ;; ---- LlmClient comes from `kschltz.agent.llm.client` (canonical).
@@ -68,6 +69,10 @@
   [response]
   (or (get-in response [:choices 0 :message :tool_calls]) []))
 
+(defn- response-thinking
+  "Extract provider reasoning text, or nil when absent/blank."
+  [response]
+  (schemas/extract-thinking response))
 ;; TODO memory-followup: delete this stub. It is a no-op marker
 ;; so a future history-trimming PR has a clear `find-fn + replace`
 ;; target (token budget, recall window, etc.).
@@ -449,18 +454,23 @@
                 delta (assoc :agent/state-delta
                              (merge (or (:agent/state-delta ctx) {}) delta)))))})
 
+(defn- system-message*
+  [state ctx]
+  (let [base  (or (:agent/system-message state) "lateralus-v2 MVP")
+        a     (:agent/system-append ctx)
+        extra (cond (string? a) (str/trim a)
+                    (sequential? a) (->> a (map str) (remove str/blank?) (str/join "\n\n"))
+                    :else "")]
+    (if (str/blank? extra) base (str base "\n\n" extra))))
+
 (def compose-context
-  "Build `:llm/request` from :agent/state + :exchange/user-text +
-   recall + explicit conversation history. Records the assembled
-   message vector under `:agent/last-request-messages` in
-   `:agent/state-delta` so the self/status tool can report the
-   context size of the last completed exchange."
+  "Build `:llm/request`; honors `:agent/system-append` from earlier slots."
   {:name ::compose-context
    :enter (fn [ctx]
             (let [state     (:agent/state ctx)
                   user-text (or (:exchange/user-text ctx) "")
                   recall    (or (:memory/recall ctx) [])
-                  sys-msg   (or (:agent/system-message state) "lateralus-v2 MVP")
+                  sys-msg   (system-message* state ctx)
                   history   (or (:agent/history state) [])
                   recalled  (mapv (fn [m]
                                     {:role    "system"
@@ -494,13 +504,18 @@
    :enter call-llm})
 
 (def parse-response
-  "Extract :exchange/response and :tool/calls from :llm/response."
+  "Extract :exchange/response, :tool/calls, and optional
+   :exchange/thinking from :llm/response. Non-blank thinking is
+   kept across tool-loop turns (a later blank reasoning field does
+   not wipe a prior value)."
   {:name ::parse-response
    :enter (fn [ctx]
-            (let [resp (:llm/response ctx)]
-              (assoc ctx
-                     :exchange/response (response-text resp)
-                     :tool/calls        (response-tool-calls resp))))})
+            (let [resp      (:llm/response ctx)
+                  thinking  (response-thinking resp)]
+              (cond-> (assoc ctx
+                             :exchange/response (response-text resp)
+                             :tool/calls        (response-tool-calls resp))
+                (seq thinking) (assoc :exchange/thinking thinking))))})
 
 (def store-exchange
   "Leave stage. Records the final exchange on ctx as

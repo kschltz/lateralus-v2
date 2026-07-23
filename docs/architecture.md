@@ -33,6 +33,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web/search, web/fetch, web/extract)│
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
+│  :lateralus/cli-ui            ──▶  optional CliRenderer (prompt/response colors; not a chain plugin) │
 │  :lateralus/plugins       ──▶  assembled plugin maps (base plugin auto-prepended) │
 │  :lateralus/agent         ──▶  agent-map + exchange-chain + pre-wired deps │
 └──────────────────────────────────┬──────────────────────────────┘

@@ -29,6 +29,8 @@
  ;; Native-image excludes Hickory; keep web tools at :none.
  :lateralus/web-tools      {:provider :none}
  :lateralus/runtime-tools        {:enabled? true :network? false}  ;; native: eval works; add-lib disabled (tools.deps not on native classpath)
+ :lateralus/cli-ui              {:enabled? :auto :theme :default}
+ :lateralus/thinking            {:mode :preview}
  :lateralus/loop-opts            {:max-tool-calls-per-turn 100 :max-tool-calls-per-exchange 20 :tool-content-caps {"clojure/eval" 12000 "clojure/add-lib" 12000}}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
@@ -43,4 +45,6 @@
                                   :llm-config     #ig/ref :lateralus/llm-config
                                   :embedder       #ig/ref :lateralus/embedder
                                   :memory-backend #ig/ref :lateralus/memory-backend
-                                  :loop-opts        #ig/ref :lateralus/loop-opts}}
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                 :loop-opts        #ig/ref :lateralus/loop-opts}}

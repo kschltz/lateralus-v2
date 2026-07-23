@@ -18,6 +18,8 @@
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
  :lateralus/logging             {}
+ :lateralus/cli-ui              {:enabled? :auto :theme :default}
+ :lateralus/thinking            {:mode :preview}
  ;; :ddg is opt-in and JVM-only (uses impersonator to bypass DDG's CAPTCHA).
  ;; :none / :mojeek are the other choices; :none ships zero network traffic.
  :lateralus/web-tools      {:provider :ddg}
@@ -36,4 +38,6 @@
                                   :llm-config     #ig/ref :lateralus/llm-config
                                   :embedder       #ig/ref :lateralus/embedder
                                   :memory-backend #ig/ref :lateralus/memory-backend
-                                  :loop-opts        #ig/ref :lateralus/loop-opts}}
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                 :loop-opts        #ig/ref :lateralus/loop-opts}}

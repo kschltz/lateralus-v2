@@ -16,7 +16,8 @@
    - OpenAI chat completions: https://platform.openai.com/docs/api-reference/chat
    - Anthropic messages:     (different shape; not covered here)
    - Ollama chat:            https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion"
-  (:require [malli.core :as m]))
+  (:require [clojure.string :as str]
+            [malli.core :as m]))
 
 (def ToolCall
   "A single tool call that the assistant asks us to execute."
@@ -156,3 +157,17 @@
   "Why the model stopped; 'unknown' if absent."
   [resp]
   (or (get-in resp [:choices 0 :finish_reason]) "unknown"))
+
+(defn extract-thinking
+  "Pull provider reasoning / thinking text out of a chat response.
+   Handles the common OpenAI-compat keys used by Ollama Cloud
+   (`:reasoning`) and OpenAI/DeepSeek-style (`:reasoning_content`).
+   Returns nil when absent or blank so callers can leave a prior
+   non-blank `:exchange/thinking` in place across tool-loop turns."
+  [resp]
+  (let [msg (get-in resp [:choices 0 :message])
+        raw (or (when (string? (:reasoning msg)) (:reasoning msg))
+                (when (string? (:reasoning_content msg)) (:reasoning_content msg))
+                (when (string? (:thinking msg)) (:thinking msg)))]
+    (when (and raw (not (str/blank? raw)))
+      raw)))

@@ -38,6 +38,7 @@
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.plugins.tools :as plugins.tools]
+            [kschltz.agent.plugins.workbench :as plugins.workbench]
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
             [kschltz.agent.tools.clojure :as tools.clojure]
@@ -46,6 +47,10 @@
             [kschltz.agent.tools.web.web :as tools.web]
             [kschltz.agent.tools.web.schemas :as web.schemas]
             [kschltz.agent.logging :as logging]
+            [kschltz.agent.cli.ui :as ui]
+            [kschltz.agent.cli.thinking :as thinking]
+            [kschltz.agent.portal.schemas :as portal.schemas]
+            [kschltz.agent.workbench.schemas :as workbench.schemas]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.memory.embedding :as embedding]
             [kschltz.agent.memory.http-embedding :as http-embedding]
@@ -155,6 +160,18 @@
 (defmethod ig/assert-key :lateralus/logging [_ config]
   (assert-malli! :lateralus/logging LoggingConfig config))
 
+(defmethod ig/assert-key :lateralus/cli-ui [_ config]
+  (assert-malli! :lateralus/cli-ui ui/CliUiConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/thinking [_ config]
+  (assert-malli! :lateralus/thinking thinking/ThinkingConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/portal [_ config]
+  (assert-malli! :lateralus/portal portal.schemas/PortalConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/workbench [_ config]
+  (assert-malli! :lateralus/workbench workbench.schemas/WorkbenchConfig (or config {})))
+
 (def ^:private LoopOpts
   "Malli schema for :lateralus/loop-opts. All keys optional; the loop
    interceptors fall back to code defaults (:max-loop-depth 5, no
@@ -207,6 +224,62 @@
    in `logging/build-sink`; here we just normalize nil to an empty map
    so the agent component can read it."
   (or opts {}))
+
+(defmethod ig/init-key :lateralus/cli-ui [_ opts]
+  "Resolve the optional CLI styling pack into a `CliRenderer`. Nil/empty
+   opts use `:enabled? :auto` + `:theme :default` (TTY + !NO_COLOR)."
+  (ui/build-renderer (or opts {})))
+
+(defmethod ig/init-key :lateralus/thinking [_ opts]
+  "Resolve the optional thinking/reasoning display pack. Default mode
+   is `:off` (Pi-style hide). See `cli.thinking/ThinkingConfig`."
+  (thinking/validate! (or opts {})))
+
+(defmethod ig/init-key :lateralus/portal [_ opts]
+  "Optional Portal UI session. Requires the `:portal` deps alias.
+   Returns an `AgentUi` or nil when `:enabled?` is false."
+  (let [opts (or opts {})]
+    (when-not (false? (:enabled? opts))
+      (let [available? (requiring-resolve 'kschltz.agent.portal.jvm/available?)
+            start!     (requiring-resolve 'kschltz.agent.portal.jvm/start!)]
+        (when-not (available?)
+          (throw (ex-info
+                  (str "Portal UI enabled but djblue/portal is not on the classpath. "
+                       "Run with -M:portal:run (or add the :portal alias).")
+                  {:opts opts})))
+        (start! opts)))))
+
+(defmethod ig/halt-key! :lateralus/portal [_ agent-ui]
+  (when agent-ui
+    ((requiring-resolve 'kschltz.agent.portal.protocol/close!) agent-ui)))
+
+(defmethod ig/init-key :lateralus/workbench [_ opts]
+  "Optional CHAT | Portal workbench plugin. Requires `:workbench` (or
+   `:portal`) deps alias. Returns a `Workbench` or nil when disabled."
+  (let [opts (or opts {})]
+    (when-not (false? (:enabled? opts))
+      (let [available? (requiring-resolve 'kschltz.agent.workbench.jvm/available?)
+            start!     (requiring-resolve 'kschltz.agent.workbench.jvm/start!)]
+        (when-not (available?)
+          (throw (ex-info
+                  (str "Workbench enabled but http-kit/portal are not on the classpath. "
+                       "Run with -M:workbench:run (or add the :workbench alias).")
+                  {:opts opts})))
+        (start! opts)))))
+
+(defmethod ig/halt-key! :lateralus/workbench [_ workbench]
+  (when workbench
+    ((requiring-resolve 'kschltz.agent.workbench.protocol/close!) workbench)))
+
+(defmethod ig/init-key :lateralus/workbench-plugin [_ {:keys [workbench]}]
+  (plugins.workbench/workbench-plugin workbench))
+
+(defmethod ig/init-key :lateralus/workbench-tools [_ {:keys [workbench]}]
+  "Portal tool registry (`portal/submit`, `portal/clear`, `portal/focus`)
+   derived from a live workbench. Empty map when workbench is disabled."
+  (if workbench
+    ((requiring-resolve 'kschltz.agent.workbench.protocol/tools) workbench)
+    {}))
 
 (defmethod ig/init-key :lateralus/loop-opts [_ opts]
   "Resolve the loop-opts config (per-exchange / per-turn tool-call caps
@@ -291,7 +364,7 @@
   (plugins.tools/tools-plugin registry))
 
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts]}]
+  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts cli-ui thinking portal workbench]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
   ;; seeds the runtime's state atom so compose-context sees the
   ;; LLM config (:base-url / :api-key / :model) and any other
@@ -300,7 +373,12 @@
   ;;
   ;; The exchange chain is assembled from `:plugins`. `:agent/logging`
   ;; carries the resolved logging config so the runtime can build a
-  ;; per-session sink in `start`.
+  ;; per-session sink in `start`. `:agent/cli-ui` is the optional
+  ;; CLI styling renderer (not a chain plugin) for prompt/response color.
+  ;; `:agent/thinking` controls whether provider reasoning is shown,
+  ;; previewed, or logged (default `:off`).
+  ;; `:agent/workbench` is the CHAT|Portal plugin (preferred interactive UI).
+  ;; `:agent/portal` is the legacy Portal sticky-composer AgentUi.
   (let [llm-config (or llm-config {})
         assembled (plugin/assemble-chain (or plugins []))]
     {:agent/llm-client  llm-client    ; pre-wired into ctx as `:llm/client`
@@ -308,6 +386,10 @@
      :memory-backend    memory-backend
      :agent/loop-opts   loop-opts
      :agent/logging     logging
+     :agent/cli-ui      (or cli-ui (ui/plain-renderer))
+     :agent/thinking    (or thinking (thinking/normalize {:mode :off}))
+     :agent/workbench   workbench
+     :agent/portal      portal
      :assembled         assembled
      :exchange-chain    assembled
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}
@@ -345,6 +427,8 @@
                               :top-y    3
                               :last-n   5}
    :lateralus/logging             {}
+   :lateralus/cli-ui              {:enabled? :auto :theme :default}
+   :lateralus/thinking            {:mode :preview}
    :lateralus/loop-opts            {}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
@@ -363,4 +447,6 @@
                                     :embedder       (ig/ref :lateralus/embedder)
                                     :memory-backend (ig/ref :lateralus/memory-backend)
                                     :logging        (ig/ref :lateralus/logging)
+                                    :cli-ui         (ig/ref :lateralus/cli-ui)
+                                    :thinking       (ig/ref :lateralus/thinking)
                                     :loop-opts      (ig/ref :lateralus/loop-opts)}})

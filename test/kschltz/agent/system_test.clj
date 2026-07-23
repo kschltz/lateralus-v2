@@ -140,11 +140,14 @@
         (finally
           (remove-method ig/init-key probe-key))))))
 
-(deftest system-does-not-use-requiring-resolve
-  (testing "system.clj resolves optional JVM-only namespaces via normal require, not requiring-resolve"
-    (let [source (slurp (io/resource "kschltz/agent/system.clj"))]
-      (is (not (str/includes? source "requiring-resolve"))
-          "system.clj should not use requiring-resolve for optional namespaces"))))
+(deftest system-requiring-resolve-only-for-optional-portal
+  (testing "system.clj may use requiring-resolve only for the optional Portal pack
+            (djblue/portal lives behind the :portal alias)."
+    (let [source (slurp (io/resource "kschltz/agent/system.clj"))
+          uses?  (str/includes? source "requiring-resolve")]
+      (is uses? "Portal init/halt use requiring-resolve")
+      (is (str/includes? source "kschltz.agent.portal")
+          "requiring-resolve is scoped to the portal pack"))))
 
 (deftest full-profile-integrant-initializes-optional-components
   (testing "default/full classpath can initialize :langchain4j embedder and :proximum backend"

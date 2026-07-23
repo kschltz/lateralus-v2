@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>lateralus workbench</title>
+  <link rel="stylesheet" href="/app.css?v=7" />
+</head>
+<body>
+  <div id="shell">
+    <section id="chat" aria-label="Chat">
+      <header class="pane-head">
+        <h1>CHAT</h1>
+        <span id="status" class="meta" data-status="connecting">connecting…</span>
+      </header>
+      <div id="turns"></div>
+      <div id="composer">
+        <div id="chips"></div>
+        <div class="row">
+          <button type="button" id="attach" title="Attach Portal selection">Attach selection</button>
+          <textarea id="input" rows="2" placeholder="Message the agent… (@portal refs attach as chips)"></textarea>
+          <button type="button" id="send">Send</button>
+        </div>
+      </div>
+    </section>
+    <section id="portal" aria-label="Portal">
+      <header class="pane-head">
+        <h1>PORTAL</h1>
+        <a id="portal-link" class="meta" href="#" target="_blank" rel="noreferrer">open ↗</a>
+      </header>
+      <iframe id="portal-frame" title="Portal visualizer"></iframe>
+      <p id="portal-fallback" class="fallback hidden">Portal URL not available yet.</p>
+    </section>
+  </div>
+  <script src="/app.js?v=7"></script>
+</body>
+</html>
