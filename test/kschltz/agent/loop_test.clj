@@ -1,6 +1,7 @@
 (ns kschltz.agent.loop-test
   "Tests for the ReAct loop strategy and loop interceptors."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [cheshire.core :as json]
+            [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
@@ -96,6 +97,49 @@
                              :messages [{:role "user" :content "hi"}]}}]
       (is (= ctx (enter-fn ctx))
           "valid request is unchanged"))))
+
+(deftest self-heal-preserves-tools-finalize-queue
+  (testing "after a schema-invalid request is healed, dispatch-tools still
+            runs so tool_calls from the healed LLM response execute"
+    (let [poison {:name ::poison-nil-content
+                  :slot :compose
+                  :enter (fn [ctx]
+                           ;; Nil :content fails ChatMessage; self-heal retries
+                           ;; then the remaining queue (llm → parse → tools →
+                           ;; finalize) must still run.
+                           (update-in ctx [:llm/request :messages]
+                                      conj {:role "user" :content nil}))}
+          calls (atom 0)
+          llm (reify LlmClient
+                (-call [_ _req]
+                  (let [n (swap! calls inc)]
+                    (if (= 1 n)
+                      {:choices [{:message {:role "assistant" :content ""
+                                            :tool_calls [{:id "tc1" :type "function"
+                                                          :function {:name "echo"
+                                                                     :arguments "{\"msg\":\"healed\"}"}}]}}]
+                       :model "fake/v0"}
+                      {:choices [{:message {:role "assistant" :content "done"}}]
+                       :model "fake/v0"}))))
+          chain (plugin/assemble-chain
+                 [(plugins.base/base-plugin)
+                  (with-meta [poison] {:plugin/name :poison})
+                  (plugins.tools/tools-plugin {"echo" (->EchoTool)})])
+          out (chain/execute
+               {:agent/state {:base-url "stub" :api-key nil :model "fake/v0"
+                              :agent/system-message "sys"}
+                :llm/client llm
+                :exchange/user-text "hi"
+                :exchange/session-id :s
+                :exchange/user-msg-id "u"
+                :exchange/assistant-msg-id "a"}
+               chain)]
+      (is (pos? (:agent/self-heal-attempts out 0))
+          "self-heal must have fired on the invalid request")
+      (is (= 1 (count (:agent/all-tool-results out)))
+          "dispatch-tools must still run after heal")
+      (is (= "healed" (-> out :agent/all-tool-results first :result))
+          "the healed tool_call must execute against the registry"))))
 
 ;; ---- ensure-text-response (item 2, 2026-06-22 improvement plan) ----
 ;;
@@ -204,6 +248,80 @@
           "stall detection stops the loop on the second identical call")
       (is (pos? (:agent/summary-attempts out 0))))))
 
+;; ---- verify-round-3 FIX 3: arg-shape stall guard ----
+;;
+;; The round-2 re-spam: the model called clojure/add-lib with the SAME
+;; :lib but DIFFERENT :require args across depth increments; every result
+;; was loaded? false (an error shape), but the exact-signature guard
+;; (which compares name + raw arguments) did NOT fire because the args
+;; differed. The arg-shape guard trips when the SAME primary arg
+;; repeats N>=2 turns in a row with all-error results, forcing a summary.
+
+(deftype FailAddLibTool []
+  tool/Tool
+  (-name [_] "clojure/add-lib")
+  (-description [_] "stub add-lib that resolves the lib but always fails to require it")
+  (-input-schema [_] [:map [:lib {:optional true} :string]
+                      [:require {:optional true} :string]
+                      [:version {:optional true} :string]])
+  (-output-schema [_] :string)
+  (-invoke [_ args _ctx]
+    ;; Returns the verify-round-2 failure envelope shape: add-libs ran
+    ;; (:status :ok) but the auto-require failed, so :loaded? is false.
+    ;; result-error-shape? must count this as an error shape.
+    (json/generate-string
+     {:added        [(or (:lib args) "com.taoensso/nippy")]
+      :coord        {(or (:lib args) "com.taoensso/nippy") {:mvn/version "3.4.2"}}
+      :status       :ok
+      :required     (str "(require '[" (or (:require args) "taoensso.nippy") "])")
+      :loaded?      false
+      :required-error "CompilerException: No such var: enc/latom"
+      :require-retried? true
+      :error        nil})))
+
+(defn- addlib-rut-llm
+  "LLM that emits a clojure/add-lib tool_call every tool turn with the
+  SAME :lib but a DIFFERENT :require (the round-2 re-spam shape), then a
+  text answer once :tools is stripped (the summary turn). Without the
+  arg-shape guard this would loop to the max depth (the exact-sig fast
+  path never fires because :require differs each turn)."
+  [n]
+  (let [turn (atom 0)]
+    (reify LlmClient
+      (-call [_ req]
+        (if (contains? req :tools)
+          (let [t (swap! turn inc)]
+            (if (<= t n)
+              {:choices [{:message {:role "assistant" :content ""
+                                    :tool_calls [{:id (str "tc" t) :type "function"
+                                                  :function {:name "clojure/add-lib"
+                                                             :arguments (str "{\"lib\":\"com.taoensso/nippy\",\"require\":\"ns" t "\",\"version\":\"3.4.2\"}")}}]}}]
+               :model "fake/v0"}
+              {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
+               :model "fake/v0"}))
+          {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
+           :model "fake/v0"})))))
+
+(deftest arg-shape-stall-trips-on-same-lib-varying-require-errors
+  (testing "verify-round-3 FIX 3: repeated clojure/add-lib with the SAME :lib
+            but DIFFERENT :require, all returning loaded? false, trips the
+            arg-shape stall guard after 2 turns (instead of looping to the
+            depth cap), and ensure-text-response forces a summary"
+    (let [out (run-exchange (addlib-rut-llm 3) "add nippy"
+                            {"clojure/add-lib" (->FailAddLibTool)})]
+      (is (true? (:agent/shape-stall-hit out))
+          (str "the arg-shape stall must trip; got shape-stall-hit="
+               (:agent/shape-stall-hit out)
+               " depth=" (:agent/tool-loop-depth out)
+               " summary-attempts=" (:agent/summary-attempts out 0)))
+      (is (= 1 (:agent/tool-loop-depth out))
+          "the stall fires on the 2nd same-shape error turn (follow-up depth 1), not the depth cap")
+      (is (not (true? (:agent/stall-hit out)))
+          "the exact-sig fast path did NOT fire (the args differed each turn)")
+      (is (= "FINAL ANSWER" (:exchange/response out))
+          "ensure-text-response coerced a summary after the stall")
+      (is (pos? (:agent/summary-attempts out 0))))))
+
 ;; ---- empty-summary-call fix (2026-06-22 investigation) ----
 ;;
 ;; The summary mini-chain used to advertise :tools on the summary LLM
@@ -245,6 +363,44 @@
                (pr-str (:exchange/response out))))
       (is (not (true? (:agent/summary-failed? out)))
           "summary should not fail when :tools is stripped"))))
+
+(deftest summary-call-strips-prior-tool-call-scaffold-from-history
+  (testing "verify-round-3 FIX 2: the summary LLM call's :messages must NOT
+            carry any prior assistant :tool_calls or any :role \"tool\"
+            messages — those are what tool-happy models (glm-5.2 / kimi-k2.6)
+            echo as empty-content tool_calls on the summary turn. Tool
+            results must survive as :role \"system\" context so the model
+            can still answer from them."
+    (let [req-views (atom [])
+          observer  (reify LlmClient
+                      (-call [_ req]
+                        (swap! req-views conj req)
+                        (condp = (count @req-views)
+                          1 {:choices [{:message {:role "assistant"
+                                                  :content ""
+                                                  :tool_calls [{:id "tc1" :type "function"
+                                                                :function {:name "echo"
+                                                                           :arguments "{\"msg\":\"hi\"}"}}]}}]
+                             :model "fake/v0"}
+                          2 {:choices [{:message {:role "assistant" :content ""}}]
+                             :model "fake/v0"}
+                          3 {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
+                             :model "fake/v0"})))
+          out       (run-exchange observer "call echo" {"echo" (->EchoTool)})
+          summary-req (get @req-views 2)]
+      (is (>= (count @req-views) 3) "at least 3 LLM calls ran")
+      (is (= "FINAL ANSWER" (:exchange/response out))
+          (str "model must produce text when the tool-call scaffold is gone; got="
+               (pr-str (:exchange/response out))))
+      (let [msgs (:messages summary-req)]
+        (is (not-any? #(seq (:tool_calls %)) msgs)
+            "no assistant message in the summary request may carry :tool_calls")
+        (is (not-any? #(= "tool" (:role %)) msgs)
+            "no :role \"tool\" messages may remain in the summary request")
+        (is (some #(and (= "system" (:role %))
+                        (str/includes? (:content %) "Tool echo returned:"))
+                   msgs)
+            "the echo tool result must survive as a :role \"system\" context line")))))
 
 (deftest summary-returns-tool-calls-anyway-sets-summary-failed-flag
   (testing "when the summary call STILL returns tool_calls (an
@@ -359,6 +515,39 @@
           "only 2 of the 5 emitted tool_calls run (cap=2)")
       (is (= 3 (:agent/tool-calls-dropped out 0))
           "the 3 dropped calls are recorded in :agent/tool-calls-dropped"))))
+
+(deftest exchange-cap-bounds-first-turn-burst
+  (testing "when per-turn cap is higher than per-exchange cap, the first
+            turn still cannot execute more than the exchange budget"
+    (let [five-calls (mapv (fn [i] {:id (str "tc" i) :type "function"
+                                    :function {:name "echo"
+                                               :arguments (str "{\"msg\":\"d" i "\"}")}})
+                           (range 5))
+          llm (scripted-llm (atom [{:choices [{:message {:role "assistant" :content ""
+                                                         :tool_calls five-calls}}]
+                                    :model "fake/v0"}
+                                   (text-choice "")
+                                   (text-choice "done")]))
+          out (run-with-loop-opts llm "loop" {"echo" (->EchoTool)}
+                                  {:max-tool-calls-per-turn 100
+                                   :max-tool-calls-per-exchange 2})]
+      (is (= 2 (count (:agent/all-tool-results out)))
+          "exchange budget of 2 wins over per-turn 100 on the first turn")
+      (is (= 3 (:agent/tool-calls-dropped out 0))
+          "the 3 calls past the exchange budget are dropped"))))
+
+(deftest result-error-shape-detects-json-string-status
+  (testing "Cheshire-serialized status \"error\"/\"timeout\" count as error
+            shapes for arg-shape stall (keywords do not survive JSON)"
+    (is (true? (#'loop/result-error-shape?
+                {:result (json/generate-string {:status :error :error "boom"})}))
+        "status :error → JSON \"error\" is detected")
+    (is (true? (#'loop/result-error-shape?
+                {:result (json/generate-string {:status :timeout :error "t"})}))
+        "status :timeout → JSON \"timeout\" is detected")
+    (is (false? (#'loop/result-error-shape?
+                 {:result (json/generate-string {:status :ok :value "1"})}))
+        "status ok is not an error shape")))
 
 (deftest loop-opts-absent-falls-back-to-defaults
   (testing "with no loop-opts on ctx, the default max-loop-depth 5 still

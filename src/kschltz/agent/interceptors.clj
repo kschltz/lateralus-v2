@@ -108,25 +108,44 @@
   "Hard cap on the `:content` of any `:role tool` message retained
    in history. Tool results larger than this are truncated with a
    `...[trimmed]` marker so the model still knows the original was
-   larger but does not pay the token cost on every subsequent turn."
+   larger but does not pay the token cost on every subsequent turn.
+   This is the DEFAULT cap; a per-tool override map
+   (`:tool-content-caps` in `:lateralus/loop-opts`) can raise it for
+   tools whose results are structurally large and must survive intact
+   (e.g. `clojure/eval` / `clojure/add-lib` Clerk render traces) — see
+   `truncate-tool-content`."
   2000)
 
 (defn truncate-tool-content
   "Truncate a single message's `:content` if it is a `:role tool`
-   message whose content exceeds `max-tool-content-chars`. Non-tool
-   messages (and tool messages already under the cap) pass through
-   unchanged. The truncation appends a `...[trimmed]` marker so the
-   model can see it was elided, not silently corrupted."
-  [msg]
-  (let [content (:content msg)
-        over?   (and (= "tool" (:role msg))
+   message whose content exceeds its cap. Non-tool messages (and tool
+   messages already under the cap) pass through unchanged. The
+   truncation appends a `...[trimmed]` marker so the model can see it
+   was elided, not silently corrupted.
+
+   The cap is selected per message: when `caps` (a map of tool-name ->
+   int) is supplied AND the message carries a `:name` (the tool name,
+   stamped onto tool-result messages by the loop), the per-tool cap is
+   used; otherwise `max-tool-content-chars` (the default 2000) applies.
+   This lets `clojure/eval` / `clojure/add-lib` keep their (structurally
+   large) Clerk render traces intact while every other tool result is
+   still bounded by the default cap (audit 2026-07 rec #5: the old
+   fixed 2000-char cap silently destroyed Clerk's >2KB output, so the
+   model re-evaluated the same oversize code and stalled)."
+  ([msg] (truncate-tool-content msg nil))
+  ([msg caps]
+   (let [content (:content msg)
+         cap     (if-let [name (:name msg)]
+                   (or (get caps name) max-tool-content-chars)
+                   max-tool-content-chars)
+         over?   (and (= "tool" (:role msg))
                      (string? content)
-                     (> (count content) max-tool-content-chars))]
-    (if over?
-      (assoc msg :content
-             (str (subs content 0 max-tool-content-chars)
-                  "...[trimmed]"))
-      msg)))
+                     (> (count content) cap))]
+     (if over?
+       (assoc msg :content
+              (str (subs content 0 cap)
+                   "...[trimmed]"))
+       msg))))
 
 ;; ---- Summarization helpers --------------------------------------------
 ;;
@@ -314,18 +333,42 @@
    - always keep the leading `:role system` message if present;
    - keep the last `max-history-entries` non-system messages, but
      never drop the most recent `:role user` message;
-   - truncate any `:role tool` `:content` over
-     `max-tool-content-chars` with a `...[trimmed]` marker.
+   - truncate any `:role tool` `:content` over its cap with a
+     `...[trimmed]` marker.
 
-   Returns a vector of messages in original order."
-  [messages]
-  (let [msgs     (vec messages)
-        first-   (first msgs)
-        has-sys? (and (map? first-) (= "system" (:role first-)))
-        body     (if has-sys? (subvec msgs 1) msgs)
-        kept     (body-window body)
-        result   (if has-sys? (into [first-] kept) kept)]
-    (mapv truncate-tool-content result)))
+   `caps` (optional) is a map of tool-name -> char cap passed through to
+   `truncate-tool-content` so tools with structurally large results
+   (e.g. `clojure/eval` Clerk traces) can keep a higher cap than the
+   default. Returns a vector of messages in original order."
+  ([messages] (trim-history messages nil))
+  ([messages caps]
+   (let [msgs     (vec messages)
+         first-   (first msgs)
+         has-sys? (and (map? first-) (= "system" (:role first-)))
+         body     (if has-sys? (subvec msgs 1) msgs)
+         kept     (body-window body)
+         result   (if has-sys? (into [first-] kept) kept)]
+     (mapv #(truncate-tool-content % caps) result))))
+(defn- tool-result->history-msg
+  "Build a persisted `:role \"tool\"` message from a result map.
+   Stamps `:name` from the call so per-tool `:tool-content-caps` apply
+   when `trim-history` / `compose-context` later truncate content."
+  [{:keys [call result]}]
+  {:role         "tool"
+   :tool_call_id (:id call)
+   :name         (get-in call [:function :name])
+   :content      (str result)})
+
+(defn- flat-tool-history-msgs
+  "Fallback when no `:agent/tool-transcript` was recorded: reconstruct a
+   single assistant(tool_calls) + tool* block from a flat results vector.
+   Prefer the transcript path for multi-turn ReAct exchanges."
+  [tool-results]
+  (into [{:role       "assistant"
+          :content    ""
+          :tool_calls (mapv :call tool-results)}]
+        (mapv tool-result->history-msg tool-results)))
+
 (defn build-exchange-history
   "Build the trimmed `:agent/history` for one exchange from the prior
    history + this exchange's user text, tool results, and final
@@ -335,36 +378,34 @@
 
    Message order is OpenAI-compatible:
      1. optional user turn,
-     2. when tools ran: assistant tool-calling turn (content empty —
-        the model emitted calls, not text) carrying :tool_calls
-        reconstructed from the results' :call fields,
-     3. one {:role tool :tool_call_id ...} entry per result,
-     4. the final assistant text (the summary or direct response),
-        when non-empty."
-  [prev-history user-text response tool-results]
-  (let [had-tools?        (seq tool-results)
-        with-user         (if (seq user-text)
-                            (conj prev-history {:role "user" :content user-text})
-                            prev-history)
-        with-tool-asm     (if had-tools?
-                            (conj with-user
-                                  {:role       "assistant"
-                                   :content    ""
-                                   :tool_calls (mapv :call tool-results)})
-                            with-user)
-        with-tool-results (if had-tools?
-                            (into with-tool-asm
-                                  (mapv (fn [{:keys [call result]}]
-                                          {:role         "tool"
-                                           :tool_call_id (:id call)
-                                           :content      (str result)})
-                                        tool-results))
-                            with-tool-asm)
-        with-response     (if (seq response)
-                            (conj with-tool-results
-                                  {:role "assistant" :content response})
-                            with-tool-results)]
-    (trim-history with-response)))
+     2. tool cycles — prefer `tool-transcript` (per-turn assistant +
+        tool messages accumulated by compose-tool-results) so multi-turn
+        ReAct stays causally ordered; fall back to a single flat
+        assistant(tool_calls)+tool* block reconstructed from
+        `tool-results`,
+     3. the final assistant text (the summary or direct response),
+        when non-empty.
+
+   `caps` (optional tool-name -> char cap) is threaded into
+   `trim-history` so configured `:tool-content-caps` survive persistence,
+   not only the in-flight request."
+  ([prev-history user-text response tool-results]
+   (build-exchange-history prev-history user-text response tool-results nil nil))
+  ([prev-history user-text response tool-results caps]
+   (build-exchange-history prev-history user-text response tool-results caps nil))
+  ([prev-history user-text response tool-results caps tool-transcript]
+   (let [with-user     (if (seq user-text)
+                         (conj prev-history {:role "user" :content user-text})
+                         prev-history)
+         tool-msgs     (cond
+                         (seq tool-transcript) (vec tool-transcript)
+                         (seq tool-results)    (flat-tool-history-msgs tool-results)
+                         :else                 [])
+         with-tools    (into with-user tool-msgs)
+         with-response (if (seq response)
+                         (conj with-tools {:role "assistant" :content response})
+                         with-tools)]
+     (trim-history with-response caps))))
 
 (def error-boundary
   "Handles any error raised by the chain. Clears the engine ::error
@@ -392,8 +433,11 @@
                   user-text    (:exchange/user-text ctx)
                   response     (:exchange/response ctx)
                   tool-results (or (:agent/all-tool-results ctx) [])
-                  partial      (when (seq tool-results)
-                                 (build-exchange-history prev-history user-text response tool-results))
+                  transcript   (:agent/tool-transcript ctx)
+                  caps         (get-in ctx [:agent/loop-opts :tool-content-caps])
+                  partial      (when (or (seq tool-results) (seq transcript))
+                                 (build-exchange-history prev-history user-text response
+                                                         tool-results caps transcript))
                   delta        (when partial {:agent/history partial})]
               (cond->
                (-> ctx
@@ -429,7 +473,8 @@
                               (seq recalled) (into recalled)
                               (seq history)  (into history)
                               (seq user-text) (conj {:role "user" :content user-text}))
-                  trimmed   (trim-history messages)]
+                  trimmed   (trim-history messages
+                                            (get-in ctx [:agent/loop-opts :tool-content-caps]))]
               (assoc ctx
                      :llm/request
                      {:base-url (:base-url state)
@@ -481,7 +526,10 @@
                   user-text    (:exchange/user-text ctx)
                   response     (:exchange/response ctx)
                   tool-results (or (:agent/all-tool-results ctx) [])
-                  history      (build-exchange-history prev-history user-text response tool-results)
+                  transcript   (:agent/tool-transcript ctx)
+                  caps         (get-in ctx [:agent/loop-opts :tool-content-caps])
+                  history      (build-exchange-history prev-history user-text response
+                                                       tool-results caps transcript)
                   delta        (merge (or (:agent/state-delta ctx) {})
                                       {:agent/history history})]
               (assoc ctx

@@ -9,6 +9,7 @@
        raw 100-message window would have cut it off (the anchor
        invariant that lets `body-window` exceed the cap)."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [kschltz.agent.interceptors :as ix]))
 
 (defn- pair-seq
@@ -67,3 +68,41 @@
       (is (= "ANCHOR-USER"
              (:content (some #(when (= "user" (:role %)) %) out)))
           "the preserved anchor retains its :role user"))))
+
+(deftest build-exchange-history-stamps-tool-name-and-honors-caps
+  (testing "persisted tool messages carry :name so :tool-content-caps apply"
+    (let [big (apply str (repeat 5000 "x"))
+          results [{:call {:id "tc1" :type "function"
+                           :function {:name "clojure/eval" :arguments "{}"}}
+                    :result big}]
+          hist (ix/build-exchange-history [] "hi" "done" results
+                                          {"clojure/eval" 12000})
+          tool (first (filter #(= "tool" (:role %)) hist))]
+      (is (= "clojure/eval" (:name tool))
+          "tool history messages stamp the tool name")
+      (is (= 5000 (count (:content tool)))
+          "per-tool cap of 12000 keeps a 5000-char result intact"))))
+
+(deftest build-exchange-history-keeps-multi-turn-transcript
+  (testing "when a tool-transcript is supplied, sequential ReAct turns stay
+            as separate assistant(tool_calls) blocks instead of one flat turn"
+    (let [transcript [{:role "assistant" :content ""
+                       :tool_calls [{:id "tc1" :type "function"
+                                     :function {:name "echo" :arguments "{\"msg\":\"a\"}"}}]}
+                      {:role "tool" :tool_call_id "tc1" :name "echo" :content "a"}
+                      {:role "assistant" :content ""
+                       :tool_calls [{:id "tc2" :type "function"
+                                     :function {:name "echo" :arguments "{\"msg\":\"b\"}"}}]}
+                      {:role "tool" :tool_call_id "tc2" :name "echo" :content "b"}]
+          hist (ix/build-exchange-history [] "do both" "done" [] nil transcript)
+          asst-call-turns (filter #(and (= "assistant" (:role %))
+                                        (seq (:tool_calls %)))
+                                  hist)]
+      (is (= 2 (count asst-call-turns))
+          "two ReAct turns produce two assistant tool_calls messages")
+      (is (= ["tc1"] (mapv :id (:tool_calls (first asst-call-turns))))
+          "first turn keeps only tc1")
+      (is (= ["tc2"] (mapv :id (:tool_calls (second asst-call-turns))))
+          "second turn keeps only tc2")
+      (is (str/includes? (pr-str hist) "done")
+          "final assistant text is still appended"))))

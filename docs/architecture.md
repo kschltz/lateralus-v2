@@ -243,6 +243,16 @@ All external/network I/O is behind a protocol:
 
 Implementation functions for network-bound protocols are instrumented with Malli schemas for input and output, per project rule.
 
+Tool invocation (`kschltz.agent.tool/invoke-tool`) validates input/output
+against each tool's Malli schema and returns model-visible envelopes on
+failure: validation errors name the tool + phase + humanized key path
+(`Tool '<name>' input/output validation failed: <path>`), and execution
+throws return a JSON envelope `{:tool :phase :class :message :error}` so
+the model can branch on the exception class without parsing prose. The
+unavailable-tool marker (`Tool '<name>' is not available in this
+session...`) is detected by the loop via that exact phrase, not the looser
+`Tool '` prefix, so a validation error is never mistaken for a missing tool.
+
 ## Files of interest
 
 | File | Responsibility |
@@ -291,7 +301,7 @@ Implementation functions for network-bound protocols are instrumented with Malli
 | `src/kschltz/agent/memory/store/file.clj` | file-backed session store |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` |
 | `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file/self/clojure/web :none tools) |
-| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file/self/clojure/web :none tools) |
+| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file/self/clojure/runtime-eval with `:network? false` + web :none tools) |
 
 ## End-to-end memory tests
 

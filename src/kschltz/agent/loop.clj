@@ -1,30 +1,21 @@
 (ns kschltz.agent.loop
   "ReAct-style tool-calling loop for lateralus.
 
-   The `Loop` protocol abstracts the decision of whether to run another
-   LLM turn and how to build the interceptor chain for that turn. The
-   default `ReActLoop` continues while at least one dispatched tool was
-   implemented and a depth cap has not been reached.
+   The `Loop` protocol abstracts whether to run another LLM turn and how
+   to build that turn's interceptor chain. Default `ReActLoop` continues
+   while at least one dispatched tool was implemented and a depth cap
+   has not been reached.
 
-   Interceptors in this namespace are slot-tagged so the base plugin can
-   assemble them in the right place. They read the tool registry from the
-   context key `:agent/tool-registry` (a map of name -> Tool), which is
-   expected to be seeded before the `:compose` stage runs.
-
-   Slotting:
-     :compose  — inject tool definitions into the LLM request
-     :tools    — execute dispatched tools and compose tool-result messages
-     :finalize — decide whether to loop back to the LLM; ensure a
-                textual response when the loop stops
-
-   The loop keeps provider-neutral tool data on the context
-   (`:tool/calls`, `:tool/results`, `:agent/all-tool-results`) and
-   converts to OpenAI-shaped messages only when composing the follow-up
-   request. Anthropic / other adapters can be layered in later."
-  (:require [clojure.string :as str]
+   Slotting: `:compose` injects tools; `:tools` dispatches and composes
+   results; `:finalize` loops or ensures a textual response. Provider-
+   neutral tool data lives on ctx; OpenAI-shaped messages are built only
+   when composing the follow-up request."
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.schemas :as schemas]
+            [kschltz.agent.loop.trim :as trim]
             [kschltz.agent.tool :as tool]
             [malli.core :as m]
             [malli.error :as me]))
@@ -32,52 +23,6 @@
 (def ^:private max-loop-depth
   "Safety cap on follow-up LLM calls inside a single exchange."
   5)
-
-(def ^:private max-in-flight-entries
-  "Cap on the number of messages retained in :llm/request :messages
-   DURING a multi-turn ReAct exchange. trim-history (cross-exchange)
-   anchors to the most-recent user turn, which mid-exchange sits at the
-   start and so would keep everything; trim-in-flight-messages instead
-   keeps the leading system message(s) + the first user turn + the last
-   `max-in-flight-entries` follow-up tool/assistant messages, dropping
-   the oldest tool results once the budget is hit.
-
-   Kept independent of `ix/max-history-entries` (which is the
-   cross-exchange history cap): the in-flight budget protects a
-   single LLM call, while the cross-exchange budget protects session
-   lifetime. Tying them together forced one to drive the other;
-   bumping the cross-exchange cap to 100 (so summarize-history can
-   compact long sessions) would otherwise defeat in-loop trimming."
-  40)
-
-(defn- trim-in-flight-messages
-  "Bound the in-exchange messages vector in BOTH count and size:
-  - count: keep the leading system message(s) + the first user turn +
-    the last `max-in-flight-entries` follow-up messages, dropping the
-    oldest tool/assistant blocks once the budget is hit;
-  - size: truncate any :role tool :content over
-    `ix/max-tool-content-chars` via `ix/truncate-tool-content`.
-
-  Unlike `ix/trim-history`, this does NOT anchor to the most-recent
-  user turn (that anchor defeats mid-exchange trimming because the
-  only user turn is at the exchange start)."
-  [messages]
-  (let [msgs (vec messages)
-        n    (count msgs)]
-    (if (<= n max-in-flight-entries)
-      (mapv ix/truncate-tool-content msgs)
-      (let [first-user-idx (->> msgs
-                                (map-indexed vector)
-                                (some (fn [[i m]] (when (= "user" (:role m)) i))))
-            head-end (cond
-                       first-user-idx (inc first-user-idx)
-                       (= "system" (:role (first msgs))) 1
-                       :else 0)
-            head       (subvec msgs 0 head-end)
-            tail-count (max 1 (- max-in-flight-entries head-end))
-            tail       (subvec msgs (- n tail-count))
-            combined   (into head tail)]
-        (mapv ix/truncate-tool-content combined)))))
 
 (def ^:private max-self-heal-attempts
   "Cap on Malli self-heal retries for invalid outgoing requests."
@@ -102,9 +47,15 @@
 ;; ---- ReAct loop implementation ----
 
 (defn- implemented-result?
-  "True when a tool result is not the unavailable-tool marker."
+  "True when a tool result is not the unavailable-tool marker. Detects the
+   exact `is not available in this session` phrase (the marker emitted by
+   `tool/execute-tools` for unregistered tools) rather than the looser
+   `Tool '` prefix, so a validation error that happens to start with
+   `Tool '<name> ...` (audit 2026-07 rec #7) is NOT mistaken for an
+   unavailable-tool marker — a validation-failed result IS an implemented
+   result (the tool ran and reported a schema failure, it did not go missing)."
   [result-map]
-  (not (str/starts-with? (str (:result result-map)) "Tool '")))
+  (not (str/includes? (str (:result result-map)) "is not available in this session")))
 
 (defrecord ReActLoop [max-depth]
   Loop
@@ -161,10 +112,15 @@
 
 (defn- tool-result-message
   "Build an OpenAI-shaped tool-result message from a provider-neutral
-   result map."
+   result map. Stamps the tool's `:name` onto the message so the
+   truncation site can apply a per-tool char cap (audit 2026-07 rec #5):
+   `clojure/eval` / `clojure/add-lib` results are structurally large
+   (Clerk render traces) and must survive the default 2000-char cap
+   intact, while ordinary tool results stay bounded."
   [{:keys [call result]}]
   {:role "tool"
    :tool_call_id (:id call)
+   :name (get-in call [:function :name])
    :content (str result)})
 
 ;; ---- Interceptors ----
@@ -183,31 +139,45 @@
                   defs     (mapv tool/tool-definition (vals registry))]
               (assoc ctx :llm/request (assoc req :tools defs))))})
 
-(defn dispatch-tools-interceptor
-  "`:tools` interceptor that executes tool calls against the registry
-   in `:agent/tool-registry` and stores `:tool/results`. Also accumulates
-   every result in `:agent/all-tool-results` so the final ctx records tools
-   that ran in earlier loop iterations. When any requested tool is not in
-   the registry, appends a system message listing the available tools so
-   the follow-up turn can self-correct instead of silently stopping.
+(defn- tool-call-limit
+  "Compute how many of this turn's tool_calls may execute given the
+   per-turn and per-exchange caps. The exchange budget is remaining
+   headroom (`max-tool-calls-per-exchange` minus results already
+   accumulated), so a first-turn burst cannot blow past the exchange
+   cap when per-turn is set higher (e.g. turn=100, exchange=20)."
+  [loop-opts already-count]
+  (let [max-per-turn (:max-tool-calls-per-turn loop-opts)
+        total-cap    (:max-tool-calls-per-exchange loop-opts)
+        room         (when total-cap (max 0 (- total-cap already-count)))]
+    (cond
+      (and room max-per-turn) (min max-per-turn room)
+      room                    room
+      max-per-turn            max-per-turn
+      :else                   nil)))
 
-   Per-turn cap: reads `:max-tool-calls-per-turn` from `:agent/loop-opts`.
-   When the model emits more tool_calls than the cap, only the first N are
-   executed and `:tool/calls` is trimmed to match so the assistant
-   tool-calling message and the tool-result messages stay paired (OpenAI
-   requires every tool_call to have a matching tool result). The dropped
-   count is recorded as `:agent/tool-calls-dropped` so the CLI/logs can
-   surface it."
+(defn dispatch-tools-interceptor
+  "`:tools` interceptor: execute tool calls against the registry in
+   `:agent/tool-registry`, store `:tool/results`, and accumulate into
+   `:agent/all-tool-results`. When a requested tool is unregistered,
+   append a system message listing available tools so the follow-up turn
+   self-corrects. Caps: `:max-tool-calls-per-turn` and the remaining
+   `:max-tool-calls-per-exchange` budget (already-executed results count
+   against the exchange total BEFORE this turn runs). When the model
+   emits more tool_calls than the effective limit, only the first N
+   execute and `:tool/calls` is trimmed to match (OpenAI requires every
+   tool_call to have a matching tool result). The dropped count is
+   recorded as `:agent/tool-calls-dropped` for the CLI/logs."
   []
   {:name ::dispatch-tools
    :slot :tools
    :enter (fn [ctx]
             (let [loop-opts      (:agent/loop-opts ctx)
-                  max-per-turn   (:max-tool-calls-per-turn loop-opts)
                   all-calls      (or (:tool/calls ctx) [])
+                  already        (count (or (:agent/all-tool-results ctx) []))
+                  limit          (tool-call-limit loop-opts already)
                   registry       (or (:agent/tool-registry ctx) {})
-                  capped-calls   (if (and max-per-turn (> (count all-calls) max-per-turn))
-                                   (take max-per-turn all-calls)
+                  capped-calls   (if (and limit (> (count all-calls) limit))
+                                   (take limit all-calls)
                                    all-calls)
                   dropped-count  (- (count all-calls) (count capped-calls))
                   results        (tool/execute-tools registry ctx capped-calls)
@@ -216,7 +186,8 @@
                                             :tool/results results)
                                      (update :agent/all-tool-results (fnil into []) results))
                   any-unavailable? (some (fn [r]
-                                           (str/starts-with? (str (:result r)) "Tool '"))
+                                           (str/includes? (str (:result r))
+                                                          "is not available in this session"))
                                          results)]
               (cond-> (if any-unavailable?
                         (update-in ctx' [:llm/request :messages]
@@ -239,21 +210,29 @@
    and matching tool-result messages to `:llm/request :messages` for the
    follow-up turn, then bounds the in-flight messages vector in both
    count and size via `trim-in-flight-messages` (audit 2026-06-24 rec #6:
-   trim-history otherwise only runs on turn 1 in compose-context and at
-   exchange end in store-exchange; a high max-loop-depth or a large
-   per-turn tool-call burst could grow the in-flight request unbounded)."
-  []
-  {:name ::compose-tool-results
-   :slot :tools
-   :enter (fn [ctx]
-            (let [results (or (:tool/results ctx) [])
-                  assistant-msg (assistant-tool-message ctx)
-                  result-msgs (mapv tool-result-message results)
-                  new-msgs (if assistant-msg
-                             (cons assistant-msg result-msgs)
-                             result-msgs)]
-              (update-in ctx [:llm/request :messages]
-                         (fn [msgs] (trim-in-flight-messages (into msgs new-msgs))))))})
+   a high max-loop-depth or large per-turn tool-call burst could grow
+   the in-flight request unbounded).
+
+   Also appends the same assistant+tool messages onto
+   `:agent/tool-transcript` so `store-exchange` can persist multi-turn
+   ReAct cycles as separate assistant/tool blocks instead of collapsing
+   every call into one synthetic assistant turn."
+  ([] (compose-tool-results-interceptor nil))
+  ([caps]
+   {:name ::compose-tool-results
+    :slot :tools
+    :enter (fn [ctx]
+             (let [results (or (:tool/results ctx) [])
+                   assistant-msg (assistant-tool-message ctx)
+                   result-msgs (mapv tool-result-message results)
+                   new-msgs (vec (if assistant-msg
+                                   (cons assistant-msg result-msgs)
+                                   result-msgs))
+                   eff-caps (or caps (get-in ctx [:agent/loop-opts :tool-content-caps]))]
+               (-> ctx
+                   (update :agent/tool-transcript (fnil into []) new-msgs)
+                   (update-in [:llm/request :messages]
+                              (fn [msgs] (trim/trim-in-flight-messages (into msgs new-msgs) eff-caps))))))}))
 
 (defn bump-loop-depth-interceptor
   "Interceptor that increments `:agent/tool-loop-depth`."
@@ -264,24 +243,78 @@
 
 (defn- tool-call-sig
   "A stable signature for the current set of tool calls, used for
-   stall detection. Compares tool name + raw arguments JSON."
+   stall detection. Compares tool name + raw arguments JSON (the FAST
+   path — catches the model emitting the IDENTICAL tool call twice)."
   [calls]
   (mapv (fn [c] {(get-in c [:function :name])
                  (get-in c [:function :arguments])})
         calls))
 
+(def ^:private tool-primary-arg-keys
+  "Map of tool-name -> arg keys identifying the *target* of a call (the
+   'primary arg'). Repeated calls with the SAME primary arg but differing
+   secondary args (e.g. `clojure/add-lib` same `:lib`, variant `:require`)
+   are treated as the same SHAPE for arg-shape stall detection
+   (verify-round-3 FIX 3). Tools not listed fall back to the full args
+   string (no behavior change)."
+  {"clojure/add-lib" [:lib :coords]})
+
+(defn- tool-call-shape
+  "Coarser signature for arg-shape stall detection: tool name + the
+  primary-arg subset of the arguments JSON. Returns `[name primary-arg-str]`.
+  Tools without a known primary-arg key set use the whole args string (shape
+  = exact signature, no new behavior). Parses the OpenAI args JSON with
+  cheshire; on parse failure falls back to the raw string."
+  [call]
+  (let [name      (get-in call [:function :name])
+        args-str   (get-in call [:function :arguments])
+        pkeys      (get tool-primary-arg-keys name)]
+    (if pkeys
+      (let [parsed (try (json/parse-string args-str true)
+                         (catch Throwable _ nil))]
+        [name (if (map? parsed)
+                (pr-str (select-keys parsed pkeys))
+                args-str)])
+      [name args-str])))
+
+(defn- error-status?
+  "True when a parsed JSON `:status` is an error/timeout shape.
+   Cheshire serializes Clojure keywords as JSON strings and parses them
+   back as strings, so real tool envelopes carry `\"error\"` / `\"timeout\"`
+   rather than `:error` / `:timeout`. Accept both so stall detection
+   works on live envelopes (not only on in-process keyword maps)."
+  [status]
+  (contains? #{:error :timeout "error" "timeout"} status))
+
+(defn- result-error-shape?
+  "True when a tool result envelope indicates a FAILURE shape worth counting
+   toward arg-shape stall detection: a JSON envelope with status
+   error/timeout or `:loaded? false` (the verify-round-3 add-lib re-spam
+   produced `loaded? false` every turn), OR the unavailable-tool marker.
+   A non-JSON string that is NOT the marker (a plain success value) does
+   NOT count."
+  [result-map]
+  (let [r (:result result-map)]
+    (if (string? r)
+      (if-let [parsed (try (json/parse-string r true) (catch Throwable _ nil))]
+        (or (error-status? (:status parsed))
+            (false? (:loaded? parsed)))
+        (str/includes? (str r) "is not available in this session"))
+      false)))
+
 (defn tool-loop-interceptor
   "`:finalize` interceptor that asks the `loop` strategy whether to
    continue and, if so, enqueues the follow-up chain. The registry is
    read from `:agent/tool-registry` on each turn so the same loop works
-   even if the registry is injected late. Stall detection: when the
-   model emits the SAME set of tool calls as the previous turn, the
-   loop does NOT enqueue again — `ensure-text-response-interceptor`
-   then coaxes a textual summary instead of looping forever. Sets
-   `:agent/loop-continuing?` so the adjacent `ensure-text-response`
-   interceptor knows whether more LLM turns are coming (it cannot
-   simply re-ask `-continue?`, because stall detection can refuse to
-   enqueue even when `-continue?` is true)."
+   even if the registry is injected late. Stall detection has two layers:
+   (1) FAST — the model emits the IDENTICAL tool-call set (name + raw args)
+   as last turn → do not enqueue; (2) ARG-SHAPE (verify-round-3 FIX 3) —
+   the SAME tool + same PRIMARY arg (e.g. `:lib` for `clojure/add-lib`)
+   with differing secondary args for N>=2 all-error turns → trip
+   `:agent/shape-stall-hit` (the round-2 re-spam of add-lib with variant
+   `:require` bypassed the exact guard). Either stall →
+   `ensure-text-response-interceptor` coaxes a summary. Sets
+   `:agent/loop-continuing?` for the adjacent interceptor."
   [loop]
   {:name ::tool-loop
    :slot :finalize
@@ -312,14 +345,38 @@
                 (assoc ctx :agent/loop-continuing? false)
 
                 :else
-                (let [calls    (or (:tool/calls ctx) [])
-                      sig      (tool-call-sig calls)
-                      last-sig (:agent/last-tool-call-sig ctx)]
-                  (if (= sig last-sig)
+                (let [calls      (or (:tool/calls ctx) [])
+                      sig        (tool-call-sig calls)
+                      last-sig   (:agent/last-tool-call-sig ctx)
+                      ;; verify-round-3 FIX 3: arg-shape stall guard.
+                      ;; exact-sig fast path catches IDENTICAL calls; this
+                      ;; catches same tool + same primary arg with differing
+                      ;; secondary args (add-lib same :lib, variant :require)
+                      ;; when every result is an error shape. Same shape for
+                      ;; N>=2 all-error turns → trip :agent/shape-stall-hit.
+                      ;; A turn with any non-error result resets the counter.
+                      shape        (set (mapv tool-call-shape calls))
+                      last-shape   (:agent/last-tool-shape ctx)
+                      prev-count   (get ctx :agent/shape-err-count 0)
+                      turn-error?  (and (seq results)
+                                        (every? result-error-shape? results))
+                      same-shape?  (and (some? last-shape) (= shape last-shape))
+                      new-count    (cond (not turn-error?) 0
+                                         same-shape?      (inc prev-count)
+                                         :else            1)
+                      shape-stall? (and turn-error? same-shape?
+                                         (>= new-count 2))]
+                  (cond
+                    (= sig last-sig)
                     (assoc ctx :agent/loop-continuing? false :agent/stall-hit true)
+                    shape-stall?
+                    (assoc ctx :agent/loop-continuing? false :agent/shape-stall-hit true)
+                    :else
                     (-> ctx
                         (assoc :agent/last-tool-call-sig sig
-                               :agent/loop-continuing? true)
+                               :agent/last-tool-shape  shape
+                               :agent/shape-err-count  new-count
+                               :agent/loop-continuing?  true)
                         (chain/enqueue (-follow-up-chain loop
                                                          (or (:agent/tool-registry ctx) {})))))))))})
 
@@ -343,7 +400,13 @@
   "Interceptor placed immediately before `ix/llm-call`. Validates the
    outgoing request; if invalid it appends a system message with the
    humanized Malli error, terminates the rest of the current queue, and
-   enqueues another validation + LLM call + parse pass. Self-heal
+   re-enqueues itself followed by the PREVIOUSLY remaining queue
+   (typically `llm-call` → `parse-response` → tools → finalize).
+
+   Preserving the remaining queue is required: a heal that only
+   re-enqueued `[self-heal llm-call parse-response]` dropped
+   `dispatch-tools` / `tool-loop` / `ensure-text-response`, so a healed
+   response carrying `tool_calls` never executed tools. Self-heal
    attempts are capped by `:agent/self-heal-attempts`."
   []
   {:name ::llm-call-with-self-heal
@@ -352,13 +415,17 @@
               (if (>= attempts max-self-heal-attempts)
                 ctx
                 (if-some [explain (humanize-request-errors (:llm/request ctx))]
-                  (-> ctx
-                      (repair-request-with-error explain)
-                      (update :agent/self-heal-attempts (fnil inc 0))
-                      chain/terminate
-                      (chain/enqueue [(llm-call-with-self-heal)
-                                      ix/llm-call
-                                      ix/parse-response]))
+                  ;; Engine has already popped this interceptor off the
+                  ;; queue before :enter runs, so ::queue is everything
+                  ;; that still needs to run after a successful heal
+                  ;; (llm-call, parse-response, tools, finalize, ...).
+                  (let [remaining (vec (or (::chain/queue ctx) []))]
+                    (-> ctx
+                        (repair-request-with-error explain)
+                        (update :agent/self-heal-attempts (fnil inc 0))
+                        chain/terminate
+                        (chain/enqueue (into [(llm-call-with-self-heal)]
+                                             remaining))))
                   ctx))))})
 
 ;; ---- Ensure a textual response when the loop stops ----
@@ -376,28 +443,60 @@
    neither text nor tool calls on the first turn."
   2)
 
+(defn- strip-tool-call-scaffold
+  "For the summary turn, remove the structural tool-call scaffolding from
+  `messages` so a tool-happy model cannot echo prior assistant
+  `:tool_calls` (verify-round-3 FIX 2 — the real criterion-3 blocker:
+  glm-5.2 / kimi-k2.6 emitted empty-content `tool_calls` on the summary
+  turn because the history still carried prior assistant `:tool_calls` to
+  echo, even with `:tool_choice` none and `:tools` stripped). Assistant
+  messages keep their prose `:content` (dropped entirely when the only
+  payload was `:tool_calls` with blank prose) and lose their `:tool_calls`;
+  `:role` `\"tool\"` result messages are rewritten to `:role` `\"system\"`
+  with a 'Tool <name> returned: <content>' prefix so the model still sees
+  the results as context but there is no `tool_call`/`tool` pairing to echo
+  (and no orphan-`tool` OpenAI 400). Other messages pass through unchanged."
+  [messages]
+  (into []
+        (keep (fn [m]
+                (cond
+                  (and (= "assistant" (:role m)) (seq (:tool_calls m)))
+                  (let [c (:content m)]
+                    (when (and (string? c) (not (str/blank? c)))
+                      (dissoc m :tool_calls)))
+
+                  (= "tool" (:role m))
+                  {:role "system"
+                   :content (str "Tool " (or (:name m) "?") " returned: " (:content m))}
+
+                  :else m)))
+        messages))
+
 (defn compose-summary-request-interceptor
-  "Append a system message instructing the model to produce the final
-   answer from the tool results already in the conversation, and STRIP
-   :tools from the request so the model cannot escape back into
-   tool-calling on the summary turn. Root-cause fix for the 2026-06-22
-   empty-response bug: the summary call used to advertise all tools, so
-   the model returned tool_calls (finish_reason tool_calls) instead of
-   text. Used by ensure-text-response-interceptor when the loop stopped
-   with a blank response but tool results exist."
+  "Append a system message telling the model to produce the final answer
+   from the tool results, STRIP :tools, set :tool-choice \"none\", AND
+   strip the prior tool-call scaffolding from history
+   (`strip-tool-call-scaffold`) so a tool-happy model cannot echo prior
+   assistant :tool_calls (verify-round-3 FIX 2 — the real criterion-3
+   blocker; :tool_choice none + stripped :tools alone was insufficient for
+   glm-5.2 / kimi-k2.6 which echoed the history's :tool_calls). Used by
+   ensure-text-response-interceptor when the loop stopped blank but tool
+   results exist."
   []
   {:name ::compose-summary-request
    :enter (fn [ctx]
             (-> ctx
+                (update-in [:llm/request :messages] strip-tool-call-scaffold)
                 (update-in [:llm/request :messages]
                            conj {:role "system"
                                  :content "You have finished calling tools. Using the tool results above, produce the final answer for the user."})
-                (update :llm/request dissoc :tools)))})
+                (update :llm/request
+                        #(-> % (dissoc :tools) (assoc :tool-choice "none")))))})
 
 (defn compose-empty-retry-interceptor
   "Append a system message nudging the model to reply after it returned
-   an empty response with no tool calls, and STRIP :tools so the model
-   cannot escape into a tool call when forced to produce text. Used by
+   an empty response with no tool calls, STRIP :tools, AND set :tool-choice
+   \"none\" so the model cannot escape into a tool call. Used by
    ensure-text-response-interceptor on the first turn when the model
    produced nothing at all."
   []
@@ -407,22 +506,21 @@
                 (update-in [:llm/request :messages]
                            conj {:role "system"
                                  :content "Your last response was empty. Reply to the user."})
-                (update :llm/request dissoc :tools)))})
+                (update :llm/request
+                        #(-> % (dissoc :tools) (assoc :tool-choice "none")))))})
 
 (defn ensure-text-response-interceptor
   "`:finalize` interceptor placed AFTER `tool-loop-interceptor`. When the
    loop is NOT continuing and :exchange/response is blank, enqueue a
-   final mini-chain to coax a textual answer: a summary request when
-   tool results exist, or an empty-response retry otherwise. Attempts
-   are capped via counters :agent/summary-attempts (max
-   max-summary-attempts) and :agent/empty-retry-attempts (max
-   max-empty-retry-attempts). When the cap is exhausted, sets
-   :agent/summary-failed? / :agent/empty-retry-failed? and returns ctx
-   unchanged so the CLI fallback can surface a clear message. When a
-   response is already present or the loop is still continuing, this
-   interceptor is a no-op. The `loop` arg is accepted for symmetry with
-   tool-loop-interceptor and ignored — the continue decision is read
-   from :agent/loop-continuing? which tool-loop-interceptor sets."
+   final mini-chain to coax a textual answer: a summary request when tool
+   results exist, or an empty-response retry otherwise. Attempts are capped
+   via :agent/summary-attempts (max max-summary-attempts) and
+   :agent/empty-retry-attempts (max max-empty-retry-attempts). When the
+   cap is exhausted, sets :agent/summary-failed? / :agent/empty-retry-failed?
+   and returns ctx unchanged so the CLI fallback surfaces a clear message.
+   When a response is already present or the loop is still continuing, this
+   interceptor is a no-op. `loop` is accepted for symmetry with
+   tool-loop-interceptor and ignored."
   [loop]
   {:name ::ensure-text-response
    :slot :finalize

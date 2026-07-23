@@ -163,16 +163,17 @@
           "compose stage records the trim marker; the future
    history-trimming follow-up will replace or remove it"))))
 
-(deftest trim-history-is-arity-1-and-bounds-growth
-  (testing "trim-history is a fn of arity 1 that keeps the leading system
-            message, caps the body to max-history-entries, never drops the
-            most recent user turn, and truncates oversized tool content"
+(deftest trim-history-bounds-growth
+  (testing "trim-history keeps the leading system message, caps the body
+            to max-history-entries, never drops the most recent user turn,
+            truncates oversized tool content, and honors per-tool caps when
+            the message carries :name"
     (let [resolved (resolve 'kschltz.agent.interceptors/trim-history)
           v        resolved
-          arity    (-> v meta :arglists first count)]
+          arities  (set (map count (:arglists (meta v))))]
       (is (some? resolved) "trim-history is defined")
       (is (fn? @v) "trim-history is a fn")
-      (is (= 1 arity) "trim-history takes exactly 1 arg")
+      (is (= #{1 2} arities) "trim-history supports 1-arity and caps 2-arity")
       ;; Keeps a small vector as-is.
       (let [small [{:role "system" :content "sys"}
                    {:role "user" :content "hi"}
@@ -183,6 +184,13 @@
             trimmed (@v [{:role "tool" :tool_call_id "t1" :content big}])]
         (is (str/ends-with? (-> trimmed first :content) "...[trimmed]")
             "oversized tool content is truncated with a marker"))
+      ;; Per-tool cap applies when :name is stamped.
+      (let [big (apply str (repeat 5000 "x"))
+            trimmed (@v [{:role "tool" :tool_call_id "t1"
+                          :name "clojure/eval" :content big}]
+                        {"clojure/eval" 12000})]
+        (is (= 5000 (count (:content (first trimmed))))
+            "named tool content under its per-tool cap is not truncated"))
       ;; Never drops the most recent user turn even when the window would cut it.
       (let [msgs (into [{:role "system" :content "sys"}]
                      (concat (repeat 50 {:role "assistant" :content "x"})
