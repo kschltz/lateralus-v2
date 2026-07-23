@@ -17,6 +17,40 @@
 ;; eval-code
 ;; ---------------------------------------------------------------------------
 
+(deftest eval-code-emits-per-form-values-and-status
+  (testing "audit 2026-07 rec #4: every form's value is returned in :values
+            (not just the last), and :status is :ok on clean eval"
+    (let [res (jvm/eval-code 'kschltz.runtime-test.values
+                             "(def x 1) (+ x 2) :done" {} nil)]
+      (is (m/validate schemas/EvalResult res))
+      (is (= :ok (:status res)))
+      (is (= ["#'kschltz.runtime-test.values/x" "3" ":done"] (:values res))
+          "all three form values survive in order (def returns the var)")
+      (is (= ":done" (:value res))
+          ":value stays the pr-str of the last form")))
+  (testing "audit 2026-07 rec #3: an eval error sets :status :error and fills
+            :error-detail with class/message/trace, while :error stays one-line"
+    (let [res (jvm/eval-code 'kschltz.runtime-test.errstat "(/ 1 0)" {} nil)]
+      (is (= :error (:status res)))
+      (is (string? (:error res)))
+      (is (str/includes? (:error res) "ArithmeticException"))
+      (is (= "java.lang.ArithmeticException" (:class (:error-detail res))))
+      (is (string? (:message (:error-detail res))))
+      (is (pos? (count (:trace (:error-detail res)))))))
+  (testing ":status is :truncated and :truncated? true when stdout is clipped"
+    (let [res (jvm/eval-code 'kschltz.runtime-test.truncstat
+                             "(dotimes [_ 100] (print \"x\"))"
+                             {:max-output-bytes 10} nil)]
+      (is (= :truncated (:status res)))
+      (is (true? (:truncated? res)))
+      (is (str/includes? (:output res) "output truncated"))))
+  (testing ":status is :timeout on a runaway eval"
+    (let [res (jvm/eval-code 'kschltz.runtime-test.timeoutstat
+                             "(Thread/sleep 10000) :never"
+                             {:eval-timeout-ms 100} nil)]
+      (is (= :timeout (:status res)))
+      (is (str/includes? (:error res) "timed out")))))
+
 (deftest eval-code-returns-last-value-and-form-count
   (testing "multiple forms are evaluated; value is the pr-str of the last"
     (let [res (jvm/eval-code 'kschltz.runtime-test.basic
@@ -91,6 +125,47 @@
   (testing "new-classloader returns a DynamicClassLoader instance"
     (is (instance? DynamicClassLoader (jvm/new-classloader)))))
 
+;; ---- verify-round-3 FIX 1: post-add-libs classloader refresh ----
+;;
+;; After `clojure.repl.deps/add-libs` mutates the runtime's shared
+;; `DynamicClassLoader` (adding the freshly resolved jars to its URL
+;; list), a `require` of an AOT-transitive lib against the SAME mutated
+;; loader fails with a `CompilerException` (nippy -> encore). The fix
+;; wraps the mutated loader in a FRESH `DynamicClassLoader` so AOT
+;; class resolution proceeds against a clean loader state. These are
+;; the fast, network-free unit tests for the refresh helper itself; the
+;; full regression (add-lib of taoensso/nippy with :require -> loaded?
+;; true) is the `^:e2e` test in tools_test.clj.
+
+(deftest refresh-classloader-wraps-in-fresh-dynamic-loader
+  (testing "refresh-classloader returns a DISTINCT DynamicClassLoader whose
+            parent is the mutated loader (so the new jars stay visible)"
+    (let [cl  (jvm/new-classloader)
+          cl' (jvm/refresh-classloader cl)]
+      (is (instance? DynamicClassLoader cl'))
+      (is (not (identical? cl cl'))
+          "refresh must produce a NEW loader instance")
+      (is (identical? cl (.getParent ^DynamicClassLoader cl'))
+          "the fresh loader's parent is the mutated one, so its URLs stay visible"))))
+
+(deftest refresh-classloader-preserves-url-visibility
+  (testing "a URL added to the original loader is still present on the
+            refreshed loader's PARENT (so the new jars stay visible to the
+            child via classloader delegation)"
+    (let [cl   (jvm/new-classloader)
+          ;; Add a dummy URL to the original loader, mirroring what
+          ;; add-libs does, then refresh and assert the child's parent
+          ;; still carries the URL (the child delegates class/resource
+          ;; lookups to its parent, so the URL stays reachable).
+          url  (.toURL (java.io.File. "."))
+          _    (.addURL ^DynamicClassLoader cl url)
+          cl'  (jvm/refresh-classloader cl)
+          parent-urls (vec (.getURLs ^DynamicClassLoader
+                                    (.getParent ^DynamicClassLoader cl')))]
+      (is (instance? DynamicClassLoader cl'))
+      (is (some #(= url %) parent-urls)
+          "the URL added to the original loader survives on the child's parent"))))
+
 ;; ---------------------------------------------------------------------------
 ;; Instrumentation
 ;; ---------------------------------------------------------------------------
@@ -136,3 +211,12 @@
       (let [res (proto/-eval rt "(require '[clojure.data.json :as json]) (json/write-str {:a 1})" {})]
         (is (nil? (:error res)))
         (is (str/includes? (:value res) "a"))))))
+
+(deftest eval-code-signals-reader-eval-disabled
+  (testing "audit 2026-07 rec #8: the result envelope carries
+            :reader-eval-disabled? true so the model knows #= is off
+            and will not execute at read time"
+    (let [res (jvm/eval-code 'kschltz.runtime-test.readereval
+                             "(+ 1 2)" {} nil)]
+      (is (m/validate schemas/EvalResult res))
+      (is (true? (:reader-eval-disabled? res))))))

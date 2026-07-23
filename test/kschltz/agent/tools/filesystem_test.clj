@@ -428,7 +428,8 @@
       ;; boundary with min-length 1, so the tool never enters its body
       ;; and never writes the file.
       (is (string? result))
-      (is (str/includes? result "Malli validation"))
+      (is (str/includes? result "input validation failed"))
+      (is (str/includes? result "old-text"))
       (is (= "hello\n" (slurp target))))))
 
 (deftest file-update-no-match-atomic-no-write

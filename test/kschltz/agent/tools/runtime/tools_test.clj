@@ -6,6 +6,7 @@
    touching the network. A couple of tests use the real `JvmRuntime` for
    the local, deterministic eval path."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.runtime.protocol :as proto]
@@ -145,6 +146,19 @@
       (is (= :eval (:op @cap)))
       (is (= "(require '[ring.adapter.jetty :as jetty])" (:code @cap))))))
 
+(deftest add-lib-tool-echoes-coord-and-omits-loaded-without-require
+  (testing "audit 2026-07 rec #2: when no :require is passed, :loaded? is
+            ABSENT (not a false-positive true) and :coord echoes the resolved
+            coordinate map for audit/version retries"
+    (let [cap (atom nil)
+          reg (rt/runtime-registry {:runtime (stub cap)})
+          out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+                                       {:lib "org.clojure/data.json" :version "2.5.0"} {}))]
+      (is (= {:org.clojure/data.json {:mvn/version "2.5.0"}} (:coord out))
+          ":coord echoes the resolved coordinate map (JSON round-trip turns symbol keys into keywords)")
+      (is (not (contains? out :loaded?))
+          ":loaded? is absent when no :require was passed — no false positive"))))
+
 (deftest add-lib-tool-reports-required-error
   (testing "when the auto-require fails, :loaded? is false and :required-error is set"
     (let [cap (atom nil)
@@ -223,3 +237,61 @@
       (is (= 3 (-> out :value read-string)))
       (is (nil? (:paren-repaired? out))
           "balanced code must not carry the :paren-repaired? flag"))))
+
+(deftest eval-tool-forwards-per-call-opts
+  (testing "audit 2026-07 rec #8: EvalInput optional :max-output-bytes and
+            :eval-timeout-ms are forwarded to the runtime opts so a Clerk
+            render can request a bigger output window / longer timeout"
+    (let [cap (atom nil)
+          reg (rt/runtime-registry {:runtime (stub cap)})]
+      (tool/invoke-tool (get reg "clojure/eval")
+                        {:code "(+ 1 2)"
+                         :max-output-bytes 131072
+                         :eval-timeout-ms 60000}
+                        {})
+      (is (= 131072 (:max-output-bytes (:opts @cap))))
+      (is (= 60000 (:eval-timeout-ms (:opts @cap)))))))
+
+(deftest eval-tool-omits-opts-when-absent
+  (testing "audit 2026-07 rec #8: when neither override is passed the
+            runtime opts stay empty (default config applies)"
+    (let [cap (atom nil)
+          reg (rt/runtime-registry {:runtime (stub cap)})]
+      (tool/invoke-tool (get reg "clojure/eval") {:code "(+ 1 2)"} {})
+      (is (not (contains? (:opts @cap) :max-output-bytes)))
+      (is (not (contains? (:opts @cap) :eval-timeout-ms))))))
+
+;; ---- verify-round-3 FIX 1: AOT-transitive add-lib regression (network) ----
+;;
+;; The round-2 failure: clojure/add-lib of `com.taoensso/nippy` (whose
+;; `taoensso.nippy.impl` references `taoensso.encore`) downloaded the jar
+;; (+ transitives) and the `:reload` auto-require retry fired, but
+;; `loaded?` stayed FALSE in every envelope with a persistent
+;; `CompilerException` in `taoensso/nippy/impl.clj`. The fix
+;; (`jvm/refresh-classloader`) wraps the mutated DynamicClassLoader in a
+;; fresh one after `add-libs` so the auto-require resolves AOT classes
+;; against a clean loader state. This test is SLOW (downloads nippy +
+;; transitives from Maven) so it is `^:e2e` and excluded from the fast
+;; suite; run with `clojure -M:e2e`.
+
+(deftest ^:e2e add-lib-tool-loads-aot-transitive-lib-with-require
+  (testing "verify-round-3 FIX 1: clojure/add-lib of an AOT-transitive lib
+            (com.taoensso/nippy -> taoensso.encore) with :require returns
+            loaded? TRUE after the post-add-libs classloader refresh — not
+            merely the jar on the classpath"
+    (let [reg (rt/runtime-registry {:enabled? true :network? true})
+          out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+                     {:lib     "com.taoensso/nippy"
+                      :version "3.4.2"
+                      :require "taoensso.nippy"
+                      :alias   "nippy"}
+                     {}))]
+      (is (some #(str/includes? % "taoensso/nippy") (:added out))
+          (str "nippy was added to the classpath; added=" (pr-str (:added out))))
+      (is (true? (:loaded? out))
+          (str "the auto-require must SUCCEED after the classloader refresh; "
+               "got loaded?=" (:loaded? out)
+               " required-error=" (pr-str (:required-error out))
+               " retried?=" (:require-retried? out)))
+      (is (nil? (:required-error out))
+          "no require error after the refresh (the :reload fallback should be dormant)"))))

@@ -208,6 +208,46 @@
               "the runner was called with the stdin content")
           (is (str/includes? out "ok")))))))
 
+;; ---- verify-round-3 FIX 2: summary-failed must surface a clear ----
+;; ---- 'agent did not produce a final answer' message, NEVER the --
+;; ---- internal 'model kept calling tools on the summary turn' ----
+;; ---- fallback string, when the model keeps emitting tool_calls ----
+;; ---- on the summary turn despite tool_choice:none. -----------
+
+(deftest run-cli-summary-failed-surfaces-clear-no-final-answer-message
+  (testing "verify-round-3 FIX 2: when :agent/summary-failed? is set with a
+            blank response, the user-facing output leads with a clear
+            'the agent did not produce a final answer' message and does NOT
+            surface the internal 'model kept calling tools on the summary
+            turn' string; the tool results are appended as reference"
+    (let [runner  (fn [_args]
+                    ;; Simulates the verify-round-2 glm-5.2 outcome: the
+                    ;; summary mini-chain exhausted its retries with the
+                    ;; model still emitting tool_calls, so summary-failed?
+                    ;; is set and the response is blank. all-tool-results
+                    ;; carry one add-lib call so the appendix is non-empty.
+                    {:exchange/response       ""
+                     :agent/summary-failed?  true
+                     :agent/all-tool-results [{:call {:id "tc1"
+                                                       :function {:name "clojure/add-lib"
+                                                                  :arguments "{}"}}
+                                               :result "{\"status\":\"ok\",\"loaded?\":false}"}]})
+          captured (atom nil)]
+      (let [[rv out] (capture-out
+                      #(cli/run-cli
+                        {:action :one-shot :prompt "do a thing"}
+                        {:in        (java.io.StringReader. "")
+                         :out       *out*
+                         :exit      (silent-exit captured)
+                         :runner-fn runner}))]
+        (is (= 0 rv))
+        (is (str/includes? out "the agent did not produce a final answer")
+            "the user-facing message clearly states no final answer was produced")
+        (is (not (str/includes? out "model kept calling tools on the summary turn"))
+            "the internal 'model kept calling tools' fallback string is NOT shown to the user")
+        (is (str/includes? out "clojure/add-lib")
+            "the tool results produced are appended as reference so the REPL is not blank")))))
+
 (deftest build-system-loads-bundled-config
   (testing "build-system reads the bundled resources/lateralus/config.edn
    with Integrant tag support and merges it over default-config"

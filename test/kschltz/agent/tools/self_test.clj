@@ -68,4 +68,6 @@
     (let [t      (get (tools.self/self-awareness-registry) "self/status")
           result (tool/invoke-tool t {:extra "bad"} (ctx {}))]
       (is (string? result))
-      (is (str/starts-with? result "Tool input failed Malli validation")))))
+      (is (str/includes? result "input validation failed"))
+      (is (str/includes? result "self/status"))
+      (is (str/includes? result ":extra")))))

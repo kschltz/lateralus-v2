@@ -37,8 +37,23 @@
             representative data"
     (is (m/validate proto/Coords '{org.clojure/data.json {:mvn/version "2.5.0"}}))
     (is (m/validate proto/EvalResult {:ns "user" :forms 1 :value "3"
-                                      :output "" :error nil}))
+                                      :values ["3"] :output ""
+                                      :status :ok :error nil}))
     (is (m/validate proto/EvalResult {:ns "user" :forms 1 :value nil
-                                      :output "boom" :error "ex"}))
-    (is (m/validate proto/AddLibsResult {:added ["a/b"] :error nil}))
-    (is (not (m/validate proto/AddLibsResult {:added "nope" :error nil})))))
+                                      :values [] :output "boom"
+                                      :status :error :error "ex"
+                                      :error-detail {:class "java.lang.Exception"
+                                                     :message "ex"
+                                                     :cause nil :data nil :trace []}}))
+    (is (m/validate proto/EvalResult {:ns "user" :forms 1 :value "x"
+                                      :values ["x"] :output "..."
+                                      :status :truncated :truncated? true
+                                      :error nil}))
+    (is (m/validate proto/AddLibsResult {:added ["a/b"] :status :ok :error nil}))
+    (is (m/validate proto/AddLibsResult {:added [] :status :error :error "boom"
+                                         :error-detail {:class "c" :message "m"
+                                                        :cause nil :data nil :trace []}}))
+    (is (not (m/validate proto/AddLibsResult {:added "nope" :status :ok :error nil})))
+    (is (not (m/validate proto/EvalResult {:ns "user" :forms 1 :value "3"
+                                           :output "" :error nil}))
+        "EvalResult without :status/:values is rejected now")))

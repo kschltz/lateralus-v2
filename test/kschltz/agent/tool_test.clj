@@ -1,6 +1,7 @@
 (ns kschltz.agent.tool-test
   "Tests for the Tool protocol and Malli-instrumented invocation."
-  (:require [clojure.string :as str]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.tool :as tool]))
 
@@ -94,3 +95,37 @@
       (is (= 1 (count results)))
       (is (= "42" (-> results first :call :id)))
       (is (= "hi" (-> results first :result))))))
+
+(deftest invoke-tool-validation-error-names-tool-and-field
+  (testing "audit 2026-07 rec #7: a validation error names the tool and the
+            failing key path so the model can fix the call, not just learn
+            that 'something' failed"
+    (let [t (reify tool/Tool
+              (-name [_] "add/lib")
+              (-description [_] "adds a lib")
+              (-input-schema [_] [:map [:lib [:string {:min 1}]]])
+              (-output-schema [_] :string)
+              (-invoke [_ _ _] "ok"))
+          err (tool/invoke-tool t {:lib ""} {})]
+      (is (str/includes? err "add/lib") "names the tool")
+      (is (str/includes? err "input validation failed") "phase is input")
+      (is (str/includes? err ":lib") "humanized key path is present"))))
+
+(deftest invoke-tool-execution-error-is-structured-json
+  (testing "audit 2026-07 rec #7: an execution throw returns a JSON envelope
+            with :tool :phase :class :message, and keeps the back-compat
+            :error one-line string"
+    (let [t (reify tool/Tool
+              (-name [_] "boom")
+              (-description [_] "always throws")
+              (-input-schema [_] [:map])
+              (-output-schema [_] :string)
+              (-invoke [_ _ _] (throw (ex-info "explosion" {:why 42}))))
+          result (tool/invoke-tool t {} {})
+          parsed (json/parse-string result true)]
+      (is (= "boom" (:tool parsed)))
+      (is (= "execution" (:phase parsed)))
+      (is (= "clojure.lang.ExceptionInfo" (:class parsed)))
+      (is (= "explosion" (:message parsed)))
+      (is (str/includes? (:error parsed) "Tool execution error"))
+      (is (str/includes? (:error parsed) "explosion")))))

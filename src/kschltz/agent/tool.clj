@@ -39,9 +39,17 @@
     (catch Throwable _ {})))
 
 (defn- validation-error
-  "Build a model-visible error string from a Malli explanation."
-  [phase _schema _value explain]
-  (format "Tool %s failed Malli validation: %s"
+  "Build a model-visible error string from a Malli explanation.
+
+   Names the tool and the phase (`input`/`output`) so the model can
+   attribute the failure, and carries the humanized error structure
+   (key paths included via `me/humanize`) so the model can see WHICH
+   field failed, not just THAT something failed (audit 2026-07 rec #7:
+   the old message omitted the tool name and the failing key path, so
+   an `AddLibInput` mistake gave the model nothing concrete to fix)."
+  [tool phase _schema _value explain]
+  (format "Tool '%s' %s validation failed: %s"
+          (-name tool)
           phase
           (pr-str (me/humanize explain))))
 
@@ -49,21 +57,35 @@
   "Call `tool` with parsed `args` and interceptor `ctx`. Validates
    `args` against the tool's input schema, executes the tool, then
    validates the result against the output schema. Returns the result
-   string on success, or a model-visible error string on failure."
+   string on success, or a model-visible error string on failure.
+
+   Error envelopes are structured and attributable (audit 2026-07 rec #7):
+   - validation failures name the tool + phase + humanized key path;
+   - execution throws return a JSON envelope `{:tool :phase :class
+     :message :error}` so the model can branch on the exception class
+     without parsing prose. The `:error` field keeps the back-compat
+     `Tool execution error: <msg>` one-line string so existing
+     string-matching callers/tests still match."
   [tool args ctx]
   (let [input-schema  (-input-schema tool)
         output-schema (-output-schema tool)]
     (if-let [explain (m/explain input-schema args)]
-      (validation-error "input" input-schema args explain)
+      (validation-error tool "input" input-schema args explain)
       (try
         (let [result (-invoke tool args ctx)]
           (if (string? result)
             (if-let [explain (m/explain output-schema result)]
-              (validation-error "output" output-schema result explain)
+              (validation-error tool "output" output-schema result explain)
               result)
-            (format "Tool result is not a string: %s" (pr-str result))))
+            (format "Tool '%s' result is not a string: %s"
+                    (-name tool) (pr-str result))))
         (catch Throwable t
-          (format "Tool execution error: %s" (ex-message t)))))))
+          (json/generate-string
+           {:tool    (-name tool)
+            :phase   "execution"
+            :class   (.getName (class t))
+            :message (ex-message t)
+            :error   (format "Tool execution error: %s" (ex-message t))}))))))
 
 (defn tool-definition
   "Build an OpenAI-shaped function-tool definition map for `tool`."

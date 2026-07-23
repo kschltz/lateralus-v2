@@ -27,7 +27,17 @@
         ;; Proximum is optional: it is only loaded when
         ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
         ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.
+        ;; Proximum -> trove -> timbre 6.0.1 -> encore 3.31.0, but the
+        ;; `clojure/add-lib` tool loads libs (e.g. io.github.nextjournal/clerk)
+        ;; whose transitives (nippy 3.4.2) require encore >= 3.148.0
+        ;; (for `enc/latom`). Parent-first class resolution kept the stale
+        ;; 3.31.0 even after add-lib appended the newer jar, so clerk's
+        ;; require threw `No such var: enc/latom` -> `loaded? false`.
+        ;; Direct override (Maven nearest-wins) forces 3.148.0 onto the
+        ;; basis so add-lib-loaded libs resolve cleanly. Encore is
+        ;; backward-compatible across 3.x; timbre 6.0.1 works with it.
         org.replikativ/proximum {:mvn/version "0.1.25"}
+        com.taoensso/encore {:mvn/version "3.148.0"}
         ;; LangChain4j in-process ONNX embedding model. The jar bundles the
         ;; all-MiniLM-L6-v2 weights, so no network calls are made at runtime.
         ;; Native-image users should switch to an HTTP embedder instead.

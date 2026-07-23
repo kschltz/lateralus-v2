@@ -28,10 +28,18 @@
   "Input schema for `clojure/eval`. `code` is a required, non-empty
    Clojure source string that may contain multiple top-level forms.
    `ns` optionally names the persistent runtime namespace to evaluate
-   in (defs persist there across calls)."
+   in (defs persist there across calls).
+
+   Optional per-call overrides (audit 2026-07 rec #8): `max-output-bytes`
+   raises the captured-stdout cap for THIS call (e.g. a Clerk `show!`
+   render trace that exceeds the default 64KB), and `eval-timeout-ms`
+   widens the per-call timeout (e.g. a long render). When omitted the
+   runtime config defaults apply. Both are positive ints."
   [:map
    [:code [:string {:min 1}]]
-   [:ns {:optional true} :string]])
+   [:ns {:optional true} :string]
+   [:max-output-bytes {:optional true} [:int {:min 1}]]
+   [:eval-timeout-ms  {:optional true} [:int {:min 1}]]])
 
 (def AddLibInput
   "Input schema for `clojure/add-lib`. Either supply `lib` (a Maven

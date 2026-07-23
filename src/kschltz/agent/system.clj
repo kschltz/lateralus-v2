@@ -162,7 +162,9 @@
   [:map
    [:max-loop-depth            {:optional true} :int]
    [:max-tool-calls-per-exchange {:optional true} :int]
-   [:max-tool-calls-per-turn   {:optional true} :int]])
+   [:max-tool-calls-per-turn   {:optional true} :int]
+   [:tool-content-caps         {:optional true}
+    [:map-of :string :int]]])
 
 (defmethod ig/assert-key :lateralus/loop-opts [_ config]
   (assert-malli! :lateralus/loop-opts LoopOpts config))

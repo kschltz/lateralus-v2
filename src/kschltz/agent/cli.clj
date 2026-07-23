@@ -377,17 +377,26 @@
    response is at :exchange/response; future agents may put it
    elsewhere (e.g. a streaming buffer). When the model returns empty
    content after tool calls, prints a readable summary of those tool
-   results so the REPL is not silent. When :agent/summary-failed? or
-   :agent/empty-retry-failed? is set, prepend a one-line breadcrumb so
-   the user knows the model did not produce a final answer (the
-   tool-result-summary digest still prints so the REPL is not blank)."
+   results so the REPL is not silent.
+
+   Verify-round-3 FIX 2: when :agent/summary-failed? is set, the summary
+   mini-chain exhausted its retries because the model kept emitting
+   tool_calls on the summary turn despite :tools being stripped and
+   tool_choice:none set (some providers, e.g. glm-5.2, ignore
+   tool_choice:none). The internal 'model kept calling tools on the
+   summary turn' state must NEVER be surfaced as the user-facing answer;
+   instead the PRIMARY text is a clear 'the agent did not produce a
+   final answer' message, with the tool results it did produce appended
+   as a reference so the REPL is not blank. :agent/empty-retry-failed?
+   (no tools ran and the model stayed blank across retries) gets a
+   'model produced no response' breadcrumb for the same reason."
   [^java.io.PrintWriter out result]
   (let [response (:exchange/response result)
         prefix  (cond
                  (:agent/tool-cap-hit result)
                  "[lateralus: hit the per-exchange tool-call cap; showing tool results instead]\n\n"
                  (:agent/summary-failed? result)
-                 "[lateralus: model kept calling tools on the summary turn; showing tool results instead]\n\n"
+                 "[lateralus: the agent did not produce a final answer for this turn (the model kept emitting tool calls on the summary turn despite tool_choice:none). Tool results produced, for reference:]\n\n"
                  (:agent/empty-retry-failed? result)
                  "[lateralus: model produced no response after retries]\n\n"
                  :else "")

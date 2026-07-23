@@ -55,11 +55,39 @@
 
 (defn- throwable->str
   "Format a Throwable into a compact, model-readable string including
-   the exception class, message, and any ex-data."
+   the exception class, message, and any ex-data. Kept as the one-line
+   `:error` value for back-compat; the structured form is `throwable->map`."
   [^Throwable t]
   (let [data (ex-data t)]
     (cond-> (str (.getName (class t)) ": " (ex-message t))
       (some? data) (str " " (pr-str data)))))
+
+(defn throwable->map
+  "Build a model-readable structured map from a Throwable for the
+   `:error-detail` envelope field: `{:class :message :cause :data :trace}`.
+   `:trace` holds the top 5 stack elements rendered as
+   `class.method(file:line)` strings so the model can see where the
+   failure originated without re-tokenizing a full stack. `:cause` is a
+   one-level nested map for the chained cause (class + message only).
+   Never raises — returns `{:class \"<nil>\" ...}` on a nil throwable."
+  [^Throwable t]
+  (if (nil? t)
+    {:class "<nil>" :message nil :cause nil :data nil :trace []}
+    (let [cause (ex-cause t)
+          data  (ex-data t)
+          st    (.getStackTrace t)]
+      {:class   (.getName (class t))
+       :message (ex-message t)
+       :cause   (when cause
+                  {:class   (.getName (class cause))
+                   :message (ex-message cause)})
+       :data    data
+       :trace   (mapv (fn [^StackTraceElement e]
+                        (str (.getClassName e) "."
+                             (.getMethodName e) "("
+                             (.getFileName e) ":"
+                             (.getLineNumber e) ")"))
+                      (take 5 st))})))
 
 (defn- read-forms
   "Read every top-level form from `code`. Reader-eval (`#=`) is disabled
@@ -112,6 +140,32 @@
   ^DynamicClassLoader []
   (DynamicClassLoader. (RT/baseLoader)))
 
+(defn refresh-classloader
+  "Wrap a `DynamicClassLoader` (already mutated by
+   `clojure.repl.deps/add-libs`, which added the freshly resolved jars to
+   its URL list) in a FRESH `DynamicClassLoader` and return it.
+
+   This is the verify-round-3 fix for the AOT-class resolution failure
+   observed when adding a lib whose transitives ship AOT-compiled classes
+   (e.g. `com.taoensso/nippy`, pulled via `io.github.nextjournal/clerk`,
+   whose `taoensso.nippy.impl` references `taoensso.encore`): after
+   `add-libs` mutates the shared classloader, a `require` of the new lib
+   against the SAME mutated classloader fails with a `CompilerException`
+   (`No such var: enc/latom`-style), even though the jar + source are now
+   present. Re-reading source via `:reload` (the round-2 retry) reproduces
+   the SAME failure because the root cause is class RESOLUTION against
+   the just-mutated classloader's cached lookup state, not source
+   staleness.
+
+   Wrapping the mutated classloader in a brand-new `DynamicClassLoader`
+   (whose parent is the mutated one, so the new jars stay visible)
+   restores resolution — confirmed live: `require` of `taoensso.nippy`
+   succeeds against the fresh wrapper while it fails against the mutated
+   original. The `:reload` retry path in `tools.clj` stays as a fallback
+   but is no longer the primary fix."
+  ^DynamicClassLoader [^DynamicClassLoader cl]
+  (DynamicClassLoader. cl))
+
 (defn- with-classloader
   "Run thunk `f` with `cl` installed as the current thread's context
    classloader, restoring the previous loader afterward. When `cl` is nil
@@ -136,7 +190,18 @@
    `ns-sym`. Returns an `EvalResult` map. `config` supplies
    `:eval-timeout-ms` and `:max-output-bytes` overrides. `cl` is the
    shared `DynamicClassLoader` installed as the context classloader so
-   namespaces added via `clojure/add-lib` are visible (may be nil)."
+   namespaces added via `clojure/add-lib` are visible (may be nil).
+
+   The envelope carries a structural `:status` keyword
+   (`:ok`/`:error`/`:timeout`/`:truncated`) so the model can branch
+   without parsing `:error` prose: `:ok` when every form evaluated and
+   stdout was not clipped, `:truncated` when evaluation succeeded but
+   captured stdout exceeded `:max-output-bytes`, `:timeout` on a
+   per-call timeout, `:error` when a form threw. `:values` holds the
+   `pr-str` of EVERY form's value in evaluation order (partial on a
+   mid-sequence throw) so a multi-form showcase (def data -> show! ->
+   port) does not discard the earlier results. `:error-detail` carries
+   the structured `throwable->map` on failure."
   [ns-sym code config cl]
   (let [forms   (read-forms code)
         the-ns  (ensure-ns! ns-sym)
@@ -150,30 +215,61 @@
                      (fn []
                        (binding [*ns* the-ns
                                  *out* sw]
-                         (try
-                           {:value (reduce (fn [_ form] (clojure.core/eval form))
-                                           nil forms)}
-                           (catch Throwable t
-                             {:throwable t})))))))]
-    {:ns     (str ns-sym)
-     :forms  (count forms)
-     :value  (when (and (map? outcome) (not (:throwable outcome)))
-               (pr-str (:value outcome)))
-     :output (truncate (str sw) max-out)
-     :error  (cond
-               (= outcome ::timeout)
-               (throwable->str (TimeoutException.
-                                (format "Evaluation timed out after %d ms" timeout)))
-
-               (:throwable outcome)
-               (throwable->str (:throwable outcome))
-
-               :else nil)}))
+                         ;; Evaluate every top-level form in order,
+                         ;; accumulating values so a multi-form showcase
+                         ;; does not discard the earlier results. A
+                         ;; mid-sequence throw returns the partial
+                         ;; values alongside the throwable so `:values`
+                         ;; stays useful even when a later form fails.
+                         ;; The per-form try lives in a separate fn so
+                         ;; the loop's recur does not cross a try.
+                         (let [eval-form (fn [form]
+                                            (try
+                                              [:value (clojure.core/eval form)]
+                                              (catch Throwable t [:throw t])))]
+                           (loop [remaining forms
+                                  acc      []]
+                             (if (empty? remaining)
+                               {:values acc}
+                               (let [r (eval-form (first remaining))]
+                                 (if (= (first r) :value)
+                                   (recur (rest remaining)
+                                          (conj acc (second r)))
+                                   {:throwable (second r) :values acc}))))))))))
+        raw-output (str sw)
+        clipped?   (and (string? raw-output) (> (count raw-output) max-out))
+        output     (if clipped? (truncate raw-output max-out) raw-output)
+        timed-out? (= outcome ::timeout)
+        threw?     (and (map? outcome) (:throwable outcome))
+        values     (if (map? outcome) (:values outcome) [])
+        last-val   (when (and (not timed-out?) (seq values))
+                     (pr-str (peek values)))
+        status     (cond
+                     timed-out? :timeout
+                     threw?     :error
+                     clipped?   :truncated
+                     :else      :ok)
+        err-throw  (cond
+                     timed-out? (TimeoutException.
+                                 (format "Evaluation timed out after %d ms" timeout))
+                     threw?     (:throwable outcome)
+                     :else      nil)]
+    {:ns           (str ns-sym)
+     :forms        (count forms)
+     :value        last-val
+     :values       (mapv #(when (some? %) (pr-str %)) values)
+     :output       output
+     :status       status
+     :truncated?   clipped?
+     :reader-eval-disabled? true
+     :error        (when err-throw (throwable->str err-throw))
+     :error-detail (when err-throw (throwable->map err-throw))}))
 
 (defn add-libs*
   "Resolve and load runtime dependencies `coords` (a lib-symbol ->
    coordinate-map map) via `clojure.repl.deps/add-libs`. NETWORK. Returns
-   an `AddLibsResult`; resolution failures are reported in `:error`.
+   an `AddLibsResult`; resolution failures are reported in `:error` and
+   `:error-detail` with `:status :error` rather than raised.
 
    `clojure.repl.deps/add-libs` refuses to run unless `clojure.core/*repl*`
    is true and the thread context classloader is a `DynamicClassLoader`.
@@ -190,10 +286,15 @@
                        (if repl-var
                          (with-bindings {repl-var true} (add-libs coords))
                          (add-libs coords))))]
-      {:added (mapv str added) :error nil})
+      {:added        (mapv str added)
+       :status       :ok
+       :error        nil
+       :error-detail nil})
     (catch Throwable t
-      {:added []
-       :error (throwable->str t)})))
+      {:added        []
+       :status       :error
+       :error        (throwable->str t)
+       :error-detail (throwable->map t)})))
 
 (defn loaded-libs*
   "Return a sorted vector of the currently loaded lib names."
@@ -218,14 +319,28 @@
 ;; Runtime
 ;; ---------------------------------------------------------------------------
 
-(deftype JvmRuntime [config classloader]
+(deftype JvmRuntime [config ^:volatile-mutable classloader]
   proto/ClojureRuntime
   (-eval [_ code opts]
     (let [cfg    (merge config opts)
           ns-sym (symbol (or (:ns opts) (:eval-ns config) default-eval-ns))]
       (eval-code ns-sym code cfg classloader)))
   (-add-libs [_ coords opts]
-    (add-libs* coords (merge config opts) classloader))
+    ;; `add-libs*` mutates `classloader` (the shared DynamicClassLoader,
+    ;; installed as the context classloader) by adding the freshly
+    ;; resolved jars to its URL list. On a SUCCESSFUL resolution we then
+    ;; refresh the classloader: wrap the mutated loader in a fresh
+    ;; `DynamicClassLoader` and install it as the runtime's classloader so
+    ;; the NEXT `-eval` (the AddLibTool auto-require, or a follow-up
+    ;; `clojure/eval`) resolves AOT-transitive classes through a clean
+    ;; loader state. See `refresh-classloader` for the why. Refresh only
+    ;; when the current loader is a `DynamicClassLoader` (it always is for
+    ;; `jvm-runtime`, but a test seam could pass something else).
+    (let [res (add-libs* coords (merge config opts) classloader)]
+      (when (and (= :ok (:status res))
+                 (instance? DynamicClassLoader classloader))
+        (set! classloader (refresh-classloader classloader)))
+      res))
   (-loaded-libs [_]
     (loaded-libs*))
   (-capabilities [_]
