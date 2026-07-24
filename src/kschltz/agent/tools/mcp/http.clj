@@ -110,41 +110,41 @@
              :headers headers
              :body (json/generate-string (assoc message :jsonrpc "2.0"))
              :timeout timeout-ms
-             :connect-timeout timeout-ms}]
-    (let [resp (try
-                 (http-fn req)
-                 (catch java.net.SocketTimeoutException t
-                   (raise :timeout (str "MCP HTTP timeout: " (ex-message t))
-                          {:url url :cause t}))
-                 (catch Throwable t
-                   (raise :http (str "MCP HTTP request failed: " (ex-message t))
-                          {:url url :cause t})))
-          status (:status resp)]
-      (cond
-        (and notification? (#{202 204} status))
-        []
+             :connect-timeout timeout-ms}
+        resp (try
+               (http-fn req)
+               (catch java.net.SocketTimeoutException t
+                 (raise :timeout (str "MCP HTTP timeout: " (ex-message t))
+                        {:url url :cause t}))
+               (catch Throwable t
+                 (raise :http (str "MCP HTTP request failed: " (ex-message t))
+                        {:url url :cause t})))
+        status (:status resp)]
+    (cond
+      (and notification? (#{202 204} status))
+      []
 
-        (and notification? (<= 200 status 299))
-        []
+      (and notification? (<= 200 status 299))
+      []
 
-        (= status 401)
-        (raise :auth "MCP HTTP unauthorized (401)"
-               {:url url :status status :body (:body resp)})
+      (= status 401)
+      (raise :auth "MCP HTTP unauthorized (401)"
+             {:url url :status status :body (:body resp)})
 
-        (= status 403)
-        (raise :auth "MCP HTTP forbidden (403)"
-               {:url url :status status :body (:body resp)})
+      (= status 403)
+      (raise :auth "MCP HTTP forbidden (403)"
+             {:url url :status status :body (:body resp)})
 
-        (not (<= 200 status 299))
-        (raise :http (str "MCP HTTP status " status)
-               {:url url :status status :body (:body resp)})
+      (not (<= 200 status 299))
+      (raise :http (str "MCP HTTP status " status)
+             {:url url :status status :body (:body resp)})
 
-        :else
-        (let [msgs (decode-response-body resp)]
-          (when (and (not notification?) (empty? msgs))
-            (raise :protocol "MCP HTTP response had no JSON-RPC message"
-                   {:url url :status status}))
-          msgs)))))
+      :else
+      (let [msgs (decode-response-body resp)]
+        (when (and (not notification?) (empty? msgs))
+          (raise :protocol "MCP HTTP response had no JSON-RPC message"
+                 {:url url :status status}))
+        msgs))))
 
 (defn connect-http!
   "Build a Streamable HTTP `McpTransport` for `server-cfg` (must include
