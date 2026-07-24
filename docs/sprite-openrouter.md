@@ -180,16 +180,22 @@ sprite exec -s lateralus -- bash -lc 'cd ~/lateralus-v2 && clojure -M:run \
 
 ## Serving the workbench from the Sprite (public CHAT + Portal, with basic auth)
 
-The Sprite proxy only offers `public` (no auth) or `sprite` (Fly.io org login) —
-no built-in user:pass. To get a simple user:pass gate for sharing, run a tiny
-HTTP Basic-Auth reverse proxy in front of the workbench, and set the Sprite
-URL to `public`. Portal works through the single proxied port because Portal's
-`/main.js`, `/rpc`, `/vendor`, `/?<session-uuid>` are delegated to Portal's
-in-process handler on the CHAT server (same-origin, since commit `5abdd4b`),
-and the iframe URL is rewritten from the browser `Host`/`x-forwarded-proto`.
+The Sprite proxy only offers `public` (no auth) or `sprite` (Fly.io org login)
+— no built-in user:pass. To get a simple user:pass gate for sharing, put a
+reverse proxy with HTTP Basic Auth in front of the workbench and set the
+Sprite URL to `public`. Portal works through the single proxied port because
+Portal's `/main.js`, `/rpc`, `/vendor`, `/?<session-uuid>` are delegated to
+Portal's in-process handler on the CHAT server (same-origin, since commit
+`5abdd4b`), and the iframe URL is rewritten from the browser `Host` /
+`x-forwarded-proto`.
+
+**Important:** Portal's runtime also opens a **WebSocket** at
+`wss://<host>/rpc?<session-uuid>` to sync its state. The reverse proxy must
+forward WebSocket upgrades; a plain HTTP-only proxy will leave the Portal pane
+blank. Caddy handles Basic Auth + WebSocket passthrough automatically.
 
 ```
-browser -> Sprite proxy (TLS) -> auth-proxy :8080 (basic auth) -> workbench 127.0.0.1:8081
+browser -> Sprite proxy (TLS) -> Caddy :8080 (basic auth) -> workbench 127.0.0.1:8081
 ```
 
 Files:
@@ -198,11 +204,44 @@ Files:
   :open-browser? false}` + workbench-plugin wired into `:lateralus/plugins`
   and `:lateralus/agent :workbench`. `:portal? true` serves Portal
   same-origin on the CHAT port (no second public port needed).
-- `scripts/sprite-auth-proxy.js` — zero-dependency Node Basic-Auth reverse
-  proxy. Forwards the original `Host` + `x-forwarded-proto` (not the upstream
-  host) so the workbench rewrites the Portal iframe URL to the browser-visible
-  origin. Env: `AUTH_USER`, `AUTH_PASS` (required), `UPSTREAM`
-  (default `http://127.0.0.1:8081`), `PORT` (default 8080), `REALM`.
+- `scripts/Caddyfile` — Caddy reverse proxy with HTTP Basic Auth, bound to
+  `:8080` and forwarding WebSocket upgrades to the workbench on
+  `127.0.0.1:8081`. Caddy sets `Host` and `X-Forwarded-Proto: https` so the
+  workbench rewrites the Portal iframe URL to the browser-visible origin.
+
+### Install Caddy on the Sprite
+
+Caddy is a single static binary:
+
+```bash
+sprite exec -s lateralus -- bash -lc '
+  curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /tmp/caddy
+  chmod +x /tmp/caddy
+  sudo mv /tmp/caddy /usr/local/bin/caddy
+  caddy version
+'
+```
+
+Generate a bcrypt password hash and write it into `scripts/Caddyfile`:
+
+```bash
+sprite exec -s lateralus -- caddy hash-password --plaintext "<your-password>"
+# edit scripts/Caddyfile: replace the placeholder hash with the generated one
+```
+
+The Caddyfile looks like this (hash truncated in the example):
+
+```caddyfile
+:8080 {
+    basic_auth /* {
+        lateralus $2a$14$...
+    }
+    reverse_proxy 127.0.0.1:8081 {
+        header_up Host {host}
+        header_up X-Forwarded-Proto https
+    }
+}
+```
 
 ### Register both as managed services
 
@@ -212,36 +251,38 @@ sprite-env services create lateralus-workbench \
   --cmd /usr/local/bin/clojure \
   --args "-M:workbench:run,-i,--config,resources/lateralus/openrouter-free-workbench.edn" \
   --dir /home/sprite/lateralus-v2 \
-  --env "OLLAMA_API_KEY=sk-or-v1-...,LATERALUS_WORKBENCH_PUBLIC_HOST=<sprite-host>"
+  --env "OLLAMA_API_KEY=sk-or-v1-..."
 
-# Basic-auth proxy on 0.0.0.0:8080 (the Sprite-proxied port), depends on workbench
+# Caddy proxy on 0.0.0.0:8080 (the Sprite-proxied port), depends on workbench
 sprite-env services create lateralus-auth-proxy \
-  --cmd /.sprite/bin/node --args scripts/sprite-auth-proxy.js \
+  --cmd /usr/local/bin/caddy \
+  --args "run,--config,/home/sprite/lateralus-v2/scripts/Caddyfile,--adapter,caddyfile" \
   --dir /home/sprite/lateralus-v2 \
-  --env "AUTH_USER=lateralus,AUTH_PASS=<your-password>,UPSTREAM=http://127.0.0.1:8081,PORT=8080" \
-  --needs lateralus-workbench --http-port 8080
+  --needs lateralus-workbench \
+  --http-port 8080
 
 # Make the Sprite URL public so friends can reach the basic-auth gate
 sprite url update --auth public -s lateralus
 ```
 
-Only the `lateralus-auth-proxy` service holds `--http-port` (one max). The
-workbench binds loopback and is unreachable directly. Manage with
+Only the Caddy service holds `--http-port` (one max). The workbench binds
+loopback and is unreachable directly. Manage with
 `sprite-env services list|get|stop|start|restart|delete`. Logs at
 `/.sprite/logs/services/<name>.log`.
 
+**Restart ordering:** because the proxy `--needs` the workbench, you must
+`stop` the proxy before `restart`-ing the workbench, then `start` the proxy
+again.
+
 ### Rotate the user:pass
 
-Service env is set at create time only — to change credentials, delete +
-recreate the proxy service:
+Generate a new hash, edit `scripts/Caddyfile` on the Sprite, then restart the
+proxy service:
 
 ```bash
-sprite-env services delete lateralus-auth-proxy
-sprite-env services create lateralus-auth-proxy \
-  --cmd /.sprite/bin/node --args scripts/sprite-auth-proxy.js \
-  --dir /home/sprite/lateralus-v2 \
-  --env "AUTH_USER=<new-user>,AUTH_PASS=<new-pass>,UPSTREAM=http://127.0.0.1:8081,PORT=8080" \
-  --needs lateralus-workbench --http-port 8080
+sprite exec -s lateralus -- caddy hash-password --plaintext "<new-pass>"
+# edit /home/sprite/lateralus-v2/scripts/Caddyfile with the new hash
+sprite-env services restart lateralus-auth-proxy -s lateralus
 ```
 
 ### Browser access for friends
@@ -249,7 +290,7 @@ sprite-env services create lateralus-auth-proxy \
 Share `https://<sprite-name>-<org>.sprites.app/` plus the user:pass. The
 browser prompts for Basic Auth; on success it loads the CHAT UI (left) with
 the Portal pane (right) same-origin. No Fly.io login needed by viewers.
-Both panes live-update over `/api/events` SSE (fixed).
+Both panes live-update over `/api/events` SSE and `/rpc` WebSocket.
 
 ## Rollback
 

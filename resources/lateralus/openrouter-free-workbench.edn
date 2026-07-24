@@ -1,25 +1,26 @@
 ;; OpenRouter "free" models + CHAT workbench, served on 0.0.0.0:8080.
 ;;
-;; Designed to run behind a basic-auth reverse proxy (scripts/sprite-auth-proxy.js)
-;; on a Sprite service. The proxy binds 0.0.0.0:8080 (the Sprite-proxied port)
-;; with HTTP Basic Auth; the workbench binds 127.0.0.1:8081 (loopback only) and is
-;; unreachable directly. The Sprite URL is set to `public` so friends can reach
-;; the basic-auth gate without a Fly.io login.
+;; Designed to run behind a Caddy reverse proxy (scripts/Caddyfile) on a Sprite
+;; service. Caddy binds 0.0.0.0:8080 (the Sprite-proxied port) with HTTP Basic
+;; Auth and forwards WebSocket upgrades; the workbench binds 127.0.0.1:8081
+;; (loopback only) and is unreachable directly. The Sprite URL is set to
+;; `public` so friends can reach the basic-auth gate without a Fly.io login.
 ;;
-;;   browser -> Sprite proxy (TLS) -> auth-proxy :8080 (basic auth) -> workbench :127.0.0.1:8081
+;;   browser -> Sprite proxy (TLS) -> Caddy :8080 (basic auth) -> workbench :127.0.0.1:8081
 ;;
 ;; :portal? true — Portal is served SAME-ORIGIN on the CHAT server (its /main.js,
 ;; /rpc, /vendor, /?<session-uuid> routes are delegated to Portal's in-process
 ;; handler), and the iframe URL is rewritten from the browser Host header, so
-;; Portal works through the single proxied port. The auth proxy forwards the
-;; original Host + x-forwarded-proto so the rewrite is correct.
+;; Portal works through the single proxied port. Caddy forwards the original Host
+;; + X-Forwarded-Proto so the rewrite is correct, and it forwards the WebSocket
+;; upgrade to the workbench's http-kit server (Portal syncs via wss://.../rpc).
 ;;
 ;; Run the workbench (loopback):
 ;;   OLLAMA_API_KEY=... \
 ;;     clojure -M:workbench:run -i --config resources/lateralus/openrouter-free-workbench.edn
 ;;
-;; Run the auth proxy (foreground, for testing):
-;;   AUTH_USER=lateralus AUTH_PASS=... node scripts/sprite-auth-proxy.js
+;; Run Caddy (foreground, for testing):
+;;   caddy run --config scripts/Caddyfile --adapter caddyfile
 ;;
 ;; Sprite services (persistent, auto-start on request):
 ;;   sprite-env services create lateralus-workbench \
@@ -28,10 +29,11 @@
 ;;     --dir /home/sprite/lateralus-v2 \
 ;;     --env "OLLAMA_API_KEY=..."
 ;;   sprite-env services create lateralus-auth-proxy \
-;;     --cmd /usr/bin/node --args scripts/sprite-auth-proxy.js \
+;;     --cmd /usr/local/bin/caddy \
+;;     --args "run,--config,/home/sprite/lateralus-v2/scripts/Caddyfile,--adapter,caddyfile" \
 ;;     --dir /home/sprite/lateralus-v2 \
-;;     --env "AUTH_USER=lateralus,AUTH_PASS=..." \
-;;     --needs lateralus-workbench --http-port 8080
+;;     --needs lateralus-workbench \
+;;     --http-port 8080
 ;;
 ;; Model id is OpenRouter's `provider/model` form (no `openrouter/` prefix).
 ;; See openrouter-free.edn for the verified tool-capable :free model list.

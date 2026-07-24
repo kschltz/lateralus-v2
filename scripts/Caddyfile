@@ -1,0 +1,9 @@
+:8080 {
+    basic_auth /* {
+        lateralus <YOUR_BCRYPT_HASH_HERE>
+    }
+    reverse_proxy 127.0.0.1:8081 {
+        header_up Host {host}
+        header_up X-Forwarded-Proto https
+    }
+}
