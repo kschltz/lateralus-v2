@@ -8,21 +8,21 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 
 ## Demo
 
-CHAT | Portal workbench — float / dock / hide the Portal pane, drag the split, and keep rich visuals out of the chat transcript:
-
-https://github.com/kschltz/lateralus-v2/raw/main/docs/assets/workbench-demo.mp4
+Live CHAT | Portal session on **Ollama Cloud** (`kimi-k2.7-code`): ask for a black-angora pet-shop landing page, watch it land in Portal, then float / resize / dock the pane.
 
 <video src="docs/assets/workbench-demo.mp4" controls playsinline poster="docs/assets/workbench-demo-poster.jpg" width="720">
-  <a href="docs/assets/workbench-demo.mp4">Watch the workbench demo (mp4)</a>
+Your browser does not support video. <a href="docs/assets/workbench-demo.mp4">Download the workbench demo (mp4)</a>
 </video>
 
-<p align="center">
-  <img src="docs/assets/workbench-mobile-chat.webp" alt="Mobile Chat pane" width="45%" />
-  &nbsp;
-  <img src="docs/assets/workbench-mobile-portal.webp" alt="Mobile Portal pane" width="45%" />
-</p>
+Reproduce locally (needs `OLLAMA_API_KEY`):
 
-<p align="center"><sub>Mobile viewers get a single-pane Chat ↔ Portal tab bar.</sub></p>
+```bash
+clojure -M:workbench:run -i \
+  --config resources/lateralus/demo-workbench-cloud.edn \
+  --base-url https://ollama.com/v1 \
+  --model kimi-k2.7-code
+# open http://localhost:7860
+```
 
 ## Quick start
 
