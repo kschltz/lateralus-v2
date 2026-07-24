@@ -18,8 +18,15 @@ set -euo pipefail
 #                 fail in restricted/sandboxed environments.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GRAALVM_DIR="${GRAALVM_HOME:-/Users/schltzk/.local/graalvm/graalvm-community-openjdk-21.0.2+13.1/Contents/Home}"
 HOSTS_FILE="/etc/hosts"
+
+if [[ -z "${GRAALVM_HOME:-}" ]]; then
+  echo "ERROR: GRAALVM_HOME is not set."
+  echo "Install GraalVM and export GRAALVM_HOME to its Home directory, e.g.:"
+  echo "  export GRAALVM_HOME=/path/to/graalvm/Contents/Home"
+  exit 1
+fi
+GRAALVM_DIR="$GRAALVM_HOME"
 # Keep all Clojure classpath caches inside the workspace so the build works
 # in restricted/sandboxed environments that cannot write to ~/.clojure.
 CLJ_CACHE_DIR="${REPO_ROOT}/.clojure-cache"
@@ -54,7 +61,7 @@ done
 
 if [[ ! -d "$GRAALVM_DIR" ]]; then
   echo "ERROR: GraalVM directory not found: $GRAALVM_DIR"
-  echo "Set GRAALVM_HOME or install GraalVM to that path."
+  echo "Check that GRAALVM_HOME points at a GraalVM Home directory."
   exit 1
 fi
 

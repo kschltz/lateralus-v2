@@ -6,6 +6,7 @@
 .nrepl-port
 .portal/
 .vscode
+.clerk/
 *.class
 *.jar
 *~
@@ -25,6 +26,12 @@ test-sessions-*/
 .lateralus/
 *.db
 *.dat
+
+# Local / machine-specific scratch (not part of the distributable)
+local-ai
+notebooks/
+/*.html
+/portal/
 
 .DS_Store
 .idea/

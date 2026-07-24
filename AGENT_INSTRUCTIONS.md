@@ -10,7 +10,7 @@
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)
 - **CLI profiles:** `~/.config/lateralus/` via `kschltz.agent.cli.profile.*` (no `--config` → interactive gate; secrets via `OLLAMA_API_KEY` only)
-- **v1 reference (archive):** sibling repo `../lateralus/` — port seed code only, do not copy `core.clj` or `loop.clj`
+- **v1 reference (archive):** https://github.com/kschltz/lateralus — port seed code only, do not copy `core.clj` or `loop.clj`
 - **Historical goals/plans (archived):** `goals/lateralus-file-editing/`, `docs/archive/arch-remediation-plan.md`, `docs/archive/clj-edit-implementation-plan.md`, `docs/archive/memory-system-mvi.md`
 
 ## The One Rule

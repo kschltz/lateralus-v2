@@ -1,9 +1,10 @@
 # lateralus-v2
 
-Greenfield rewrite of [Lateralus](../lateralus) (v1 archive). A Clojure LLM agent with an interceptor-chain runtime, Integrant lifecycles, session memory contract, and a clean-slate CLI.
+Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 archive). A Clojure LLM agent with an interceptor-chain runtime, Integrant lifecycles, session memory contract, and a clean-slate CLI.
 
 **Coord:** `net.clojars.kschltz/lateralus-v2`  
-**Main ns:** `kschltz.lateralus`
+**Main ns:** `kschltz.lateralus`  
+**License:** [Eclipse Public License 2.0](LICENSE)
 
 ## Quick start
 
@@ -55,7 +56,9 @@ Flags:
 ```
 
 When `--config` is omitted on a TTY, lateralus always opens the **profile gate**
-(pick / create / edit a saved profile; Enter keeps current values). Model prompts
+(pick / create / edit a saved profile; Enter keeps current values). Editing also
+shows a **tool-group checklist** (`j`/`k` move, space/`t` toggle, Enter accept).
+Model prompts
 accept `?` (list catalog) and `/term` (filter), backed by the endpoint’s `/v1/models`
 (and Ollama Cloud when keyed).
 
