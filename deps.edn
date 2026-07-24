@@ -77,7 +77,7 @@
            ;; The build task also enables *warn-on-reflection* during compilation.
            :jvm-opts ["-Dclojure.compiler.direct-linking=true"]
            :ns-default build}
-  :test {:extra-paths ["test"]
+  :test {:extra-paths ["test" "dev"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}
                       ;; Test-only HTTP server for LLM end-to-end tests.
@@ -95,7 +95,7 @@
          :main-opts ["-m" "cognitect.test-runner" "-e" ":e2e"]}
   ;; Run only the ^:e2e tests. This requires a local Ollama instance
   ;; (default model glm5.1:cloud) or LATERALUS_E2E_FAKE=true.
-  :e2e {:extra-paths ["test"]
+  :e2e {:extra-paths ["test" "dev"]
         :extra-deps {io.github.cognitect-labs/test-runner
                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}
                      ring/ring-core {:mvn/version "1.13.0"}

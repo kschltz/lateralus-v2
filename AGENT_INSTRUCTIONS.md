@@ -4,6 +4,7 @@
 
 - **Active goal:** `goals/lateralus-v2-rewrite/goal.md` → `facts.md` → `plan.md`
 - **Follow-up goal (MCP client tools):** `goals/mcp-client-tools/goal.md` → `plan.md`
+- **MCP client tool:** `docs/mcp.md` (`tools.mcp`, `:lateralus/mcp-tools`, stdio servers, air-gapped default)
 - **Architecture overview:** `docs/architecture.md`
 - **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
 - **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek`/`:ddg` opt-in, `:lateralus/web-tools` Integrant key)
@@ -39,7 +40,8 @@ Core loop (tool-calling loop in base plugin, empty registry by default, filesyst
 clojure -M:test                                 # default suite (excludes ^:e2e)
 clojure -T:build test                           # same suite via tools.build
 clojure -M:e2e                                  # end-to-end memory tests
-LATERALUS_E2E_FAKE=true clojure -M:e2e          # deterministic fake-server e2e
+LATERALUS_E2E_FAKE=true clojure -M:e2e          # deterministic fake-server e2e (incl. MCP)
+LATERALUS_E2E_MCP=live clojure -M:e2e -n kschltz.agent.tools.mcp.mcp-e2e-test
 clojure -T:build uber                           # JVM distributable (includes :workbench)
 ./target/lateralus-v2 -h                        # smoke-test launcher
 ./scripts/start-workbench                       # Docker: Ollama + profile gate + workbench
@@ -67,4 +69,4 @@ Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without
 
 ## Doc freshness policy
 
-When a Kanban card changes architecture (new Integrant keys, plugin slots, protocol surface, default config, or tool surface), update `docs/architecture.md`, `README.md`, and the relevant tool doc (`docs/web.md` for web tools, `docs/memory-v2.md` for memory) before advancing the card.
+When a Kanban card changes architecture (new Integrant keys, plugin slots, protocol surface, default config, or tool surface), update `docs/architecture.md`, `README.md`, and the relevant tool doc (`docs/web.md` for web tools, `docs/mcp.md` for MCP client tools, `docs/memory-v2.md` for memory) before advancing the card.

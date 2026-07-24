@@ -520,9 +520,9 @@ server id (`filesystem_read_file`), optional `:tool-name-prefix` override
 
 ## Done when
 
-- [ ] Steps 1–8 merged
-- [ ] Fast suite covers G1–G10, G13–G15
-- [ ] `LATERALUS_E2E_FAKE=true clojure -M:e2e` covers G11
-- [ ] Live G12 documented and skip-safe
-- [ ] `docs/mcp.md` + architecture/README/AGENT_INSTRUCTIONS updated
-- [ ] Default configs spawn zero MCP processes
+- [x] Steps 1–8 merged
+- [x] Fast suite covers G1–G10, G13–G15
+- [x] `LATERALUS_E2E_FAKE=true clojure -M:e2e` covers G11
+- [x] Live G12 documented and skip-safe
+- [x] `docs/mcp.md` + architecture/README/AGENT_INSTRUCTIONS updated
+- [x] Default configs spawn zero MCP processes

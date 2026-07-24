@@ -177,11 +177,14 @@
               :lateralus/web-tools            {:provider web-prov}
               :lateralus/runtime-tools        {:enabled? (boolean (:runtime groups))
                                                :network? true}
+              ;; MCP client: always present, empty by default (air-gapped).
+              :lateralus/mcp-tools            {:servers {}}
               :lateralus/loop-opts            {:max-tool-calls-per-turn 100
                                                :max-tool-calls-per-exchange 20
                                                :tool-content-caps {"clojure_eval" 12000
                                                                    "clojure_add_lib" 12000}}
-              :lateralus/tool-registry        (tool-registry groups)
+              :lateralus/tool-registry        (conj (tool-registry groups)
+                                                    (ig/ref :lateralus/mcp-tools))
               :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
               :lateralus/plugins              (plugins wb?)
               :lateralus/agent                (agent-map wb?)})

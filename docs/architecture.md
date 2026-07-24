@@ -31,6 +31,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/clojure-tools    ──▶  clojure structured-edit tool registry│
 │  :lateralus/runtime-tools    ──▶  ClojureRuntime tool registry (clojure_eval, add_lib, loaded_libs)│
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web_search, web_fetch, web_extract)│
+│  :lateralus/mcp-tools        ──▶  MCP client Tool registry (stdio servers → adapted Tools)│
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
 │  :lateralus/cli-ui            ──▶  optional CliRenderer (prompt/response colors; not a chain plugin) │
@@ -137,7 +138,7 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
-- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Tool names use conservative snake_case (`^[A-Za-z][A-Za-z0-9_]{0,63}$`) so the same definitions work across OpenAI-compatible, Cerebras, Anthropic, Gemini, and Bedrock APIs; `tool-definition` rejects non-portable names before network I/O. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure structured-editing tools (`:lateralus/clojure-tools`), clojure runtime-eval tools (`:lateralus/runtime-tools` — `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs`, behind the `ClojureRuntime` protocol), and web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`).
+- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Tool names use conservative snake_case (`^[A-Za-z][A-Za-z0-9_]{0,63}$`) so the same definitions work across OpenAI-compatible, Cerebras, Anthropic, Gemini, and Bedrock APIs; `tool-definition` rejects non-portable names before network I/O. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure structured-editing tools (`:lateralus/clojure-tools`), clojure runtime-eval tools (`:lateralus/runtime-tools` — `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs`, behind the `ClojureRuntime` protocol), web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`), and MCP client tools (`:lateralus/mcp-tools` — stdio MCP servers adapted into `Tool`s behind `McpClient` / `McpTransport`; see [`docs/mcp.md`](mcp.md)).
 - **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
 - **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.
@@ -219,7 +220,7 @@ Required keys: `:base-url`, `:model`, `:dimensions`. Optional: `:api-key`, `:con
 
 ## Config validation
 
-`kschltz.agent.system` registers `defmethod ig/assert-key` for the externally-configurable `:lateralus/*` keys: `:lateralus/llm-client`, `:lateralus/embedder`, `:lateralus/memory-backend`, `:lateralus/web-tools`, and `:lateralus/runtime-tools`. Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
+`kschltz.agent.system` registers `defmethod ig/assert-key` for the externally-configurable `:lateralus/*` keys: `:lateralus/llm-client`, `:lateralus/embedder`, `:lateralus/memory-backend`, `:lateralus/web-tools`, `:lateralus/mcp-tools`, and `:lateralus/runtime-tools`. Each assertion uses a Malli schema and runs before any resources are allocated, so malformed configs fail fast with a clear explanation of which key is wrong and which fields are missing or invalid.
 
 For example:
 
@@ -287,6 +288,8 @@ session...`) is detected by the loop via that exact phrase, not the looser
 | `src/kschltz/agent/tools/web/mojeek.clj` | `:mojeek` live provider (JVM-only, opt-in) |
 | `src/kschltz/agent/tools/web/ddg.clj` | `:ddg` live provider (JVM-only, opt-in; impersonator TLS fingerprint) |
 | `src/kschltz/agent/tools/web/web.clj` | `web_search`, `web_fetch`, `web_extract` Tool implementations and registry factory |
+| `src/kschltz/agent/tools/mcp/protocol.clj` | `McpClient` / `McpTransport` protocols |
+| `src/kschltz/agent/tools/mcp/tools.clj` | MCP registry factory (stdio servers → adapted Tools) |
 | `src/kschltz/agent/llm/client.clj` | `LlmClient` protocol + stub + HTTP wrapper |
 | `src/kschltz/agent/llm/http.clj` | real OpenAI-shaped HTTP client |
 | `src/kschltz/agent/llm/schemas.clj` | Malli schemas for LLM request/response shapes |
@@ -301,8 +304,9 @@ session...`) is detected by the loop via that exact phrase, not the looser
 | `src/kschltz/agent/memory/knowledge_graph.clj` | entity knowledge graph |
 | `src/kschltz/agent/memory/store/file.clj` | file-backed session store |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` |
-| `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file/self/clojure/web :none tools) |
-| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file/self/clojure/runtime-eval with `:network? false` + web :none tools) |
+| `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file/self/clojure/web :none + empty mcp-tools) |
+| `resources/lateralus/native.edn` | native-image config (KG-BM25 + noop embedder + file/self/clojure/runtime-eval with `:network? false` + web :none + empty mcp-tools) |
+| `docs/mcp.md` | MCP client tools: stdio servers, naming, guards, e2e |
 
 ## End-to-end memory tests
 
