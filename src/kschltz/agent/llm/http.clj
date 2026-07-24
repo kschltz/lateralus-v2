@@ -56,13 +56,21 @@
               :status status
               :body   parsed})))
 
+(defn normalize-base-url
+  "Strip trailing slashes so `…/v1/` and `…/v1` resolve the same.
+   Without this, `models-url` turns `http://localhost:11434/v1/` into
+   `…/v1//v1/models` and Ollama answers 307 — local model list looks broken."
+  [base-url]
+  (str/replace (str base-url) #"/+$" ""))
+
 (defn- chat-completions-url
   "Build the chat completions URL from the base URL. Accepts both
    conventions: base-url with or without a trailing /v1 segment."
   [base-url]
-  (str base-url (if (str/ends-with? base-url "/v1")
-                  "/chat/completions"
-                  "/v1/chat/completions")))
+  (let [base (normalize-base-url base-url)]
+    (str base (if (str/ends-with? base "/v1")
+                "/chat/completions"
+                "/v1/chat/completions"))))
 
 (defn models-url
   "Build the OpenAI-shaped model-list URL from `base-url`. Mirrors
@@ -70,9 +78,83 @@
    appended; any other base-url gets `/v1/models`. Works for OpenAI,
    Ollama (`/v1/models`), and Ollama Cloud (`https://ollama.com/v1`)."
   [base-url]
-  (str base-url (if (str/ends-with? base-url "/v1")
-                  "/models"
-                  "/v1/models")))
+  (let [base (normalize-base-url base-url)]
+    (str base (if (str/ends-with? base "/v1")
+                "/models"
+                "/v1/models"))))
+
+(defn- ollama-native-root
+  "Host root for native Ollama routes (`/api/tags`), stripping a trailing `/v1`."
+  [base-url]
+  (str/replace (normalize-base-url base-url) #"/v1$" ""))
+
+(defn- parse-openai-model-ids
+  [body]
+  (->> (get body :data)
+       (map :id)
+       (filter string?)
+       (distinct)
+       (sort)
+       (vec)))
+
+(defn- parse-ollama-tag-ids
+  "Native `/api/tags` body → model name strings."
+  [body]
+  (->> (get body :models)
+       (map #(or (:name %) (:model %)))
+       (filter string?)
+       (distinct)
+       (sort)
+       (vec)))
+
+(defn- get-json
+  "GET `url` as JSON. Returns parsed body on 2xx; throws ex-info otherwise."
+  [url api-key]
+  (let [response (http/request {:method           :get
+                                :url              url
+                                :headers          (->headers api-key)
+                                :as               :string
+                                :connect-timeout  default-connect-timeout-ms
+                                :request-timeout  default-request-timeout-ms
+                                :throw-exceptions false
+                                :coerce           :always})
+        status   (:status response)]
+    (cond
+      (and status (<= 200 status 299))
+      (try (json/parse-string (:body response) true)
+           (catch Throwable t
+             (throw (ex-info "models response is not valid JSON"
+                             {:kind   :parse
+                              :status status
+                              :body   (:body response)
+                              :cause  t}))))
+      :else
+      (throw (error-response :http-error response)))))
+
+(defn- list-models-openai
+  [base-url api-key]
+  (parse-openai-model-ids (get-json (models-url base-url) api-key)))
+
+(defn- list-models-ollama-tags
+  "List pulled models via native Ollama `/api/tags` (no Bearer needed)."
+  [base-url]
+  (parse-ollama-tag-ids
+   (get-json (str (ollama-native-root base-url) "/api/tags") nil)))
+
+(def ^:private ollama-cloud-base-url
+  "OpenAI-compatible Ollama Cloud base URL."
+  "https://ollama.com/v1")
+
+(defn- local-ollama-base?
+  "True for any OpenAI-style base aimed at an Ollama daemon on :11434
+   (localhost, 127.0.0.1, host.docker.internal, compose service name, …)."
+  [base-url]
+  (boolean (re-find #"(?i):11434(?:/|$)" (normalize-base-url base-url))))
+
+(defn- ollama-cloud-base?
+  [base-url]
+  (boolean (re-find #"(?i)(?:^https?://)?(?:www\.)?ollama\.com(?:/|$)"
+                    (normalize-base-url base-url))))
 
 (defn list-models
   "GET the OpenAI-shaped model list from `base-url`. Returns a sorted,
@@ -81,50 +163,21 @@
    :http-error`, `:parse`, or `:transport` on failure — the caller decides
    whether to fall back to free-text entry.
 
+   For a local Ollama gateway (`*:11434`), falls back to native `/api/tags`
+   when `/v1/models` fails (trailing-slash redirects, compat quirks).
+
    This is the only other HTTP call in the codebase besides
    `chat-completions`; it stays here so `rg 'http' src/` still routes all
    network I/O through this namespace."
   ([base-url] (list-models base-url nil))
   ([base-url api-key]
-   (let [url      (models-url base-url)
-         response (http/request {:method           :get
-                                :url              url
-                                :headers          (->headers api-key)
-                                :as               :string
-                                :connect-timeout  default-connect-timeout-ms
-                                :request-timeout  default-request-timeout-ms
-                                :throw-exceptions false
-                                :coerce           :always})
-         status   (:status response)]
-     (cond
-       (and status (<= 200 status 299))
-       (let [body (try (json/parse-string (:body response) true)
-                       (catch Throwable t
-                         (throw (ex-info "models response is not valid JSON"
-                                         {:kind   :parse
-                                          :status status
-                                          :body   (:body response)
-                                          :cause  t}))))]
-         (->> (get body :data)
-              (map :id)
-              (filter string?)
-              (distinct)
-              (sort)
-              (vec)))
-       :else
-       (throw (error-response :http-error response))))))
-
-(def ^:private ollama-cloud-base-url
-  "OpenAI-compatible Ollama Cloud base URL."
-  "https://ollama.com/v1")
-
-(defn- local-ollama-base?
-  [base-url]
-  (boolean (re-find #"(?i)(localhost|127\.0\.0\.1):11434" (str base-url))))
-
-(defn- ollama-cloud-base?
-  [base-url]
-  (boolean (re-find #"(?i)(?:^https?://)?(?:www\.)?ollama\.com(?:/|$)" (str base-url))))
+   (try
+     (list-models-openai base-url api-key)
+     (catch Exception e
+       (if (local-ollama-base? base-url)
+         (try (list-models-ollama-tags base-url)
+              (catch Throwable _ (throw e)))
+         (throw e))))))
 
 (defn- resolve-ollama-api-key
   [api-key]

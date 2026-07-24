@@ -161,3 +161,20 @@
   (is (= "laguna-s-2.1:latest"
          (lcm-http/preferred-default-model
           ["deepseek-v4-flash:cloud" "nomic-embed-text:latest" "laguna-s-2.1:latest"]))))
+
+(deftest normalize-base-url-strips-trailing-slashes
+  (is (= "http://localhost:11434/v1"
+         (lcm-http/normalize-base-url "http://localhost:11434/v1/")))
+  (is (= "http://localhost:11434/v1"
+         (lcm-http/normalize-base-url "http://localhost:11434/v1///"))))
+
+(deftest models-url-tolerates-trailing-slash
+  (testing "trailing slash must not produce //v1/models (Ollama 307)"
+    (is (= "http://localhost:11434/v1/models"
+           (lcm-http/models-url "http://localhost:11434/v1/")))
+    (is (= "http://localhost:11434/v1/models"
+           (lcm-http/models-url "http://localhost:11434/")))
+    (is (= "http://localhost:11434/v1/models"
+           (lcm-http/models-url "http://localhost:11434/v1")))
+    (is (= "https://ollama.com/v1/models"
+           (lcm-http/models-url "https://ollama.com/v1/")))))

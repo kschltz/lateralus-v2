@@ -2,10 +2,16 @@
   "Pure Integrant builders for lateralus CLI profiles.
    Profiles persist as plain settings maps (no secrets); `build`
    expands them to Integrant with `(ig/ref …)` at load time."
-  (:require [integrant.core :as ig]))
+  (:require [clojure.string :as str]
+            [integrant.core :as ig]))
 
 (def local-base-url "http://localhost:11434/v1")
 (def cloud-base-url "https://ollama.com/v1")
+
+(defn- normalize-base-url
+  "Strip trailing slashes so model-list URLs do not become `…/v1//v1/models`."
+  [url]
+  (when url (str/replace (str url) #"/+$" "")))
 
 (def tool-group-catalog
   "Ordered tool groups shown in the interactive profile checklist."
@@ -78,12 +84,13 @@
   [settings]
   (let [input (dissoc settings :api-key)
         backend (keyword (or (:backend input) (:backend default-settings)))
-        url (or (not-empty (:base-url input))
-                (case backend
-                  :ollama-cloud cloud-base-url
-                  :custom       (or (not-empty (:base-url default-settings))
-                                    local-base-url)
-                  local-base-url))
+        url (normalize-base-url
+             (or (not-empty (:base-url input))
+                 (case backend
+                   :ollama-cloud cloud-base-url
+                   :custom       (or (not-empty (:base-url default-settings))
+                                     local-base-url)
+                   local-base-url)))
         workbench? (boolean (if (contains? input :workbench?)
                               (:workbench? input)
                               (:workbench? default-settings)))]
