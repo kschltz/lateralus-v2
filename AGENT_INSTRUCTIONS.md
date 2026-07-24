@@ -3,6 +3,7 @@
 ## Canonical Sources
 
 - **Active goal:** `goals/lateralus-v2-rewrite/goal.md` → `facts.md` → `plan.md`
+- **Follow-up goal (MCP client tools):** `goals/mcp-client-tools/goal.md` → `plan.md`
 - **Architecture overview:** `docs/architecture.md`
 - **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
 - **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek`/`:ddg` opt-in, `:lateralus/web-tools` Integrant key)
