@@ -314,17 +314,33 @@
                         (not-empty (:host opts))
                         "127.0.0.1")
         p        (open (cond-> {:window-title (or (:window-title opts) "lateralus portal")
-                                :value        viz-atom}
+                                :value        viz-atom
+                                ;; Workbench embeds Portal in an iframe — never
+                                ;; spawn a separate browser window.
+                                :launcher     false}
                          (contains? opts :app) (assoc :app (:app opts))
                          (:theme opts)         (assoc :theme (:theme opts))
                          portal-port           (assoc :port portal-port)
                          portal-host           (assoc :host portal-host)))
         raw-url  (try (url p) (catch Throwable _ nil))
         adv-host (advertise-host portal-host)
-        pub-url  (cond
-                   portal-port (str "http://" adv-host ":" portal-port)
-                   raw-url     (rewrite-url-host raw-url adv-host)
-                   :else       nil)]
+        ;; Prefer Portal's own URL (includes ?<session-uuid>), but advertise
+        ;; on the public host / configured port. Dropping the session id used
+        ;; to break the iframe (empty Portal session + unreachable :7870).
+        pub-url  (let [session (when raw-url
+                                 (try (.getRawQuery (java.net.URI. (str raw-url)))
+                                      (catch Exception _ nil)))
+                       port    (cond
+                                 (and portal-port (pos? (long portal-port)))
+                                 (long portal-port)
+                                 raw-url
+                                 (try (let [p (.getPort (java.net.URI. (str raw-url)))]
+                                        (when (pos? p) p))
+                                      (catch Exception _ nil)))]
+                   (when (or port session)
+                     (str "http://" adv-host
+                          (when port (str ":" port))
+                          (when session (str "?" session)))))]
     {:portal   p
      :url      pub-url
      :viz-atom viz-atom}))

@@ -24,13 +24,12 @@ Fallback (no host daemon): compose starts an isolated `ollama` volume and pulls
 `LATERALUS_MODEL` (default `llama3.2`). Force that path with
 `LATERALUS_FORCE_DOCKER_OLLAMA=1`.
 
-Open **http://localhost:7860** for CHAT | Portal (Portal iframe on **:7870**).
+Open **http://localhost:7860** for CHAT | Portal.
 
-Remote viewers (Tailscale MagicDNS, LAN IP): set
-`LATERALUS_WORKBENCH_HOST=0.0.0.0` so both CHAT and Portal bind on all
-interfaces, publish **7860** and **7870**, then open the workbench via the
-MagicDNS name. The Portal iframe host follows the browser `Host` header
-(so it is not stuck on `localhost`).
+Portal is mounted on the same origin/port as CHAT (`/rpc`, `/main.js`,
+`/?<session>`), so remote viewers (Tailscale MagicDNS, LAN) only need
+**7860**. Set `LATERALUS_WORKBENCH_HOST=0.0.0.0` and open the MagicDNS
+name — the iframe no longer depends on a published **7870**.
 
 ## Useful knobs
 
@@ -40,9 +39,9 @@ MagicDNS name. The Portal iframe host follows the browser `Host` header
 | `LATERALUS_DOCKER_OLLAMA_URL` | host or `http://ollama:11434/v1` | Rewrite target for localhost:11434 inside Docker |
 | `LATERALUS_FORCE_DOCKER_OLLAMA` | `0` | `1` = always use compose Ollama |
 | `LATERALUS_LIST_CLOUD` | `0` | `1` = merge Ollama Cloud ids into local `?` in Docker |
-| `LATERALUS_WORKBENCH_HOST` | `0.0.0.0` (Docker) | Bind address for CHAT + Portal |
-| `LATERALUS_WORKBENCH_PUBLIC_HOST` | `localhost` (Docker) | Startup advertise host only; runtime iframe uses request Host |
-| `LATERALUS_PORTAL_PORT` | `7870` (Docker) | Portal HTTP port (must be reachable by the browser) |
+| `LATERALUS_WORKBENCH_HOST` | `0.0.0.0` (Docker) | Bind address for CHAT (and Portal's private server) |
+| `LATERALUS_WORKBENCH_PUBLIC_HOST` | `localhost` (Docker) | Startup advertise host only; iframe uses CHAT origin |
+| `LATERALUS_PORTAL_PORT` | `7870` (Docker) | Private Portal server port (optional; iframe uses :7860) |
 | `OLLAMA_API_KEY` | _(empty)_ | Required for Ollama Cloud profiles |
 | `LATERALUS_CONFIG_HOME` | `/data/config` | Profile store inside the container |
 

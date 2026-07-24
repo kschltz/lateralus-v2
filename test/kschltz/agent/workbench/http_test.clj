@@ -33,6 +33,31 @@
   (is (= "http://127.0.0.1:7870"
          (http/rewrite-url-host "http://127.0.0.1:7870" ""))))
 
+(deftest portal-session-id-and-same-origin-url
+  (let [sid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
+    (is (= sid (http/portal-session-id (str "http://127.0.0.1:7870?" sid))))
+    (is (nil? (http/portal-session-id "http://127.0.0.1:7870")))
+    (is (http/portal-session-query? (str "/?" sid)))
+    (is (http/portal-session-query? "/" sid)
+        "http-kit puts the UUID in :query-string")
+    (is (not (http/portal-session-query? "/")))
+    (is (not (http/portal-session-query? "/?foo=bar")))
+    (is (= (str "http://box.tailnet.ts.net:7860/?" sid)
+           (http/portal-url-for-request
+            (str "http://127.0.0.1:7870?" sid)
+            {:headers {"host" "box.tailnet.ts.net:7860"}})))))
+
+(deftest portal-path-routing
+  (let [sid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
+    (is (http/portal-path? :get "/main.js" "/main.js"))
+    (is (http/portal-path? :get "/rpc" "/rpc"))
+    (is (http/portal-path? :post "/load" "/load"))
+    (is (http/portal-path? :get "/" (str "/?" sid)))
+    (is (http/portal-path? :get "/" "/" sid))
+    (is (not (http/portal-path? :get "/" "/" nil)))
+    (is (not (http/portal-path? :get "/app.js" "/app.js")))
+    (is (not (http/portal-path? :get "/api/state" "/api/state")))))
+
 (deftest handler-message-and-state
   (let [h (hub/create-hub {:session-id "http-test"})
         attached (atom nil)
@@ -58,16 +83,18 @@
     (is (= 200 (:status attach)))
     (is (string? (:id @attached)))))
 
-(deftest api-state-rewrites-portal-url-to-request-host
-  (let [h (hub/create-hub {:session-id "tailscale-test"})
-        _ (hub/set-portal-url! h "http://127.0.0.1:7870/")
+(deftest api-state-rewrites-portal-url-to-chat-origin
+  (let [sid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        h (hub/create-hub {:session-id "tailscale-test"})
+        _ (hub/set-portal-url! h (str "http://127.0.0.1:7870?" sid))
         handler (http/make-handler h {})
         res (handler {:request-method :get
                       :uri "/api/state"
                       :headers {"host" "box.tailnet.ts.net:7860"}})
         body (json/parse-string (:body res) true)]
     (is (= 200 (:status res)))
-    (is (= "http://box.tailnet.ts.net:7870/" (:portal-url body)))))
+    (is (= (str "http://box.tailnet.ts.net:7860/?" sid) (:portal-url body))
+        "iframe must use CHAT origin/port, not private :7870")))
 
 (deftest ^:workbench start-server-serves-index
   (when (available?)
@@ -82,6 +109,7 @@
           (is (re-find #"^http://127\.0\.0\.1:\d+$" url))
           (let [html (slurp (str url "/"))]
             (is (re-find #"CHAT" html))
-            (is (re-find #"PORTAL" html)))
+            (is (re-find #"PORTAL" html))
+            (is (re-find #"browserPortalUrl" (slurp (str url "/app.js")))))
           (finally
             (http/stop-server! server)))))))

@@ -73,24 +73,28 @@
     }
   }
 
+  // Portal's session query must remain a bare UUID (`?<uuid>`). Cache-bust
+  // with a hash fragment so we never corrupt session parsing.
   function bustPortalUrl(url) {
     if (!url) return url;
-    const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}_wb=${Date.now()}`;
+    try {
+      const u = new URL(url, window.location.origin);
+      u.hash = "wb=" + Date.now();
+      return u.toString();
+    } catch (_) {
+      return url;
+    }
   }
 
-  // Portal often advertises localhost/127.0.0.1 at process start. When CHAT is
-  // opened via Tailscale MagicDNS / LAN IP, rewrite the iframe host to match
-  // the page host so the browser does not aim the iframe at the viewer's own
-  // loopback. Port/path/query from the server URL are preserved.
+  // Embed Portal on the CHAT origin/port. Remote viewers (Tailscale MagicDNS)
+  // only need :7860 — the workbench mounts Portal's /rpc + assets in-process.
   function browserPortalUrl(url) {
     if (!url) return url;
     try {
       const u = new URL(url, window.location.origin);
-      if (u.hostname !== window.location.hostname) {
-        u.hostname = window.location.hostname;
-      }
-      return u.toString();
+      const session = (u.search || "").replace(/^\?/, "").split("&")[0];
+      if (!session) return window.location.origin + "/";
+      return `${window.location.origin}/?${session}`;
     } catch (_) {
       return url;
     }
