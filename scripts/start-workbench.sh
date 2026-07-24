@@ -53,7 +53,8 @@ LATERALUS_MODEL="$MODEL" "${COMPOSE[@]}" --profile setup run --rm pull-model
 echo ""
 echo "==> starting lateralus (interactive profile gate, then workbench)"
 echo "    Workbench UI: http://localhost:7860"
-echo "    At the profile prompts, press Enter to keep the seeded 'docker' defaults."
+echo "    Tip: pick the 'docker' profile (base-url http://ollama:11434/v1)."
+echo "    Host profiles that use localhost:11434 will be rewritten to ollama inside Docker."
 echo ""
 
 # Open the UI shortly after the container is up (workbench binds 0.0.0.0:7860).

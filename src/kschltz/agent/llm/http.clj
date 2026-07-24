@@ -63,6 +63,29 @@
   [base-url]
   (str/replace (str base-url) #"/+$" ""))
 
+(defn resolve-base-url
+  "Normalize `base-url`, and when `LATERALUS_IN_DOCKER=1` rewrite
+   `localhost`/`127.0.0.1:11434` to the compose Ollama service
+   (`LATERALUS_DOCKER_OLLAMA_URL`, default `http://ollama:11434/v1`).
+
+   Host-oriented profiles shared into the container otherwise fail
+   model-list/chat with an empty error (nothing listens on container
+   localhost:11434).
+
+   Arity-2 `getenv` is `(fn [name] → string|nil)` for tests."
+  ([base-url]
+   (resolve-base-url base-url #(System/getenv %)))
+  ([base-url getenv]
+   (let [base (normalize-base-url base-url)
+         in-docker? (= "1" (getenv "LATERALUS_IN_DOCKER"))
+         docker-ollama (normalize-base-url
+                        (or (not-empty (getenv "LATERALUS_DOCKER_OLLAMA_URL"))
+                            "http://ollama:11434/v1"))]
+     (if (and in-docker?
+              (re-find #"(?i)(?:localhost|127\.0\.0\.1):11434" base))
+       docker-ollama
+       base))))
+
 (defn- chat-completions-url
   "Build the chat completions URL from the base URL. Accepts both
    conventions: base-url with or without a trailing /v1 segment."
@@ -133,13 +156,15 @@
 
 (defn- list-models-openai
   [base-url api-key]
-  (parse-openai-model-ids (get-json (models-url base-url) api-key)))
+  (parse-openai-model-ids
+   (get-json (models-url (resolve-base-url base-url)) api-key)))
 
 (defn- list-models-ollama-tags
   "List pulled models via native Ollama `/api/tags` (no Bearer needed)."
   [base-url]
   (parse-ollama-tag-ids
-   (get-json (str (ollama-native-root base-url) "/api/tags") nil)))
+   (get-json (str (ollama-native-root (resolve-base-url base-url)) "/api/tags")
+             nil)))
 
 (def ^:private ollama-cloud-base-url
   "OpenAI-compatible Ollama Cloud base URL."
@@ -235,10 +260,11 @@
    picker useful for Ollama Cloud without forcing `--base-url https://ollama.com/v1`."
   ([base-url] (list-models-thorough base-url nil))
   ([base-url api-key]
-   (let [primary (list-models base-url api-key)
+   (let [base    (resolve-base-url base-url)
+         primary (list-models base api-key)
          key     (resolve-ollama-api-key api-key)]
-     (if (or (ollama-cloud-base? base-url)
-             (not (local-ollama-base? base-url))
+     (if (or (ollama-cloud-base? base)
+             (not (local-ollama-base? base))
              (str/blank? key))
        (->> primary (sort-by model-menu-key) vec)
        (let [cloud (try (list-models ollama-cloud-base-url key)
@@ -252,7 +278,7 @@
            tool-choice connect-timeout-ms request-timeout-ms]
     :or   {connect-timeout-ms default-connect-timeout-ms
            request-timeout-ms  default-request-timeout-ms}}]
-  (let [url      (chat-completions-url base-url)
+  (let [url      (chat-completions-url (resolve-base-url base-url))
         body     (cond-> {:model    model
                           :messages (vec messages)}
                    temperature (assoc :temperature temperature)

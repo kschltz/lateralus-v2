@@ -64,6 +64,21 @@
       (#{"n" "no"} t) false
       :else default?)))
 
+(defn- format-list-models-error
+  "Human-readable list-models failure, never an empty paren."
+  [t base-url]
+  (let [msg (or (not-empty (ex-message t))
+                (some-> t class .getSimpleName)
+                "unknown error")
+        status (some-> (ex-data t) :status)
+        docker-localhost?
+        (and (= "1" (System/getenv "LATERALUS_IN_DOCKER"))
+             (re-find #"(?i)(?:localhost|127\.0\.0\.1):11434" (str base-url)))]
+    (str msg
+         (when status (str " (HTTP " status ")"))
+         (when docker-localhost?
+           " — inside Docker use http://ollama:11434/v1 (profile 'docker'), not localhost"))))
+
 (defn- workbench-available?
   []
   (try
@@ -104,7 +119,7 @@
       (let [backend (keyword backend-s)
             default-url (case backend
                           :ollama-cloud templates/cloud-base-url
-                          :ollama-local templates/local-base-url
+                          :ollama-local (templates/default-local-base-url)
                           (:base-url cur))
             base-url (prompt-line out read-line-fn "Base URL" default-url)
             _ (when (nil? base-url) (throw (ex-info "no-tty" {:phase :no-tty})))
@@ -140,11 +155,13 @@
                           (catch clojure.lang.ExceptionInfo e
                             (if (= :no-tty (:phase (ex-data e))) (throw e)
                                 (do (.println out (str "  (could not list models: "
-                                                       (ex-message e) ")"))
+                                                       (format-list-models-error e base-url)
+                                                       ")"))
                                     (prompt-line out read-line-fn "Model name" model-default))))
                           (catch Throwable t
                             (.println out (str "  (could not list models: "
-                                               (ex-message t) ")"))
+                                               (format-list-models-error t base-url)
+                                               ")"))
                             (prompt-line out read-line-fn "Model name" model-default)))
 
                         :else (:raw cmd)))

@@ -44,6 +44,8 @@ services:
       LATERALUS_WORKBENCH_HOST: "0.0.0.0"
       LATERALUS_WORKBENCH_PUBLIC_HOST: localhost
       LATERALUS_PORTAL_PORT: "7870"
+      LATERALUS_IN_DOCKER: "1"
+      LATERALUS_DOCKER_OLLAMA_URL: http://ollama:11434/v1
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       LATERALUS_CONFIG_HOME: /data/config
       # Optional overrides (only used when seeding a fresh volume, or if you

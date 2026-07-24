@@ -178,3 +178,17 @@
            (lcm-http/models-url "http://localhost:11434/v1")))
     (is (= "https://ollama.com/v1/models"
            (lcm-http/models-url "https://ollama.com/v1/")))))
+
+(deftest resolve-base-url-rewrites-localhost-in-docker
+  (let [docker (fn [k] (get {"LATERALUS_IN_DOCKER" "1"
+                             "LATERALUS_DOCKER_OLLAMA_URL" "http://ollama:11434/v1"}
+                            k))
+        host (fn [_] nil)]
+    (is (= "http://ollama:11434/v1"
+           (lcm-http/resolve-base-url "http://localhost:11434/v1" docker)))
+    (is (= "http://ollama:11434/v1"
+           (lcm-http/resolve-base-url "http://127.0.0.1:11434/v1/" docker)))
+    (is (= "http://localhost:11434/v1"
+           (lcm-http/resolve-base-url "http://localhost:11434/v1" host)))
+    (is (= "https://api.cerebras.ai/v1"
+           (lcm-http/resolve-base-url "https://api.cerebras.ai/v1" docker)))))

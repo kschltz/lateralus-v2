@@ -7,11 +7,20 @@
 
 (def local-base-url "http://localhost:11434/v1")
 (def cloud-base-url "https://ollama.com/v1")
+(def docker-local-base-url "http://ollama:11434/v1")
 
 (defn- normalize-base-url
   "Strip trailing slashes so model-list URLs do not become `…/v1//v1/models`."
   [url]
   (when url (str/replace (str url) #"/+$" "")))
+
+(defn default-local-base-url
+  "Host default is localhost; inside Docker compose use the `ollama` service."
+  []
+  (if (= "1" (System/getenv "LATERALUS_IN_DOCKER"))
+    (or (not-empty (System/getenv "LATERALUS_DOCKER_OLLAMA_URL"))
+        docker-local-base-url)
+    local-base-url))
 
 (def tool-group-catalog
   "Ordered tool groups shown in the interactive profile checklist."
@@ -70,9 +79,11 @@
     (cond-> merged
       (not workbench?) (assoc :workbench false))))
 
-(def default-settings
+(defn default-settings
+  "Fresh profile defaults. `:base-url` follows the runtime (Docker vs host)."
+  []
   {:backend      :ollama-local
-   :base-url     local-base-url
+   :base-url     (default-local-base-url)
    :model        nil
    :web-provider :ddg
    :workbench?   false
@@ -82,23 +93,24 @@
   "Fill defaults and coerce a settings map. Never keeps `:api-key`.
    When `:base-url` is omitted, derive it from `:backend`."
   [settings]
-  (let [input (dissoc settings :api-key)
-        backend (keyword (or (:backend input) (:backend default-settings)))
+  (let [defaults (default-settings)
+        input (dissoc settings :api-key)
+        backend (keyword (or (:backend input) (:backend defaults)))
         url (normalize-base-url
              (or (not-empty (:base-url input))
                  (case backend
                    :ollama-cloud cloud-base-url
-                   :custom       (or (not-empty (:base-url default-settings))
-                                     local-base-url)
-                   local-base-url)))
+                   :custom       (or (not-empty (:base-url defaults))
+                                     (default-local-base-url))
+                   (default-local-base-url))))
         workbench? (boolean (if (contains? input :workbench?)
                               (:workbench? input)
-                              (:workbench? default-settings)))]
+                              (:workbench? defaults)))]
     {:backend      backend
      :base-url     url
      :model        (not-empty (:model input))
      :web-provider (keyword (or (:web-provider input)
-                                (:web-provider default-settings)))
+                                (:web-provider defaults)))
      :workbench?   workbench?
      :tool-groups  (normalize-tool-groups (:tool-groups input) workbench?)}))
 
