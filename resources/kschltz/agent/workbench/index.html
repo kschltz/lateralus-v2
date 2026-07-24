@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>lateralus workbench</title>
-  <link rel="stylesheet" href="/app.css?v=8" />
+  <link rel="stylesheet" href="/app.css?v=9" />
 </head>
-<body>
+<body data-portal-mode="split">
   <div id="shell">
     <section id="chat" aria-label="Chat">
       <header class="pane-head">
@@ -23,18 +23,35 @@
         </div>
       </div>
     </section>
+    <div id="divider" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
     <section id="portal" aria-label="Portal">
-      <header class="pane-head">
+      <header class="pane-head" id="portal-head">
         <h1>PORTAL</h1>
         <div class="portal-actions">
+          <button type="button" id="portal-float" class="meta-btn only-split" title="Pop out into a floating panel">float</button>
+          <button type="button" id="portal-dock" class="meta-btn only-float" title="Dock back into the split">dock</button>
+          <button type="button" id="portal-snap-left" class="meta-btn only-float" title="Snap to left half">⇤</button>
+          <button type="button" id="portal-snap-right" class="meta-btn only-float" title="Snap to right half">⇥</button>
+          <button type="button" id="portal-max" class="meta-btn only-float" title="Maximize">▣</button>
           <button type="button" id="portal-reload" class="meta-btn" title="Reload Portal iframe">reload</button>
+          <button type="button" id="portal-hide" class="meta-btn" title="Hide Portal (Ctrl/Cmd-J)">hide</button>
           <a id="portal-link" class="meta" href="#" target="_blank" rel="noreferrer">open ↗</a>
         </div>
       </header>
       <iframe id="portal-frame" title="Portal visualizer"></iframe>
       <p id="portal-fallback" class="fallback hidden">Portal URL not available yet.</p>
+      <div class="rh rh-n" data-dir="n"></div>
+      <div class="rh rh-s" data-dir="s"></div>
+      <div class="rh rh-e" data-dir="e"></div>
+      <div class="rh rh-w" data-dir="w"></div>
+      <div class="rh rh-ne" data-dir="ne"></div>
+      <div class="rh rh-nw" data-dir="nw"></div>
+      <div class="rh rh-se" data-dir="se"></div>
+      <div class="rh rh-sw" data-dir="sw"></div>
     </section>
   </div>
-  <script src="/app.js?v=8"></script>
+  <button type="button" id="portal-show" title="Show Portal (Ctrl/Cmd-J)">▸ Portal</button>
+  <div id="drag-shield" aria-hidden="true"></div>
+  <script src="/app.js?v=9"></script>
 </body>
 </html>

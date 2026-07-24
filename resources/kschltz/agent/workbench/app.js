@@ -290,6 +290,218 @@
     }
   });
 
+  /* ---------------------------------------------------------------------
+   * Portal layout controller: split (docked, draggable divider) | float
+   * (draggable/resizable window) | hidden. Persisted to localStorage.
+   * ------------------------------------------------------------------- */
+  const shellEl = document.getElementById("shell");
+  const dividerEl = document.getElementById("divider");
+  const portalEl = document.getElementById("portal");
+  const portalHead = document.getElementById("portal-head");
+  const shieldEl = document.getElementById("drag-shield");
+  const showPill = document.getElementById("portal-show");
+  const rootStyle = document.documentElement.style;
+
+  const LKEY = "lateralus.workbench.layout";
+  const MIN_W = 320;
+  const MIN_H = 220;
+  const MIN_CHAT = 300;
+
+  const defaults = () => ({
+    mode: "split",
+    prev: "split",
+    splitW: Math.round(window.innerWidth * 0.5),
+    float: {
+      x: Math.round(window.innerWidth * 0.45),
+      y: Math.round(window.innerHeight * 0.12),
+      w: 640,
+      h: Math.round(window.innerHeight * 0.62),
+    },
+  });
+
+  function loadLayout() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LKEY) || "null");
+      if (!saved) return defaults();
+      return Object.assign(defaults(), saved, {
+        float: Object.assign(defaults().float, saved.float || {}),
+      });
+    } catch (_) {
+      return defaults();
+    }
+  }
+
+  let layout = loadLayout();
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  function saveLayout() {
+    try {
+      localStorage.setItem(LKEY, JSON.stringify(layout));
+    } catch (_) {}
+  }
+
+  function clampFloat() {
+    const f = layout.float;
+    f.w = clamp(f.w, MIN_W, window.innerWidth);
+    f.h = clamp(f.h, MIN_H, window.innerHeight);
+    f.x = clamp(f.x, 0, Math.max(0, window.innerWidth - f.w));
+    f.y = clamp(f.y, 0, Math.max(0, window.innerHeight - 40));
+  }
+
+  function applyLayout() {
+    document.body.dataset.portalMode = layout.mode;
+    const maxSplit = Math.max(MIN_W, window.innerWidth - MIN_CHAT);
+    layout.splitW = clamp(layout.splitW, MIN_W, maxSplit);
+    rootStyle.setProperty("--portal-w", layout.splitW + "px");
+    clampFloat();
+    rootStyle.setProperty("--pf-x", layout.float.x + "px");
+    rootStyle.setProperty("--pf-y", layout.float.y + "px");
+    rootStyle.setProperty("--pf-w", layout.float.w + "px");
+    rootStyle.setProperty("--pf-h", layout.float.h + "px");
+    saveLayout();
+  }
+
+  function setMode(mode) {
+    if (mode !== "hidden" && layout.mode !== "hidden") layout.prev = layout.mode;
+    if (mode === "hidden") layout.prev = layout.mode === "hidden" ? layout.prev : layout.mode;
+    layout.mode = mode;
+    applyLayout();
+    // The iframe stays mounted across float/dock/hide, so a layout change must
+    // NOT reload it (reloading flashes Portal's loader and drops render state).
+    // Socket recovery is handled by the post-turn force-reload + manual reload.
+  }
+
+  function showPortal() {
+    setMode(layout.prev && layout.prev !== "hidden" ? layout.prev : "split");
+  }
+
+  // Generic pointer-drag helper with an iframe shield + cursor override.
+  function beginDrag(cursor, onMove, onEnd) {
+    shieldEl.classList.add("active");
+    shieldEl.style.cursor = cursor;
+    const move = (ev) => onMove(ev);
+    const up = (ev) => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      shieldEl.classList.remove("active");
+      shieldEl.style.cursor = "";
+      if (onEnd) onEnd(ev);
+      saveLayout();
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  }
+
+  // Divider: resize the split columns.
+  dividerEl.addEventListener("pointerdown", (e) => {
+    if (layout.mode !== "split") return;
+    e.preventDefault();
+    dividerEl.classList.add("dragging");
+    beginDrag(
+      "col-resize",
+      (ev) => {
+        const w = window.innerWidth - ev.clientX;
+        layout.splitW = clamp(w, MIN_W, window.innerWidth - MIN_CHAT);
+        rootStyle.setProperty("--portal-w", Math.round(layout.splitW) + "px");
+      },
+      () => dividerEl.classList.remove("dragging")
+    );
+  });
+  dividerEl.addEventListener("dblclick", () => {
+    layout.splitW = Math.round(window.innerWidth * 0.5);
+    applyLayout();
+  });
+
+  // Title-bar drag (float mode) — ignore clicks on the control buttons.
+  portalHead.addEventListener("pointerdown", (e) => {
+    if (layout.mode !== "float") return;
+    if (e.target.closest("button, a")) return;
+    e.preventDefault();
+    const f = layout.float;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const ox = f.x;
+    const oy = f.y;
+    beginDrag("move", (ev) => {
+      f.x = clamp(ox + ev.clientX - sx, 0, window.innerWidth - f.w);
+      f.y = clamp(oy + ev.clientY - sy, 0, window.innerHeight - 40);
+      rootStyle.setProperty("--pf-x", Math.round(f.x) + "px");
+      rootStyle.setProperty("--pf-y", Math.round(f.y) + "px");
+    });
+  });
+
+  // Resize handles (float mode).
+  portalEl.querySelectorAll(".rh").forEach((handle) => {
+    handle.addEventListener("pointerdown", (e) => {
+      if (layout.mode !== "float") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const dir = handle.dataset.dir;
+      const f = layout.float;
+      const sx = e.clientX;
+      const sy = e.clientY;
+      const o = { x: f.x, y: f.y, w: f.w, h: f.h };
+      beginDrag(getComputedStyle(handle).cursor, (ev) => {
+        const dx = ev.clientX - sx;
+        const dy = ev.clientY - sy;
+        if (dir.includes("e")) f.w = clamp(o.w + dx, MIN_W, window.innerWidth - o.x);
+        if (dir.includes("s")) f.h = clamp(o.h + dy, MIN_H, window.innerHeight - o.y);
+        if (dir.includes("w")) {
+          const w = clamp(o.w - dx, MIN_W, o.x + o.w);
+          f.x = o.x + (o.w - w);
+          f.w = w;
+        }
+        if (dir.includes("n")) {
+          const h = clamp(o.h - dy, MIN_H, o.y + o.h);
+          f.y = o.y + (o.h - h);
+          f.h = h;
+        }
+        rootStyle.setProperty("--pf-x", Math.round(f.x) + "px");
+        rootStyle.setProperty("--pf-y", Math.round(f.y) + "px");
+        rootStyle.setProperty("--pf-w", Math.round(f.w) + "px");
+        rootStyle.setProperty("--pf-h", Math.round(f.h) + "px");
+      });
+    });
+  });
+
+  // Window-control buttons.
+  const on = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("click", fn);
+  };
+  on("portal-float", () => setMode("float"));
+  on("portal-dock", () => setMode("split"));
+  on("portal-hide", () => setMode("hidden"));
+  on("portal-show", showPortal);
+  showPill.addEventListener("click", showPortal);
+  on("portal-snap-left", () => {
+    layout.float = { x: 0, y: 0, w: Math.round(window.innerWidth / 2), h: window.innerHeight };
+    applyLayout();
+  });
+  on("portal-snap-right", () => {
+    const w = Math.round(window.innerWidth / 2);
+    layout.float = { x: window.innerWidth - w, y: 0, w, h: window.innerHeight };
+    applyLayout();
+  });
+  on("portal-max", () => {
+    layout.float = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+    applyLayout();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && (e.key === "j" || e.key === "J")) {
+      e.preventDefault();
+      layout.mode === "hidden" ? showPortal() : setMode("hidden");
+    } else if (e.key === "Escape" && layout.mode === "float") {
+      setMode("hidden");
+    }
+  });
+
+  window.addEventListener("resize", applyLayout);
+  applyLayout();
+
   // Always keep a slow heartbeat — SSE alone proved unreliable mid-turn.
   setInterval(refresh, 2500);
 

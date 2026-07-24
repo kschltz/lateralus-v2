@@ -23,9 +23,17 @@ html, body {
   font: 14px/1.45 "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
+:root {
+  --portal-w: 50vw;   /* split-mode Portal column width (draggable) */
+  --pf-x: 45vw;       /* float-mode panel position / size */
+  --pf-y: 12vh;
+  --pf-w: 640px;
+  --pf-h: 62vh;
+}
+
 #shell {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 10px var(--portal-w);
   grid-template-rows: 100%;
   width: 100vw;
   height: 100vh;
@@ -45,6 +53,64 @@ html, body {
   overflow: hidden; /* fixed pane window; only #turns / iframe scroll */
   background: var(--pane);
   border-right: 1px solid var(--line);
+}
+
+/* Draggable divider between the CHAT and PORTAL panes (split mode).
+   Wide (10px) hit target with a thin centered visual line so it is easy
+   to grab without looking heavy. */
+#divider {
+  position: relative;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+#divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  background: var(--line);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+#divider:hover::before,
+#divider.dragging::before {
+  background: var(--accent);
+  width: 4px;
+}
+
+/* Control-visibility helpers driven by body[data-portal-mode]. */
+body[data-portal-mode="split"] .only-float { display: none !important; }
+body[data-portal-mode="float"] .only-split { display: none !important; }
+
+/* HIDDEN: Portal off, CHAT takes the whole shell. */
+body[data-portal-mode="hidden"] #shell { grid-template-columns: 1fr; }
+body[data-portal-mode="hidden"] #divider,
+body[data-portal-mode="hidden"] #portal { display: none; }
+
+/* FLOAT: Portal becomes a draggable, resizable window over the CHAT. */
+body[data-portal-mode="float"] #shell { grid-template-columns: 1fr; }
+body[data-portal-mode="float"] #divider { display: none; }
+body[data-portal-mode="float"] #portal {
+  position: fixed;
+  left: var(--pf-x);
+  top: var(--pf-y);
+  width: var(--pf-w);
+  height: var(--pf-h);
+  z-index: 40;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 10px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+body[data-portal-mode="float"] #portal-head {
+  cursor: move;
+  user-select: none;
+  background: color-mix(in srgb, var(--accent) 8%, var(--pane));
 }
 
 .pane-head {
@@ -247,6 +313,38 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .fallback { flex: 1 1 auto; min-height: 0; padding: 1rem; color: var(--muted); overflow: auto; }
 .hidden { display: none; }
+
+/* Resize handles — only interactive while the Portal is a floating window. */
+.rh { display: none; position: absolute; z-index: 41; touch-action: none; }
+body[data-portal-mode="float"] .rh { display: block; }
+.rh-n { top: -3px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.rh-s { bottom: -3px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.rh-e { right: -3px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.rh-w { left: -3px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.rh-ne { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+.rh-nw { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.rh-se { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.rh-sw { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+
+/* Transparent shield placed over the iframe during drag/resize so the
+   Portal iframe does not swallow pointer events mid-gesture. */
+#drag-shield { position: fixed; inset: 0; z-index: 100; display: none; }
+#drag-shield.active { display: block; }
+
+/* Floating "show Portal" pill, visible only while the Portal is hidden. */
+#portal-show {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: none;
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font: 600 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.06em;
+}
+body[data-portal-mode="hidden"] #portal-show { display: inline-flex; }
 
 @media (max-width: 900px) {
   #shell {
