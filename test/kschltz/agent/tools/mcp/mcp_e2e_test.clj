@@ -12,6 +12,7 @@
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [fake-mcp-http-server :as fake-http]
             [integrant.core :as ig]
             [kschltz.agent.system :as system]
             [kschltz.agent.tool :as tool]
@@ -96,6 +97,31 @@
                                        {:message "system-e2e"} {}))))
           (finally
             (ig/halt! sys)))))))
+
+(deftest ^:e2e e2e-mcp-http-fake-server-round-trip
+  (when fake-e2e?
+    (testing "Streamable HTTP fake server through Integrant tool registry"
+      (let [{:keys [url stop!]} (fake-http/start! 0)]
+        (try
+          (let [cfg (-> system/default-config
+                        (assoc :lateralus/mcp-tools
+                               {:servers
+                                {"remote"
+                                 {:transport :http
+                                  :url url
+                                  :allow-http? true
+                                  :allow-loopback? true}}}))
+                sys (ig/init cfg)]
+            (try
+              (let [reg (:lateralus/tool-registry sys)]
+                (is (contains? reg "remote_echo"))
+                (is (re-find #"http-e2e"
+                             (tool/-invoke (get reg "remote_echo")
+                                           {:message "http-e2e"} {}))))
+              (finally
+                (ig/halt! sys))))
+          (finally
+            (stop!)))))))
 
 (deftest ^:e2e e2e-mcp-filesystem-server-read
   (when live-e2e?

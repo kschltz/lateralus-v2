@@ -141,19 +141,23 @@ but block runtime dependency loading. See [`docs/runtime-eval.md`](docs/runtime-
 
 ## MCP client tools
 
-Lateralus can attach widely available **stdio MCP servers** (Claude Desktop /
-Cursor `command` / `args` / `env` shape) and expose their tools to the LLM.
-Default config is air-gapped (`:servers {}`). Opt in via
-`:lateralus/mcp-tools`, which spawns servers at Integrant init, discovers
-tools, remaps names to portable prefixed ids (`filesystem_read_file`), and
-reaps children on halt. See [`docs/mcp.md`](docs/mcp.md).
+Lateralus can attach **stdio** MCP servers (Claude Desktop / Cursor
+`command` / `args` / `env`) and **remote Streamable HTTP** MCP endpoints
+(`:url` + optional Bearer/headers). Default config is air-gapped
+(`:servers {}`). Opt in via `:lateralus/mcp-tools`; tools are discovered at
+Integrant init, remapped to portable prefixed ids (`filesystem_read_file`),
+and closed on halt. Remote URLs are SSRF-checked (https-only; loopback
+blocked unless opted in). See [`docs/mcp.md`](docs/mcp.md).
 
 ```clojure
 :lateralus/mcp-tools
 {:servers
  {"filesystem"
   {:command "npx"
-   :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}}}
+   :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}
+  "acme"
+  {:url "https://mcp.example.com/mcp"
+   :bearer-token-env "ACME_MCP_TOKEN"}}}
 ```
 
 ## Memory backend
