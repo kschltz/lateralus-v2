@@ -2,18 +2,75 @@
   "Pure Integrant builders for lateralus CLI profiles.
    Profiles persist as plain settings maps (no secrets); `build`
    expands them to Integrant with `(ig/ref …)` at load time."
-  (:require [clojure.string :as str]
-            [integrant.core :as ig]))
+  (:require [integrant.core :as ig]))
 
 (def local-base-url "http://localhost:11434/v1")
 (def cloud-base-url "https://ollama.com/v1")
+
+(def tool-group-catalog
+  "Ordered tool groups shown in the interactive profile checklist."
+  [{:id :files
+    :label "files"
+    :description "workspace file read/write"
+    :ref :lateralus/file-tools}
+   {:id :self
+    :label "self"
+    :description "self/status awareness"
+    :ref :lateralus/self-awareness-tools}
+   {:id :clojure
+    :label "clojure"
+    :description "structured Clojure editing"
+    :ref :lateralus/clojure-tools}
+   {:id :web
+    :label "web"
+    :description "search / fetch / extract"
+    :ref :lateralus/web-tools}
+   {:id :runtime
+    :label "runtime"
+    :description "clojure/eval + add-lib"
+    :ref :lateralus/runtime-tools}
+   {:id :workbench
+    :label "workbench"
+    :description "portal submit tools"
+    :ref :lateralus/workbench-tools
+    :requires-workbench? true}])
+
+(defn tool-group-meta
+  [id]
+  (first (filter #(= id (:id %)) tool-group-catalog)))
+
+(defn default-tool-groups
+  "All core groups on; workbench tools follow workbench?."
+  [workbench?]
+  {:files true
+   :self true
+   :clojure true
+   :web true
+   :runtime true
+   :workbench (boolean workbench?)})
+
+(defn normalize-tool-groups
+  "Coerce a tool-groups map. Unknown keys dropped; missing keys default on.
+   Workbench tools forced off when workbench? is false."
+  [raw workbench?]
+  (let [base (default-tool-groups workbench?)
+        allowed (set (keys base))
+        incoming (into {}
+                       (keep (fn [[k v]]
+                               (let [id (keyword k)]
+                                 (when (allowed id) [id (boolean v)])))
+                             (or raw {})))
+        merged (merge base incoming)]
+    (cond-> merged
+      (not workbench?) (assoc :workbench false))))
 
 (def default-settings
   {:backend      :ollama-local
    :base-url     local-base-url
    :model        nil
    :web-provider :ddg
-   :workbench?   false})
+   :workbench?   false
+   :tool-groups  (default-tool-groups false)})
 
 (defn normalize-settings
   "Fill defaults and coerce a settings map. Never keeps `:api-key`.
@@ -26,15 +83,17 @@
                   :ollama-cloud cloud-base-url
                   :custom       (or (not-empty (:base-url default-settings))
                                     local-base-url)
-                  local-base-url))]
+                  local-base-url))
+        workbench? (boolean (if (contains? input :workbench?)
+                              (:workbench? input)
+                              (:workbench? default-settings)))]
     {:backend      backend
      :base-url     url
      :model        (not-empty (:model input))
      :web-provider (keyword (or (:web-provider input)
                                 (:web-provider default-settings)))
-     :workbench?   (boolean (if (contains? input :workbench?)
-                              (:workbench? input)
-                              (:workbench? default-settings)))}))
+     :workbench?   workbench?
+     :tool-groups  (normalize-tool-groups (:tool-groups input) workbench?)}))
 
 (defn- llm-keys
   [{:keys [base-url model]}]
@@ -46,13 +105,12 @@
      :lateralus/llm-config cfg}))
 
 (defn- tool-registry
-  [workbench?]
-  (cond-> [(ig/ref :lateralus/file-tools)
-           (ig/ref :lateralus/self-awareness-tools)
-           (ig/ref :lateralus/clojure-tools)
-           (ig/ref :lateralus/web-tools)
-           (ig/ref :lateralus/runtime-tools)]
-    workbench? (conj (ig/ref :lateralus/workbench-tools))))
+  [tool-groups]
+  (into []
+        (keep (fn [{:keys [id ref]}]
+                (when (get tool-groups id)
+                  (ig/ref ref))))
+        tool-group-catalog))
 
 (defn- plugins
   [workbench?]
@@ -77,9 +135,11 @@
   "Expand profile settings into a full Integrant config map.
    Never includes `:api-key`."
   [settings]
-  (let [{:keys [base-url model web-provider workbench?] :as s}
+  (let [{:keys [base-url model web-provider workbench? tool-groups] :as s}
         (normalize-settings settings)
-        wb? (boolean workbench?)]
+        wb? (boolean workbench?)
+        groups (normalize-tool-groups tool-groups wb?)
+        web-prov (if (:web groups) web-provider :none)]
     (cond-> (merge
              (llm-keys s)
              {:lateralus/embedder       {:method :noop}
@@ -95,13 +155,14 @@
               :lateralus/logging              {}
               :lateralus/cli-ui               {:enabled? :auto :theme :default}
               :lateralus/thinking             {:mode :preview}
-              :lateralus/web-tools            {:provider web-provider}
-              :lateralus/runtime-tools        {:enabled? true :network? true}
+              :lateralus/web-tools            {:provider web-prov}
+              :lateralus/runtime-tools        {:enabled? (boolean (:runtime groups))
+                                               :network? true}
               :lateralus/loop-opts            {:max-tool-calls-per-turn 100
                                                :max-tool-calls-per-exchange 20
                                                :tool-content-caps {"clojure/eval" 12000
                                                                    "clojure/add-lib" 12000}}
-              :lateralus/tool-registry        (tool-registry wb?)
+              :lateralus/tool-registry        (tool-registry groups)
               :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
               :lateralus/plugins              (plugins wb?)
               :lateralus/agent                (agent-map wb?)})
@@ -134,11 +195,14 @@
 (defn format-summary
   "One-line description for menus."
   [settings]
-  (let [{:keys [backend base-url model web-provider workbench?]}
-        (normalize-settings settings)]
-    (format "%s  model=%s  web=%s  workbench=%s  url=%s"
+  (let [{:keys [backend base-url model web-provider workbench? tool-groups]}
+        (normalize-settings settings)
+        enabled (count (filter val tool-groups))]
+    (format "%s  model=%s  web=%s  workbench=%s  tools=%d/%d  url=%s"
             (name backend)
             (or model "(unset)")
             (name web-provider)
             (if workbench? "yes" "no")
+            enabled
+            (count tool-groups)
             base-url)))

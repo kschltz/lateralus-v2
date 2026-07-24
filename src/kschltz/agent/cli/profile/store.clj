@@ -13,13 +13,23 @@
             [malli.instrument :as mi]
             [kschltz.agent.cli.profile.templates :as templates]))
 
+(def ToolGroups
+  [:map
+   [:files {:optional true} :boolean]
+   [:self {:optional true} :boolean]
+   [:clojure {:optional true} :boolean]
+   [:web {:optional true} :boolean]
+   [:runtime {:optional true} :boolean]
+   [:workbench {:optional true} :boolean]])
+
 (def Settings
   [:map
    [:backend {:optional true} [:enum :ollama-local :ollama-cloud :custom]]
    [:base-url {:optional true} [:maybe :string]]
    [:model {:optional true} [:maybe :string]]
    [:web-provider {:optional true} [:enum :ddg :none :mojeek]]
-   [:workbench? {:optional true} :boolean]])
+   [:workbench? {:optional true} :boolean]
+   [:tool-groups {:optional true} ToolGroups]])
 
 (def ProfileName
   [:and :string [:fn {:error/message "profile name must be [a-z0-9-]+"}

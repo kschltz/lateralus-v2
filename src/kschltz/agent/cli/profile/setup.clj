@@ -9,6 +9,7 @@
             [kschltz.agent.cli.model :as model]
             [kschltz.agent.cli.profile.store :as store]
             [kschltz.agent.cli.profile.templates :as templates]
+            [kschltz.agent.cli.profile.tool-groups :as tool-groups]
             [kschltz.agent.llm.http :as llm-http]))
 
 (defn- pw
@@ -18,15 +19,16 @@
     (java.io.PrintWriter. ^java.io.Writer out true)))
 
 (defn- default-read-line
-  "Read one trimmed line from the controlling terminal.
+  "Read one line from the controlling terminal (not trimmed — callers
+   that need trim do it; tool-group spacebar toggle needs raw spaces).
    Prefer `System/console` (keeps piped stdin intact for one-shot prompts).
    The Clojure CLI often leaves `System/console` nil even on a real TTY —
    fall back to `clojure.core/read-line` in that case."
   []
   (if-let [c (System/console)]
-    (some-> (.readLine c) str/trim)
+    (.readLine c)
     (try
-      (some-> (read-line) str/trim)
+      (read-line)
       (catch Throwable _ nil))))
 
 (defn- interactive-terminal?
@@ -153,7 +155,9 @@
               wb-default (if (:workbench? cur) "y" "n")
               wb-s (prompt-line out read-line-fn "Enable workbench (y/n)" wb-default)
               _ (when (nil? wb-s) (throw (ex-info "no-tty" {:phase :no-tty})))
-              workbench? (yn? wb-s (:workbench? cur))]
+              workbench? (yn? wb-s (:workbench? cur))
+              tool-groups* (tool-groups/prompt!
+                            out read-line-fn (:tool-groups cur) workbench?)]
           (when (and workbench? (not (workbench-available?)))
             (.println out "  Note: workbench deps not on classpath; run with -M:workbench:run")
             (.println out "  or the workbench keys will fail at system init."))
@@ -163,7 +167,8 @@
             :base-url     base-url
             :model        model
             :web-provider (keyword web-s)
-            :workbench?   workbench?}))))))
+            :workbench?   workbench?
+            :tool-groups  tool-groups*}))))))
 
 (defn- starter-settings
   [kind]

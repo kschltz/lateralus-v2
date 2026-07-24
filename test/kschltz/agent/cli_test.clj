@@ -702,8 +702,8 @@
   (testing "no --config on a TTY runs the profile wizard before the system builds"
     (let [sys-opts (atom nil)
           out      (java.io.StringWriter.)
-          ;; first-run: starter 1, keep all field defaults, save as default
-          lines    (atom ["1" "" "" "" "" "" "default"])
+          ;; first-run: starter 1, keep all field defaults, accept tool groups, save
+          lines    (atom ["1" "" "" "" "" "" "" "default"])
           opts     (cli/parse-args ["hi"])
           code     (cli/run-cli opts
                      {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))

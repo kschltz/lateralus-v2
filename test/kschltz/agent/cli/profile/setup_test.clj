@@ -53,6 +53,7 @@
                ""           ; model keep
                ""           ; web keep
                ""           ; workbench keep
+               ""           ; tool groups accept
                "default"]   ; name
         opts (setup/run-wizard {}
                {:out out
@@ -81,7 +82,7 @@
   (testing "run-cli passes :read-line-fn nil from destructuring; must not NPE"
     (let [root (temp-root)
           out  (java.io.StringWriter.)
-          lines (atom ["1" "" "" "" "" "" "default"])
+          lines (atom ["1" "" "" "" "" "" "" "default"])
           opts (setup/ensure-profile {:action :interactive} out
                  {:tty? true
                   :profile-root root
@@ -94,7 +95,7 @@
       (let [opts2 (setup/ensure-profile {:action :interactive} (java.io.StringWriter.)
                     {:tty? true
                      :profile-root root
-                     :read-line-fn (scripted ["1" "" "" "" "" "" "default"])
+                     :read-line-fn (scripted ["1" "" "" "" "" "" "" "default"])
                      :list-models-fn (fn [_ _] [])})]
         (is (= "default" (:profile-name opts2)))
         (is (some? (:profile-edn opts2)))

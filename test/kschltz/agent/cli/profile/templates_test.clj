@@ -22,3 +22,10 @@
 (deftest normalize-strips-api-key
   (is (nil? (:api-key (t/normalize-settings {:api-key "secret"
                                              :backend :ollama-local})))))
+
+(deftest normalize-defaults-tool-groups
+  (let [s (t/normalize-settings {:backend :ollama-local})]
+    (is (true? (get-in s [:tool-groups :files])))
+    (is (false? (get-in s [:tool-groups :workbench]))))
+  (let [s (t/normalize-settings {:backend :ollama-local :workbench? true})]
+    (is (true? (get-in s [:tool-groups :workbench])))))
