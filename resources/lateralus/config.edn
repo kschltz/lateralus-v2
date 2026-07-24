@@ -40,6 +40,11 @@
  :lateralus/runtime-tools        {:enabled? true :network? true}
  ;; Web tools: :none by default (air-gapped). Switch to :mojeek for live search.
  :lateralus/web-tools      {:provider :none}
+ ;; MCP client tools: empty by default (air-gapped, no child processes).
+ ;; Opt in with Claude Desktop-like server stanzas, e.g.
+ ;;   {:servers {"filesystem" {:command "npx"
+ ;;                            :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}}}
+ :lateralus/mcp-tools            {:servers {}}
  :lateralus/logging             {}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
@@ -48,7 +53,8 @@
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/runtime-tools
-                                  #ig/ref :lateralus/web-tools]
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/mcp-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
