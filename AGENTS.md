@@ -26,14 +26,27 @@ Standard commands (see `README.md` / `AGENT_INSTRUCTIONS.md` for the full list):
 - Run offline (no network / no Ollama needed):
   `clojure -M:run --config resources/lateralus/demo-stub.edn "your prompt"`.
 
+Real LLM via Ollama Cloud (when `OLLAMA_API_KEY` is set as a secret):
+- One-shot run: `echo "..." | clojure -M:run --config resources/lateralus/demo-ollama.edn --model gpt-oss:20b --base-url https://ollama.com/v1`.
+  The API key is read automatically from `OLLAMA_API_KEY`. Pick any cloud model
+  from `curl -s -H "Authorization: Bearer $OLLAMA_API_KEY" https://ollama.com/v1/models`.
+- Live e2e against the cloud: `OLLAMA_BASE_URL=https://ollama.com/v1 OLLAMA_MODEL=gpt-oss:20b clojure -M:e2e -n kschltz.agent.live-llm-tool-test`.
+
 Non-obvious caveats:
+- **`--config` is required to skip the interactive profile gate.** Passing only
+  `--model`/`--base-url` (without `--config`) still opens the gate, which then
+  consumes piped stdin and silently falls back to the stub LLM. Always pass
+  `--config <edn>` for non-interactive/cloud runs.
 - The default runtime config (`resources/lateralus/config.edn`) and the plain
   `clojure -M:run` path expect a reachable **Ollama** LLM endpoint at
-  `http://localhost:11434/v1`. No Ollama runs in the cloud VM by default, so use
-  `--config resources/lateralus/demo-stub.edn` (stub LLM + KG-BM25 memory) for
-  offline runs.
+  `http://localhost:11434/v1`. No local Ollama runs in the cloud VM, so either
+  use `--base-url https://ollama.com/v1` (cloud, needs `OLLAMA_API_KEY`) or
+  `--config resources/lateralus/demo-stub.edn` (offline stub + KG-BM25 memory).
+- The `^:e2e` `e2e-memory-test` probes a *local* Ollama via `/api/tags` and uses
+  `LATERALUS_E2E_API_KEY` (not `OLLAMA_API_KEY`); it will skip against Ollama
+  Cloud. The `live-llm-tool-test` is the one that works with cloud + `OLLAMA_API_KEY`.
 - `^:e2e` "live-llm" and "list-models" tests intentionally **auto-skip** when
-  Ollama is unreachable — a skip is expected here, not a failure.
+  the endpoint is unreachable — a skip is expected, not a failure.
 - `clojure -M:test` currently has **3 pre-existing failures** in
   `test/kschltz/agent/workbench/portal_test.clj`
   (`with-default-viewer-picks-rich-surfaces`, about Portal viewer metadata
