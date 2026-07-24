@@ -10,6 +10,17 @@
   --chip: #243040;
   --danger: #e07a6a;
   --warn: #d2b46e;
+  --portal-w: 50vw;   /* split-mode Portal column width (draggable) */
+  --pf-x: 45vw;       /* float-mode panel position / size */
+  --pf-y: 12vh;
+  --pf-w: 640px;
+  --pf-h: 62vh;
+  --mobile-tab-h: 3.25rem;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --shell-h: 100vh;
 }
 
 * { box-sizing: border-box; }
@@ -21,14 +32,8 @@ html, body {
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.45 "IBM Plex Sans", "Segoe UI", sans-serif;
-}
-
-:root {
-  --portal-w: 50vw;   /* split-mode Portal column width (draggable) */
-  --pf-x: 45vw;       /* float-mode panel position / size */
-  --pf-y: 12vh;
-  --pf-w: 640px;
-  --pf-h: 62vh;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 #shell {
@@ -36,9 +41,9 @@ html, body {
   grid-template-columns: minmax(0, 1fr) 10px var(--portal-w);
   grid-template-rows: 100%;
   width: 100vw;
-  height: 100vh;
+  height: var(--shell-h, 100vh);
   max-width: 100vw;
-  max-height: 100vh;
+  max-height: var(--shell-h, 100vh);
   overflow: hidden;
 }
 
@@ -302,6 +307,8 @@ button {
 }
 button:disabled { opacity: 0.5; cursor: default; }
 #attach { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+#attach .label-short { display: none; }
+#mobile-tabs { display: none; }
 
 #portal-frame {
   flex: 1 1 auto;
@@ -346,10 +353,170 @@ body[data-portal-mode="float"] .rh { display: block; }
 }
 body[data-portal-mode="hidden"] #portal-show { display: inline-flex; }
 
+/* ---------------------------------------------------------------------
+ * Mobile / narrow viewers: single-pane Chat ↔ Portal with a bottom tab
+ * bar. Desktop float/split chrome is hidden; the active pane fills the
+ * shell above the tabs (and respects notch / home-indicator insets).
+ * ------------------------------------------------------------------- */
 @media (max-width: 900px) {
+  html, body {
+    height: 100%;
+    height: 100dvh;
+  }
+
   #shell {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr);
+    width: 100%;
+    height: var(--shell-h, 100dvh);
+    max-width: 100%;
+    max-height: var(--shell-h, 100dvh);
+    padding-top: var(--safe-top);
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    padding-bottom: calc(var(--mobile-tab-h) + var(--safe-bottom));
   }
-  #chat { border-right: 0; border-bottom: 1px solid var(--line); }
+
+  #divider,
+  .desktop-only,
+  .rh {
+    display: none !important;
+  }
+
+  #chat,
+  #portal {
+    border-right: 0;
+    border-bottom: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+
+  /* Collapse float-mode absolute positioning so Portal is a full pane. */
+  body[data-portal-mode="float"] #portal,
+  body[data-portal-mode="split"] #portal,
+  body[data-portal-mode="hidden"] #portal {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    z-index: auto !important;
+  }
+
+  body[data-portal-mode="hidden"] #portal { display: flex; }
+  body[data-portal-mode="hidden"] #portal-show { display: none !important; }
+
+  body[data-mobile-pane="chat"] #portal { display: none !important; }
+  body[data-mobile-pane="portal"] #chat { display: none !important; }
+
+  .pane-head {
+    padding: 0.65rem 0.75rem;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .pane-head h1 { font-size: 11px; }
+  .portal-actions { gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+  .meta-btn,
+  #portal-link.meta {
+    min-height: 2rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+
+  #status {
+    max-width: min(58vw, 14rem);
+    font-size: 10px;
+  }
+
+  #turns {
+    padding: 0.75rem;
+    gap: 0.6rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .turn {
+    padding: 0.7rem 0.75rem;
+    border-radius: 8px;
+  }
+
+  #composer {
+    padding: 0.65rem 0.75rem calc(0.65rem + var(--safe-bottom) * 0);
+    gap: 0.45rem;
+    background: color-mix(in srgb, var(--pane) 92%, #000);
+  }
+  .row {
+    grid-template-columns: auto 1fr auto;
+    gap: 0.4rem;
+    align-items: end;
+  }
+  #attach .label-full { display: none; }
+  #attach .label-short { display: inline; }
+  #attach,
+  #send {
+    min-height: 2.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  textarea {
+    min-height: 2.75rem;
+    max-height: 40vh;
+    border-radius: 8px;
+    padding: 0.65rem 0.7rem;
+    font-size: 16px; /* avoid iOS focus zoom */
+  }
+
+  #mobile-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    height: calc(var(--mobile-tab-h) + var(--safe-bottom));
+    padding: 0.35rem 0.5rem var(--safe-bottom);
+    gap: 0.35rem;
+    background: color-mix(in srgb, var(--bg) 88%, #000);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.35);
+  }
+  #mobile-tabs[hidden] { display: none !important; }
+  #mobile-tabs button {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    border-radius: 10px;
+    min-height: 2.55rem;
+    padding: 0.45rem 0.5rem;
+    font: 600 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  #mobile-tabs button[aria-selected="true"] {
+    color: var(--ink);
+    background: color-mix(in srgb, var(--accent) 16%, var(--pane));
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  }
+  #mobile-tabs button:active {
+    transform: scale(0.98);
+  }
+}
+
+@media (max-width: 420px) {
+  .row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "input input"
+      "attach send";
+  }
+  #attach { grid-area: attach; }
+  #input { grid-area: input; }
+  #send { grid-area: send; min-width: 5.5rem; }
 }

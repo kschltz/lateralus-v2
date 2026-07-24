@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1218" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>lateralus workbench</title>
-  <link rel="stylesheet" href="/app.css?v=9" />
+  <link rel="stylesheet" href="/app.css?v=10" />
 </head>
-<body data-portal-mode="split">
+<body data-portal-mode="split" data-mobile-pane="chat">
   <div id="shell">
     <section id="chat" aria-label="Chat">
       <header class="pane-head">
@@ -17,8 +20,11 @@
       <div id="composer">
         <div id="chips"></div>
         <div class="row">
-          <button type="button" id="attach" title="Attach Portal selection">Attach selection</button>
-          <textarea id="input" rows="2" placeholder="Message the agent… (@portal refs attach as chips)"></textarea>
+          <button type="button" id="attach" title="Attach Portal selection">
+            <span class="label-full">Attach selection</span>
+            <span class="label-short" aria-hidden="true">Attach</span>
+          </button>
+          <textarea id="input" rows="2" placeholder="Message the agent… (@portal refs attach as chips)" enterkeyhint="send" autocomplete="off" autocorrect="on" autocapitalize="sentences"></textarea>
           <button type="button" id="send">Send</button>
         </div>
       </div>
@@ -28,13 +34,13 @@
       <header class="pane-head" id="portal-head">
         <h1>PORTAL</h1>
         <div class="portal-actions">
-          <button type="button" id="portal-float" class="meta-btn only-split" title="Pop out into a floating panel">float</button>
-          <button type="button" id="portal-dock" class="meta-btn only-float" title="Dock back into the split">dock</button>
-          <button type="button" id="portal-snap-left" class="meta-btn only-float" title="Snap to left half">⇤</button>
-          <button type="button" id="portal-snap-right" class="meta-btn only-float" title="Snap to right half">⇥</button>
-          <button type="button" id="portal-max" class="meta-btn only-float" title="Maximize">▣</button>
+          <button type="button" id="portal-float" class="meta-btn only-split desktop-only" title="Pop out into a floating panel">float</button>
+          <button type="button" id="portal-dock" class="meta-btn only-float desktop-only" title="Dock back into the split">dock</button>
+          <button type="button" id="portal-snap-left" class="meta-btn only-float desktop-only" title="Snap to left half">⇤</button>
+          <button type="button" id="portal-snap-right" class="meta-btn only-float desktop-only" title="Snap to right half">⇥</button>
+          <button type="button" id="portal-max" class="meta-btn only-float desktop-only" title="Maximize">▣</button>
           <button type="button" id="portal-reload" class="meta-btn" title="Reload Portal iframe">reload</button>
-          <button type="button" id="portal-hide" class="meta-btn" title="Hide Portal (Ctrl/Cmd-J)">hide</button>
+          <button type="button" id="portal-hide" class="meta-btn desktop-only" title="Hide Portal (Ctrl/Cmd-J)">hide</button>
           <a id="portal-link" class="meta" href="#" target="_blank" rel="noreferrer">open ↗</a>
         </div>
       </header>
@@ -50,8 +56,16 @@
       <div class="rh rh-sw" data-dir="sw"></div>
     </section>
   </div>
-  <button type="button" id="portal-show" title="Show Portal (Ctrl/Cmd-J)">▸ Portal</button>
+  <nav id="mobile-tabs" aria-label="Workbench panes" hidden>
+    <button type="button" id="tab-chat" data-pane="chat" aria-selected="true">
+      Chat
+    </button>
+    <button type="button" id="tab-portal" data-pane="portal" aria-selected="false">
+      Portal
+    </button>
+  </nav>
+  <button type="button" id="portal-show" class="desktop-only" title="Show Portal (Ctrl/Cmd-J)">▸ Portal</button>
   <div id="drag-shield" aria-hidden="true"></div>
-  <script src="/app.js?v=9"></script>
+  <script src="/app.js?v=10"></script>
 </body>
 </html>
