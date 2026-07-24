@@ -6,6 +6,24 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 **Main ns:** `kschltz.lateralus`  
 **License:** [Eclipse Public License 2.0](LICENSE)
 
+## Demo
+
+CHAT | Portal workbench — float / dock / hide the Portal pane, drag the split, and keep rich visuals out of the chat transcript:
+
+https://github.com/kschltz/lateralus-v2/raw/main/docs/assets/workbench-demo.mp4
+
+<video src="docs/assets/workbench-demo.mp4" controls playsinline poster="docs/assets/workbench-demo-poster.jpg" width="720">
+  <a href="docs/assets/workbench-demo.mp4">Watch the workbench demo (mp4)</a>
+</video>
+
+<p align="center">
+  <img src="docs/assets/workbench-mobile-chat.webp" alt="Mobile Chat pane" width="45%" />
+  &nbsp;
+  <img src="docs/assets/workbench-mobile-portal.webp" alt="Mobile Portal pane" width="45%" />
+</p>
+
+<p align="center"><sub>Mobile viewers get a single-pane Chat ↔ Portal tab bar.</sub></p>
+
 ## Quick start
 
 **Docker (recommended for a full workbench):** Java/Ollama packaged; interactive profile gate + CHAT | Portal UI.
@@ -15,7 +33,7 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 # .\scripts\start-workbench.ps1            # Windows PowerShell
 ```
 
-Open **http://localhost:7860** (Portal iframe on **:7870**). Details: [`docker/README.md`](docker/README.md).
+Open **http://localhost:7860** (Portal is served on the same origin/port). Details: [`docker/README.md`](docker/README.md).
 
 **Local Clojure** (Java 22+; JVM flags are baked into `:run` / `:workbench`):
 
