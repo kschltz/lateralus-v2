@@ -315,6 +315,8 @@
   /* ---------------------------------------------------------------------
    * Portal layout controller: split (docked, draggable divider) | float
    * (draggable/resizable window) | hidden. Persisted to localStorage.
+   * On narrow viewports, a single-pane Chat ↔ Portal tab switcher takes
+   * over; desktop float/split chrome is suppressed by CSS.
    * ------------------------------------------------------------------- */
   const shellEl = document.getElementById("shell");
   const dividerEl = document.getElementById("divider");
@@ -322,12 +324,17 @@
   const portalHead = document.getElementById("portal-head");
   const shieldEl = document.getElementById("drag-shield");
   const showPill = document.getElementById("portal-show");
+  const mobileTabs = document.getElementById("mobile-tabs");
+  const tabChat = document.getElementById("tab-chat");
+  const tabPortal = document.getElementById("tab-portal");
   const rootStyle = document.documentElement.style;
 
   const LKEY = "lateralus.workbench.layout";
+  const MKEY = "lateralus.workbench.mobilePane";
   const MIN_W = 320;
   const MIN_H = 220;
   const MIN_CHAT = 300;
+  const MOBILE_MQ = window.matchMedia("(max-width: 900px)");
 
   const defaults = () => ({
     mode: "split",
@@ -353,13 +360,30 @@
     }
   }
 
+  function loadMobilePane() {
+    try {
+      const saved = localStorage.getItem(MKEY);
+      return saved === "portal" ? "portal" : "chat";
+    } catch (_) {
+      return "chat";
+    }
+  }
+
   let layout = loadLayout();
+  let mobilePane = loadMobilePane();
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const isMobile = () => MOBILE_MQ.matches;
 
   function saveLayout() {
     try {
       localStorage.setItem(LKEY, JSON.stringify(layout));
+    } catch (_) {}
+  }
+
+  function saveMobilePane() {
+    try {
+      localStorage.setItem(MKEY, mobilePane);
     } catch (_) {}
   }
 
@@ -369,6 +393,42 @@
     f.h = clamp(f.h, MIN_H, window.innerHeight);
     f.x = clamp(f.x, 0, Math.max(0, window.innerWidth - f.w));
     f.y = clamp(f.y, 0, Math.max(0, window.innerHeight - 40));
+  }
+
+  function syncMobileTabs() {
+    const mobile = isMobile();
+    if (mobileTabs) {
+      if (mobile) mobileTabs.removeAttribute("hidden");
+      else mobileTabs.setAttribute("hidden", "");
+    }
+    document.body.dataset.mobilePane = mobilePane;
+    if (tabChat) tabChat.setAttribute("aria-selected", mobilePane === "chat" ? "true" : "false");
+    if (tabPortal) tabPortal.setAttribute("aria-selected", mobilePane === "portal" ? "true" : "false");
+  }
+
+  function setMobilePane(pane) {
+    mobilePane = pane === "portal" ? "portal" : "chat";
+    saveMobilePane();
+    syncMobileTabs();
+    if (mobilePane === "chat" && stickToBottom) {
+      requestAnimationFrame(scrollTurnsToBottom);
+    }
+  }
+
+  function updateShellHeight() {
+    // Keep the shell + tab bar inside the visual viewport so the soft
+    // keyboard does not cover the composer on iOS/Android.
+    const vv = window.visualViewport;
+    const h = vv ? Math.round(vv.height) : window.innerHeight;
+    rootStyle.setProperty("--shell-h", h + "px");
+    if (!isMobile() || !vv) {
+      if (mobileTabs) mobileTabs.style.bottom = "";
+      if (shellEl) shellEl.style.marginTop = "";
+      return;
+    }
+    const bottomGap = Math.max(0, window.innerHeight - (vv.offsetTop + vv.height));
+    if (mobileTabs) mobileTabs.style.bottom = bottomGap + "px";
+    if (shellEl) shellEl.style.marginTop = (vv.offsetTop || 0) + "px";
   }
 
   function applyLayout() {
@@ -381,10 +441,26 @@
     rootStyle.setProperty("--pf-y", layout.float.y + "px");
     rootStyle.setProperty("--pf-w", layout.float.w + "px");
     rootStyle.setProperty("--pf-h", layout.float.h + "px");
+    syncMobileTabs();
+    updateShellHeight();
     saveLayout();
   }
 
   function setMode(mode) {
+    if (isMobile()) {
+      // On mobile, hide/show map onto the Chat ↔ Portal tabs.
+      if (mode === "hidden") {
+        setMobilePane("chat");
+        return;
+      }
+      setMobilePane("portal");
+      // Keep a non-hidden desktop mode around for when the viewport widens.
+      if (layout.mode === "hidden") {
+        layout.mode = layout.prev && layout.prev !== "hidden" ? layout.prev : "split";
+      }
+      applyLayout();
+      return;
+    }
     if (mode !== "hidden" && layout.mode !== "hidden") layout.prev = layout.mode;
     if (mode === "hidden") layout.prev = layout.mode === "hidden" ? layout.prev : layout.mode;
     layout.mode = mode;
@@ -395,6 +471,10 @@
   }
 
   function showPortal() {
+    if (isMobile()) {
+      setMobilePane("portal");
+      return;
+    }
     setMode(layout.prev && layout.prev !== "hidden" ? layout.prev : "split");
   }
 
@@ -417,7 +497,7 @@
 
   // Divider: resize the split columns.
   dividerEl.addEventListener("pointerdown", (e) => {
-    if (layout.mode !== "split") return;
+    if (isMobile() || layout.mode !== "split") return;
     e.preventDefault();
     dividerEl.classList.add("dragging");
     beginDrag(
@@ -431,13 +511,14 @@
     );
   });
   dividerEl.addEventListener("dblclick", () => {
+    if (isMobile()) return;
     layout.splitW = Math.round(window.innerWidth * 0.5);
     applyLayout();
   });
 
   // Title-bar drag (float mode) — ignore clicks on the control buttons.
   portalHead.addEventListener("pointerdown", (e) => {
-    if (layout.mode !== "float") return;
+    if (isMobile() || layout.mode !== "float") return;
     if (e.target.closest("button, a")) return;
     e.preventDefault();
     const f = layout.float;
@@ -456,7 +537,7 @@
   // Resize handles (float mode).
   portalEl.querySelectorAll(".rh").forEach((handle) => {
     handle.addEventListener("pointerdown", (e) => {
-      if (layout.mode !== "float") return;
+      if (isMobile() || layout.mode !== "float") return;
       e.preventDefault();
       e.stopPropagation();
       const dir = handle.dataset.dir;
@@ -496,7 +577,7 @@
   on("portal-dock", () => setMode("split"));
   on("portal-hide", () => setMode("hidden"));
   on("portal-show", showPortal);
-  showPill.addEventListener("click", showPortal);
+  if (showPill) showPill.addEventListener("click", showPortal);
   on("portal-snap-left", () => {
     layout.float = { x: 0, y: 0, w: Math.round(window.innerWidth / 2), h: window.innerHeight };
     applyLayout();
@@ -511,17 +592,35 @@
     applyLayout();
   });
 
+  if (tabChat) tabChat.addEventListener("click", () => setMobilePane("chat"));
+  if (tabPortal) tabPortal.addEventListener("click", () => setMobilePane("portal"));
+
   document.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && (e.key === "j" || e.key === "J")) {
       e.preventDefault();
-      layout.mode === "hidden" ? showPortal() : setMode("hidden");
+      if (isMobile()) {
+        setMobilePane(mobilePane === "portal" ? "chat" : "portal");
+      } else {
+        layout.mode === "hidden" ? showPortal() : setMode("hidden");
+      }
     } else if (e.key === "Escape" && layout.mode === "float") {
       setMode("hidden");
     }
   });
 
+  const onMq = () => applyLayout();
+  if (typeof MOBILE_MQ.addEventListener === "function") {
+    MOBILE_MQ.addEventListener("change", onMq);
+  } else if (typeof MOBILE_MQ.addListener === "function") {
+    MOBILE_MQ.addListener(onMq);
+  }
+
   window.addEventListener("resize", applyLayout);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", updateShellHeight);
+    window.visualViewport.addEventListener("scroll", updateShellHeight);
+  }
   applyLayout();
 
   // Always keep a slow heartbeat — SSE alone proved unreliable mid-turn.

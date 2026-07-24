@@ -107,9 +107,19 @@
                                    :handler handler})]
         (try
           (is (re-find #"^http://127\.0\.0\.1:\d+$" url))
-          (let [html (slurp (str url "/"))]
+          (let [html (slurp (str url "/"))
+                css  (slurp (str url "/app.css"))
+                js   (slurp (str url "/app.js"))]
             (is (re-find #"CHAT" html))
             (is (re-find #"PORTAL" html))
-            (is (re-find #"browserPortalUrl" (slurp (str url "/app.js")))))
+            (is (re-find #"id=\"mobile-tabs\"" html)
+                "mobile viewers get a Chat/Portal tab bar")
+            (is (re-find #"viewport-fit=cover" html))
+            (is (re-find #"data-mobile-pane" css)
+                "CSS switches single-pane layout on narrow viewports")
+            (is (re-find #"mobilePane|mobile-pane|setMobilePane" js)
+                "JS drives the mobile pane switcher")
+            (is (re-find #"browserPortalUrl" js)
+                "JS remaps Portal iframe onto the CHAT origin"))
           (finally
             (http/stop-server! server)))))))
