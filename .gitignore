@@ -30,6 +30,7 @@ test-sessions-*/
 # Local / machine-specific scratch (not part of the distributable)
 local-ai
 notebooks/
+graphify-out/
 /*.html
 /portal/
 

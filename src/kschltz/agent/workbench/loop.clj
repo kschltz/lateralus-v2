@@ -85,8 +85,8 @@
       (do
         (wb/publish! workbench
                      {:role :system
-                      :text (str "Portal guard: claimed a viz without a successful "
-                                 "portal/submit (or used a fake @portal id). Retrying once…")})
+                     :text (str "Portal guard: claimed a viz without a successful "
+                                "portal_submit (or used a fake @portal id). Retrying once…")})
         (let [repair (runtime/send-message runtime cite/repair-prompt)
               fixed  (guard-assistant-event repair workbench)]
           (public-event fixed))))))
@@ -123,7 +123,7 @@
                 {:role :system
                  :text (str "lateralus workbench — open "
                             (wb/url workbench)
-                            " (CHAT | Portal). Prefer portal/submit for rich "
+                           " (CHAT | Portal). Prefer portal_submit for rich "
                             "visuals (HTML/SVG charts, tables); /quit to exit.")})
    (let [feeder (when stdin-feeder? (start-stdin-feeder! workbench in))]
      (try

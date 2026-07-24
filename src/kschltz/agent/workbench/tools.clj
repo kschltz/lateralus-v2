@@ -34,7 +34,7 @@
 
 (defrecord PortalSubmitTool [workbench]
   tool/Tool
-  (-name [_] "portal/submit")
+  (-name [_] "portal_submit")
   (-description [_]
     "PRIMARY visualization tool — use optimistically. Push rich artifacts into
      the Portal pane (right side): HTML/CSS demos (preferred for charts — one
@@ -49,7 +49,7 @@
 
 (defrecord PortalClearTool [workbench]
   tool/Tool
-  (-name [_] "portal/clear")
+  (-name [_] "portal_clear")
   (-description [_]
     "Clear the Portal visualization pane. Call before a fresh HTML/demo/table
      when leftover values would confuse the human.")
@@ -61,10 +61,10 @@
 
 (defrecord PortalFocusTool [workbench]
   tool/Tool
-  (-name [_] "portal/focus")
+  (-name [_] "portal_focus")
   (-description [_]
     "Resolve a Portal ref the human attached (@portal/<id> or by label)
-     and return its preview. Then derive follow-up visuals with portal/submit
+     and return its preview. Then derive follow-up visuals with portal_submit
      instead of pasting the artifact back into chat.")
   (-input-schema [_] schemas/PortalFocusInput)
   (-output-schema [_] :string)
@@ -89,6 +89,6 @@
 (defn registry
   "Tool registry for a live workbench instance (or atom/delay of one)."
   [workbench]
-  {"portal/submit" (->PortalSubmitTool workbench)
-   "portal/clear"  (->PortalClearTool workbench)
-   "portal/focus"  (->PortalFocusTool workbench)})
+  {"portal_submit" (->PortalSubmitTool workbench)
+   "portal_clear"  (->PortalClearTool workbench)
+   "portal_focus"  (->PortalFocusTool workbench)})

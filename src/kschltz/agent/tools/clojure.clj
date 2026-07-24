@@ -99,7 +99,7 @@
 
 (deftype QueryTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/query")
+  (-name [_] "clojure_query")
   (-description [_]
     "Inspect a Clojure source file. Returns JSON with `:defs`, `:requires`, and `:imports`. Query a specific category with :query (:defs, :requires, or :imports or their string equivalents).")
   (-input-schema [_] InputSchema:Query)
@@ -132,7 +132,7 @@
 
 (deftype AddRequireTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/add-require")
+  (-name [_] "clojure_add_require")
   (-description [_]
     "Add a namespace require to a Clojure file. :libspec is the namespace string; :alias is optional. Writes the file only if the round-trip parse check passes.")
   (-input-schema [_] InputSchema:AddRequire)
@@ -158,7 +158,7 @@
 
 (deftype RemoveDefTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/remove-def")
+  (-name [_] "clojure_remove_def")
   (-description [_]
     "Remove a top-level def/defn/etc. by name. Writes the file only if the round-trip parse check passes.")
   (-input-schema [_] InputSchema:RemoveDef)
@@ -188,7 +188,7 @@
 
 (deftype RenameSymbolTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/rename-symbol")
+  (-name [_] "clojure_rename_symbol")
   (-description [_]
     "Rename all occurrences of :old symbol to :new symbol in a Clojure file. Writes the file only if the round-trip parse check passes.")
   (-input-schema [_] InputSchema:RenameSymbol)
@@ -218,7 +218,7 @@
 
 (deftype InsertFormTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/insert-form")
+  (-name [_] "clojure_insert_form")
   (-description [_]
     "Insert one complete top-level Clojure form into a file. :form must be a single quoted Clojure form as a string, e.g. '(defn reverse-string [s] (apply str (reverse s)))'. :path is the file name. :position can be :end (default) or :beginning. Writes the file only if the round-trip parse check passes.")
   (-input-schema [_] InputSchema:InsertForm)
@@ -249,7 +249,7 @@
 
 (deftype EditDefTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/edit-def")
+  (-name [_] "clojure_edit_def")
   (-description [_]
     "Replace the body of a defn/def by name. The :body string replaces the function/value body after the arg vector (for defn) or after the name/docstring/metadata (for def). Writes the file only if the round-trip parse check passes.")
   (-input-schema [_] InputSchema:EditDef)
@@ -272,7 +272,7 @@
 
 (deftype FormatFileTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "clojure/format-file")
+  (-name [_] "clojure_format_file")
   (-description [_]
     "Reformat a Clojure/EDN file using rewrite-clj's pretty printer. Writes the file only if the round-trip parse check passes.")
   (-input-schema [_] InputSchema:Path)
@@ -283,49 +283,49 @@
       (catch Throwable t (error-result t)))))
 
 (defn query
-  "Return a new `clojure/query` Tool instance."
+  "Return a new `clojure_query` Tool instance."
   ([] (query nil default-max-read-bytes))
   ([workspace-root] (query workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->QueryTool workspace-root max-read-bytes)))
 
 (defn add-require
-  "Return a new `clojure/add-require` Tool instance."
+  "Return a new `clojure_add_require` Tool instance."
   ([] (add-require nil default-max-read-bytes))
   ([workspace-root] (add-require workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->AddRequireTool workspace-root max-read-bytes)))
 
 (defn remove-def
-  "Return a new `clojure/remove-def` Tool instance."
+  "Return a new `clojure_remove_def` Tool instance."
   ([] (remove-def nil default-max-read-bytes))
   ([workspace-root] (remove-def workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->RemoveDefTool workspace-root max-read-bytes)))
 
 (defn rename-symbol
-  "Return a new `clojure/rename-symbol` Tool instance."
+  "Return a new `clojure_rename_symbol` Tool instance."
   ([] (rename-symbol nil default-max-read-bytes))
   ([workspace-root] (rename-symbol workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->RenameSymbolTool workspace-root max-read-bytes)))
 
 (defn insert-form
-  "Return a new `clojure/insert-form` Tool instance."
+  "Return a new `clojure_insert_form` Tool instance."
   ([] (insert-form nil default-max-read-bytes))
   ([workspace-root] (insert-form workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->InsertFormTool workspace-root max-read-bytes)))
 
 (defn edit-def
-  "Return a new `clojure/edit-def` Tool instance."
+  "Return a new `clojure_edit_def` Tool instance."
   ([] (edit-def nil default-max-read-bytes))
   ([workspace-root] (edit-def workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->EditDefTool workspace-root max-read-bytes)))
 
 (defn format-file
-  "Return a new `clojure/format-file` Tool instance."
+  "Return a new `clojure_format_file` Tool instance."
   ([] (format-file nil default-max-read-bytes))
   ([workspace-root] (format-file workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
@@ -342,10 +342,10 @@
    used. No path containment is enforced."
   ([] (clojure-registry {}))
   ([{:keys [workspace-root max-read-bytes]}]
-   {"clojure/query"         (query workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure/add-require"   (add-require workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure/remove-def"    (remove-def workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure/rename-symbol" (rename-symbol workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure/insert-form"   (insert-form workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure/edit-def"      (edit-def workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure/format-file"   (format-file workspace-root (or max-read-bytes default-max-read-bytes))}))
+   {"clojure_query"         (query workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_add_require"   (add-require workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_remove_def"    (remove-def workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_rename_symbol" (rename-symbol workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_insert_form"   (insert-form workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_edit_def"      (edit-def workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_format_file"   (format-file workspace-root (or max-read-bytes default-max-read-bytes))}))

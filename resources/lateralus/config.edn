@@ -33,7 +33,7 @@
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
- ;; Runtime-eval tools (clojure/eval, clojure/add-lib, clojure/loaded-libs):
+ ;; Runtime-eval tools (clojure_eval, clojure_add_lib, clojure_loaded_libs):
  ;; run Clojure in-process and load Maven deps at runtime (Clojure 1.12
  ;; add-libs). Arbitrary code execution — set :enabled? false to disable,
  ;; or :network? false to keep eval but block runtime dependency loading.
@@ -43,7 +43,7 @@
  :lateralus/logging             {}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
- :lateralus/loop-opts            {:max-tool-calls-per-turn 100 :max-tool-calls-per-exchange 20 :tool-content-caps {"clojure/eval" 12000 "clojure/add-lib" 12000}}
+ :lateralus/loop-opts            {:max-tool-calls-per-turn 100 :max-tool-calls-per-exchange 20 :tool-content-caps {"clojure_eval" 12000 "clojure_add_lib" 12000}}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools

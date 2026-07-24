@@ -114,7 +114,7 @@
   "Build an OpenAI-shaped tool-result message from a provider-neutral
    result map. Stamps the tool's `:name` onto the message so the
    truncation site can apply a per-tool char cap (audit 2026-07 rec #5):
-   `clojure/eval` / `clojure/add-lib` results are structurally large
+  `clojure_eval` / `clojure_add_lib` results are structurally large
    (Clerk render traces) and must survive the default 2000-char cap
    intact, while ordinary tool results stay bounded."
   [{:keys [call result]}]
@@ -253,11 +253,11 @@
 (def ^:private tool-primary-arg-keys
   "Map of tool-name -> arg keys identifying the *target* of a call (the
    'primary arg'). Repeated calls with the SAME primary arg but differing
-   secondary args (e.g. `clojure/add-lib` same `:lib`, variant `:require`)
+  secondary args (e.g. `clojure_add_lib` same `:lib`, variant `:require`)
    are treated as the same SHAPE for arg-shape stall detection
    (verify-round-3 FIX 3). Tools not listed fall back to the full args
    string (no behavior change)."
-  {"clojure/add-lib" [:lib :coords]})
+ {"clojure_add_lib" [:lib :coords]})
 
 (defn- tool-call-shape
   "Coarser signature for arg-shape stall detection: tool name + the
@@ -309,7 +309,7 @@
    even if the registry is injected late. Stall detection has two layers:
    (1) FAST — the model emits the IDENTICAL tool-call set (name + raw args)
    as last turn → do not enqueue; (2) ARG-SHAPE (verify-round-3 FIX 3) —
-   the SAME tool + same PRIMARY arg (e.g. `:lib` for `clojure/add-lib`)
+  the SAME tool + same PRIMARY arg (e.g. `:lib` for `clojure_add_lib`)
    with differing secondary args for N>=2 all-error turns → trip
    `:agent/shape-stall-hit` (the round-2 re-spam of add-lib with variant
    `:require` bypassed the exact guard). Either stall →

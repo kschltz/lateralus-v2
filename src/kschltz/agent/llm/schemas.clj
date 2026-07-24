@@ -17,7 +17,13 @@
    - Anthropic messages:     (different shape; not covered here)
    - Ollama chat:            https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion"
   (:require [clojure.string :as str]
+            [kschltz.agent.tool :as tool]
             [malli.core :as m]))
+
+(def PortableToolName
+  "Cross-provider function name: ASCII letter first, then only ASCII
+   letters, digits, or underscores, up to 64 characters."
+  [:re tool/portable-tool-name-pattern])
 
 (def ToolCall
   "A single tool call that the assistant asks us to execute."
@@ -25,7 +31,7 @@
    [:id   :string]
    [:type [:= "function"]]
    [:function [:map
-               [:name :string]
+               [:name PortableToolName]
                [:arguments :string]]]])
 
 (def Tool
@@ -34,7 +40,7 @@
   [:map
    [:type [:= "function"]]
    [:function [:map
-               [:name :string]
+               [:name PortableToolName]
                [:description {:optional true} :string]
                [:parameters {:optional true} :map]]]])
 
@@ -79,7 +85,7 @@
                                  [:id   :string]
                                  [:type [:= "function"]]
                                  [:function [:map
-                                            [:name :string]
+                                            [:name PortableToolName]
                                             [:arguments :string]]]]]]]]
    [:finish_reason  {:optional true} :string]])
 

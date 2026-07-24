@@ -275,7 +275,7 @@
   (plugins.workbench/workbench-plugin workbench))
 
 (defmethod ig/init-key :lateralus/workbench-tools [_ {:keys [workbench]}]
-  "Portal tool registry (`portal/submit`, `portal/clear`, `portal/focus`)
+ "Portal tool registry (`portal_submit`, `portal_clear`, `portal_focus`)
    derived from a live workbench. Empty map when workbench is disabled."
   (if workbench
     ((requiring-resolve 'kschltz.agent.workbench.protocol/tools) workbench)
@@ -335,26 +335,26 @@
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
-   registry (`file/read`, `file/list`, `file/info`, `file/search`).
+  registry (`file_read`, `file_list`, `file_info`, `file_search`).
    Used by the tool-loop example config; not part of the default config
    so production agents start with an empty tool registry."
   (tools.filesystem/filesystem-registry opts))
 
 (defmethod ig/init-key :lateralus/self-awareness-tools [_ {:keys [workspace-root]}]
-  "Returns the self-awareness tool registry (`self/status`). The tool
+ "Returns the self-awareness tool registry (`self_status`). The tool
    reads from the interceptor context, so it can be built at system
    init time like any other tool."
   (tools.self/self-awareness-registry workspace-root))
 
 (defmethod ig/init-key :lateralus/clojure-tools [_ opts]
-  "Returns the Clojure structured-editing tool registry (clojure/query,
-   clojure/add-require, clojure/remove-def, clojure/rename-symbol,
-   clojure/insert-form, clojure/edit-def, clojure/format-file)."
+ "Returns the Clojure structured-editing tool registry (clojure_query,
+  clojure_add_require, clojure_remove_def, clojure_rename_symbol,
+  clojure_insert_form, clojure_edit_def, clojure_format_file)."
   (tools.clojure/clojure-registry opts))
 
 (defmethod ig/init-key :lateralus/runtime-tools [_ opts]
-  "Returns the runtime-eval tool registry (clojure/eval, clojure/add-lib,
-   clojure/loaded-libs). These run Clojure code in-process and load Maven
+ "Returns the runtime-eval tool registry (clojure_eval, clojure_add_lib,
+  clojure_loaded_libs). These run Clojure code in-process and load Maven
    dependencies at runtime; gate them with `:enabled?` / `:network?`.
    JVM-only — not wired into the native-image config (GraalVM cannot
    compile arbitrary forms at runtime)."

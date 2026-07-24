@@ -73,12 +73,12 @@
   (testing "persisted tool messages carry :name so :tool-content-caps apply"
     (let [big (apply str (repeat 5000 "x"))
           results [{:call {:id "tc1" :type "function"
-                           :function {:name "clojure/eval" :arguments "{}"}}
+                           :function {:name "clojure_eval" :arguments "{}"}}
                     :result big}]
           hist (ix/build-exchange-history [] "hi" "done" results
-                                          {"clojure/eval" 12000})
+                                          {"clojure_eval" 12000})
           tool (first (filter #(= "tool" (:role %)) hist))]
-      (is (= "clojure/eval" (:name tool))
+      (is (= "clojure_eval" (:name tool))
           "tool history messages stamp the tool name")
       (is (= 5000 (count (:content tool)))
           "per-tool cap of 12000 keeps a 5000-char result intact"))))

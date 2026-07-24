@@ -250,7 +250,7 @@
 
 ;; ---- verify-round-3 FIX 3: arg-shape stall guard ----
 ;;
-;; The round-2 re-spam: the model called clojure/add-lib with the SAME
+;; The round-2 re-spam: the model called clojure_add_lib with the SAME
 ;; :lib but DIFFERENT :require args across depth increments; every result
 ;; was loaded? false (an error shape), but the exact-signature guard
 ;; (which compares name + raw arguments) did NOT fire because the args
@@ -259,7 +259,7 @@
 
 (deftype FailAddLibTool []
   tool/Tool
-  (-name [_] "clojure/add-lib")
+  (-name [_] "clojure_add_lib")
   (-description [_] "stub add-lib that resolves the lib but always fails to require it")
   (-input-schema [_] [:map [:lib {:optional true} :string]
                       [:require {:optional true} :string]
@@ -280,7 +280,7 @@
       :error        nil})))
 
 (defn- addlib-rut-llm
-  "LLM that emits a clojure/add-lib tool_call every tool turn with the
+  "LLM that emits a clojure_add_lib tool_call every tool turn with the
   SAME :lib but a DIFFERENT :require (the round-2 re-spam shape), then a
   text answer once :tools is stripped (the summary turn). Without the
   arg-shape guard this would loop to the max depth (the exact-sig fast
@@ -294,7 +294,7 @@
             (if (<= t n)
               {:choices [{:message {:role "assistant" :content ""
                                     :tool_calls [{:id (str "tc" t) :type "function"
-                                                  :function {:name "clojure/add-lib"
+                                                  :function {:name "clojure_add_lib"
                                                              :arguments (str "{\"lib\":\"com.taoensso/nippy\",\"require\":\"ns" t "\",\"version\":\"3.4.2\"}")}}]}}]
                :model "fake/v0"}
               {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
@@ -303,12 +303,12 @@
            :model "fake/v0"})))))
 
 (deftest arg-shape-stall-trips-on-same-lib-varying-require-errors
-  (testing "verify-round-3 FIX 3: repeated clojure/add-lib with the SAME :lib
+  (testing "verify-round-3 FIX 3: repeated clojure_add_lib with the SAME :lib
             but DIFFERENT :require, all returning loaded? false, trips the
             arg-shape stall guard after 2 turns (instead of looping to the
             depth cap), and ensure-text-response forces a summary"
     (let [out (run-exchange (addlib-rut-llm 3) "add nippy"
-                            {"clojure/add-lib" (->FailAddLibTool)})]
+                            {"clojure_add_lib" (->FailAddLibTool)})]
       (is (true? (:agent/shape-stall-hit out))
           (str "the arg-shape stall must trip; got shape-stall-hit="
                (:agent/shape-stall-hit out)
@@ -333,7 +333,7 @@
   (testing "ensure-text-response's summary LLM call has :tools removed
             from :llm/request — even if the registry had tools, the
             summary is text-only. Regression guard for the 2026-06-22
-            bug where the summary re-called file/read instead of
+            bug where the summary re-called file_read instead of
             producing text."
     (let [req-views (atom [])
           observer  (reify LlmClient

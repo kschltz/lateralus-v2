@@ -49,7 +49,7 @@
         event (loop/guard-assistant-event
                {:exchange/response (str "table: @portal/" (subs id 0 8))
                 :agent/all-tool-results
-                [{:call {:function {:name "portal/submit"}}
+                [{:call {:function {:name "portal_submit"}}
                   :result (str "{\"ok\":true,\"cite\":\"@portal/" id
                                "\",\"ref\":{\"id\":\"" id "\"}}")}]}
                wb)]

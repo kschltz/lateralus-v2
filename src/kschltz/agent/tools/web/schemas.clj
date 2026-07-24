@@ -30,7 +30,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def WebSearchInput
-  "Malli input schema for `web/search`. `query` is required and must
+ "Malli input schema for `web_search`. `query` is required and must
    be a non-empty string; `result-count` defaults to 5 in the tool
    and is hard-capped at 20 in the guard pipeline."
   [:map
@@ -38,12 +38,12 @@
    [:result-count {:optional true} :int]])
 
 (def WebSearchOutput
-  "Malli output schema for `web/search`. The tool deftype JSON-serializes
+ "Malli output schema for `web_search`. The tool deftype JSON-serializes
    its envelope before returning."
   :string)
 
 (def WebFetchInput
-  "Malli input schema for `web/fetch`. `url` is required and must
+ "Malli input schema for `web_fetch`. `url` is required and must
    be a non-empty string; `max-bytes` optionally overrides the
    configured `:max-page-bytes` cap."
   [:map
@@ -51,18 +51,18 @@
    [:max-bytes {:optional true} :int]])
 
 (def WebFetchOutput
-  "Malli output schema for `web/fetch`. Tool JSON-serializes its envelope."
+ "Malli output schema for `web_fetch`. Tool JSON-serializes its envelope."
   :string)
 
 (def WebExtractInput
-  "Malli input schema for `web/extract`. `html` is required;
+ "Malli input schema for `web_extract`. `html` is required;
    `selector` optionally narrows the parsed tree to a CSS selector."
   [:map
    [:html [:string {:min 1}]]
    [:selector {:optional true} :string]])
 
 (def WebExtractOutput
-  "Malli output schema for `web/extract`. Tool JSON-serializes its envelope."
+ "Malli output schema for `web_extract`. Tool JSON-serializes its envelope."
   :string)
 
 ;; ---------------------------------------------------------------------------

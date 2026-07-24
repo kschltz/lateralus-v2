@@ -3,8 +3,8 @@
 
    Three families, mirroring `kschltz.agent.tools.web.schemas`:
 
-   1. **Op input/output** — one pair per tool op (`clojure/eval`,
-      `clojure/add-lib`, `clojure/loaded-libs`). Inputs are Malli maps;
+  1. **Op input/output** — one pair per tool op (`clojure_eval`,
+     `clojure_add_lib`, `clojure_loaded_libs`). Inputs are Malli maps;
       outputs are `:string` because `kschltz.agent.tool/invoke-tool`
       validates every tool result with `string?` before handing it to
       the model. The data envelope is JSON-encoded inside the tool
@@ -25,7 +25,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def EvalInput
-  "Input schema for `clojure/eval`. `code` is a required, non-empty
+ "Input schema for `clojure_eval`. `code` is a required, non-empty
    Clojure source string that may contain multiple top-level forms.
    `ns` optionally names the persistent runtime namespace to evaluate
    in (defs persist there across calls).
@@ -42,7 +42,7 @@
    [:eval-timeout-ms  {:optional true} [:int {:min 1}]]])
 
 (def AddLibInput
-  "Input schema for `clojure/add-lib`. Either supply `lib` (a Maven
+ "Input schema for `clojure_add_lib`. Either supply `lib` (a Maven
    coordinate string like \"org.clojure/data.json\") with an optional
    `version`, or supply `coords`: an EDN string of a full coordinate
    map (`{lib {:mvn/version \"...\"}}` or git coords) for advanced use.
@@ -59,7 +59,7 @@
    [:alias {:description "Alias for :require, e.g. \"jetty\" to produce [ring.adapter.jetty :as jetty]" :optional true} :string]])
 
 (def LoadedLibsInput
-  "Input schema for `clojure/loaded-libs`. Takes no arguments."
+ "Input schema for `clojure_loaded_libs`. Takes no arguments."
   [:map {:closed true}])
 
 (def OutputString
@@ -83,15 +83,15 @@
 
      :eval-ns          — name of the persistent runtime namespace
                          (default \"lateralus.repl\").
-     :eval-timeout-ms  — hard cap on a single `clojure/eval` call; on
+    :eval-timeout-ms  — hard cap on a single `clojure_eval` call; on
                          timeout the future is cancelled and an error is
                          reported (default 30000).
      :max-output-bytes — cap on captured stdout returned to the model
                          (default 65536).
      :enabled?         — master switch; when false every tool returns a
                          disabled envelope (default true).
-     :network?         — when false `clojure/add-lib` refuses to resolve
-                         dependencies (default true). `clojure/eval` is
+    :network?         — when false `clojure_add_lib` refuses to resolve
+                        dependencies (default true). `clojure_eval` is
                          unaffected.
 
    `:runtime` may also appear here to inject a pre-built

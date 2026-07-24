@@ -135,7 +135,7 @@
           _        (spit tmp "hello from filesystem tool")
           _        (.deleteOnExit tmp)
           registry (tools.filesystem/filesystem-registry {:workspace-root (.getParent tmp)})
-          calls    [{:id "tc1" :type "function" :function {:name "file/read"
+          calls    [{:id "tc1" :type "function" :function {:name "file_read"
                                                            :arguments (format "{\"path\":\"%s\"}"
                                                                               (.getName tmp))}}]
           out      (chain/execute
@@ -149,7 +149,7 @@
                                             (plugins.tools/tools-plugin registry)]))]
       (is (= 1 (count (:tool/results out))))
       (is (str/includes? (-> out :tool/results first :result) "hello from filesystem tool")
-          "file/read Tool returned the test file content"))))
+          "file_read Tool returned the test file content"))))
 
 ;; ---- compose-context trim stub pin ----
 
@@ -187,8 +187,8 @@
       ;; Per-tool cap applies when :name is stamped.
       (let [big (apply str (repeat 5000 "x"))
             trimmed (@v [{:role "tool" :tool_call_id "t1"
-                          :name "clojure/eval" :content big}]
-                        {"clojure/eval" 12000})]
+                          :name "clojure_eval" :content big}]
+                        {"clojure_eval" 12000})]
         (is (= 5000 (count (:content (first trimmed))))
             "named tool content under its per-tool cap is not truncated"))
       ;; Never drops the most recent user turn even when the window would cut it.

@@ -2,7 +2,7 @@
   "Partial interceptor plugin for the CHAT | Portal workbench pack.
 
    Makes Portal the obvious agent surface for data + visualization:
-     :guard  — seed `:agent/workbench` and merge `portal/*` tools
+     :guard  — seed `:agent/workbench` and merge `portal_*` tools
      :enrich — append Portal policy to `:agent/system-append` so
                compose-context puts it in the system message every turn"
   (:require [kschltz.agent.workbench.guidance :as guidance]

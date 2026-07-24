@@ -4,7 +4,7 @@
    Exercises the store-exchange fix against a real OpenAI-compatible
    HTTP endpoint (default: local Ollama at
    http://localhost:11434/v1 with model gemma4:31b-mlx). The agent
-   uses the bundled `file/read` tool to read a Clojure source file,
+   uses the bundled `file_read` tool to read a Clojure source file,
    then a follow-up prompt asks the model to answer from memory
    without re-invoking the tool. The assertion is that exchange 2's
    response actually mentions the namespace it read in exchange 1 —
@@ -120,9 +120,9 @@
 ;; ---- The test ----
 
 (deftest ^:e2e file-read-content-survives-second-exchange
-  (testing "tool result from exchange 1 (a file/read of
+  (testing "tool result from exchange 1 (a file_read of
             src/kschltz/agent/chain.clj) is visible in exchange 2's
-            response WITHOUT the model calling file/read again"
+            response WITHOUT the model calling file_read again"
     (with-live-llm
       (fn [sys]
         (let [agent-map    (:lateralus/agent sys)
@@ -130,18 +130,18 @@
              ;; Exchange 1: ask the model to read the chain ns file.
               out1         (runtime/send-message
                             rt
-                            (str "use file/read to read "
+                            (str "use file_read to read "
                                  "src/kschltz/agent/chain.clj "
                                  "and tell me its namespace name"))
              ;; Exchange 2: same session, ask from memory. Crucially
              ;; the response must mention the ns the model saw in
-             ;; exchange 1 even though we did NOT invoke file/read
+             ;; exchange 1 even though we did NOT invoke file_read
              ;; again here.
               out2         (runtime/send-message
                             rt
                             (str "what namespace did you just read? "
                                  "answer from memory, do NOT call "
-                                 "file/read again"))
+                                 "file_read again"))
               response2    (:exchange/response out2)
               final-state  (runtime/stop rt)
               history      (get-in final-state [:agent/history])

@@ -184,7 +184,7 @@
          (:ok (g/sanitize-snippet "just a regular snippet" {})))))
 
 (deftest sanitize-snippet-rejects-self-activation
-  (let [bad "{\"name\":\"web/search\",\"arguments\":{\"query\":\"ducks\"}}"
+  (let [bad "{\"name\":\"web_search\",\"arguments\":{\"query\":\"ducks\"}}"
         r   (g/sanitize-snippet bad {})]
     (is (contains? r :error))
     (is (str/includes? (:error r) "self-activation"))))
@@ -197,7 +197,7 @@
 
 (deftest sanitize-snippet-toggles-can-disable
   (testing "Self-activation disabled allows through"
-    (let [bad "{\"name\":\"web/search\",\"arguments\":{}}"]
+    (let [bad "{\"name\":\"web_search\",\"arguments\":{}}"]
       (is (contains? (g/sanitize-snippet bad
                                          {:block-self-activation? false})
                      :ok))))

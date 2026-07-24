@@ -26,13 +26,13 @@
 (deftest portal-submit-returns-cite
   (let [wb  (fake-wb)
         reg (tools/registry wb)
-        out (tool/invoke-tool (get reg "portal/submit")
+        out (tool/invoke-tool (get reg "portal_submit")
                               {:value {:n 1} :label "n"}
                               {})
         parsed (json/parse-string out true)
         id (get-in parsed [:ref :id])
         focus (json/parse-string
-               (tool/invoke-tool (get reg "portal/focus") {:id id} {})
+               (tool/invoke-tool (get reg "portal_focus") {:id id} {})
                true)]
     (is (true? (:ok parsed)))
     (is (string? id))
@@ -48,7 +48,7 @@
               :encoding {:theta {:field "v" :type "quantitative"}}
               :data {:values [{:v 1}]}}
         parsed (json/parse-string
-                (tool/invoke-tool (get reg "portal/submit")
+                (tool/invoke-tool (get reg "portal_submit")
                                   {:value spec :label "pie" :kind "vega"}
                                   {})
                 true)]
@@ -59,6 +59,6 @@
 (deftest portal-clear
   (let [reg (tools/registry (fake-wb))
         out (json/parse-string
-             (tool/invoke-tool (get reg "portal/clear") {} {})
+             (tool/invoke-tool (get reg "portal_clear") {} {})
              true)]
     (is (true? (:ok out)))))

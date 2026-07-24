@@ -248,7 +248,7 @@
                     {:exchange/response       ""
                      :agent/summary-failed?  true
                      :agent/all-tool-results [{:call {:id "tc1"
-                                                       :function {:name "clojure/add-lib"
+                                                       :function {:name "clojure_add_lib"
                                                                   :arguments "{}"}}
                                                :result "{\"status\":\"ok\",\"loaded?\":false}"}]})
           captured (atom nil)]
@@ -264,7 +264,7 @@
             "the user-facing message clearly states no final answer was produced")
         (is (not (str/includes? out "model kept calling tools on the summary turn"))
             "the internal 'model kept calling tools' fallback string is NOT shown to the user")
-        (is (str/includes? out "clojure/add-lib")
+        (is (str/includes? out "clojure_add_lib")
             "the tool results produced are appended as reference so the REPL is not blank")))))
 
 (deftest build-system-loads-bundled-config

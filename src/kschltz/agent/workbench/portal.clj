@@ -3,7 +3,7 @@
    helpers with Malli-shaped I/O at the workbench boundary.
 
    Visualization is driven through a watched atom so the iframe always
-   reflects the latest `portal/submit` (not only tap/submit side-channel)."
+  reflects the latest `portal_submit` (not only tap/submit side-channel)."
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -282,8 +282,8 @@
                                        :app :window-title :open?]))
   (let [open     (requiring-resolve 'portal.api/open)
         url      (requiring-resolve 'portal.api/url)
-        viz-atom (atom {:lateralus/workbench "ready"
-                        :hint "Use portal/submit for HTML/SVG charts, tables, demos — chat stays thin."})
+       viz-atom (atom {:lateralus/workbench "ready"
+                       :hint "Use portal_submit for HTML/SVG charts, tables, demos — chat stays thin."})
         portal-port (or (:portal-port opts) (env-int "LATERALUS_PORTAL_PORT"))
         portal-host (or (not-empty (:portal-host opts))
                         (not-empty (System/getenv "LATERALUS_WORKBENCH_HOST"))
@@ -344,8 +344,8 @@
       ((requiring-resolve 'portal.api/clear) portal)
       (catch Throwable _)))
   (when viz-atom
-    (reset! viz-atom {:lateralus/workbench "ready"
-                      :hint "Use portal/submit for HTML/SVG charts, tables, demos — chat stays thin."}))
+   (reset! viz-atom {:lateralus/workbench "ready"
+                     :hint "Use portal_submit for HTML/SVG charts, tables, demos — chat stays thin."}))
   {:ok true})
 
 (defn selected

@@ -1,5 +1,5 @@
 (ns kschltz.agent.tools.file-write
-  "Mutating filesystem Tool implementations: `file/write` and `file/update`.
+ "Mutating filesystem Tool implementations: `file_write` and `file_update`.
 
    These two tools live in their own namespace so that the read-only
    `filesystem` namespace can stay under the project's per-file line
@@ -39,14 +39,14 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private OutputSchema:String
-  "Both `file/write` and `file/update` return a JSON or plain string.
+ "Both `file_write` and `file_update` return a JSON or plain string.
    Duplicated here as a private constant so this namespace does not
    have to `require` `kschltz.agent.tools.filesystem` (which would
    create a load-order cycle: filesystem -> file-write -> filesystem)."
   :string)
 
 (def InputSchema:WriteFile
-  "Input schema for `file/write`.
+ "Input schema for `file_write`.
 
    `:expected-sha256`, when supplied, must match the SHA-256 of the
    file currently on disk (the caller's last-known view); a mismatch
@@ -63,7 +63,7 @@
    [:clj-override {:optional true} :boolean]])
 
 (def InputSchema:UpdateFile
-  "Input schema for `file/update`.
+ "Input schema for `file_update`.
 
    `:edits` is a vector of `{:old-text :new-text :replace-all
    :expected-occurrences}` maps. It may also be supplied as a JSON or
@@ -120,7 +120,7 @@
       {:error :blocked-path}
 
       (and refuse-clojure? (not clj-override) (fs/clojure-file? path))
-      {:error :use-clj-edit :use-tool "clojure/*"}
+      {:error :use-clj-edit :use-tool "clojure_*"}
 
       :else nil)))
 
@@ -236,7 +236,7 @@
 
 (deftype WriteFileTool [workspace-root max-write-bytes refuse-clojure? blocked-paths clojure-guard?]
   tool/Tool
-  (-name [_] "file/write")
+ (-name [_] "file_write")
   (-description [_]
     "Overwrite a UTF-8 text file with the given content. The target path must be inside the configured workspace root (unless `force` is set) and must not touch blocked segments such as `.git`, `target`, or `node_modules`. Clojure/EDN source files are refused by default unless `clj-override` is set. Before mutating, a timestamped `.bak.<millis>` sidecar backup of the original is written and the new content is landed via an atomic temp-file + move. Optional `expected-sha256` aborts when the on-disk file no longer matches the caller's last-known digest. The write is size-capped by the registry's `:max-write-bytes`.")
   (-input-schema [_] InputSchema:WriteFile)
@@ -291,9 +291,9 @@
 
 (deftype UpdateFileTool [workspace-root max-write-bytes refuse-clojure? blocked-paths clojure-guard?]
   tool/Tool
-  (-name [_] "file/update")
+ (-name [_] "file_update")
   (-description [_]
-    "Apply in-place text edits to an existing UTF-8 file. Each edit replaces occurrences of `old-text` with `new-text`; `replace-all` swaps every occurrence, otherwise the edit must match exactly once. `expected-occurrences` asserts a known count. `fuzzy` (default true) falls back to EOL/BOM/Unicode-tolerant matching when no exact match exists. `atomic` (default true) means any validation failure returns an error without writing or backing up. The same containment, blocked-path, and Clojure-file guards as `file/write` apply, and a timestamped `.bak.<millis>` backup plus an atomic write protect the file on disk. Edits to the same path are serialized across threads.")
+   "Apply in-place text edits to an existing UTF-8 file. Each edit replaces occurrences of `old-text` with `new-text`; `replace-all` swaps every occurrence, otherwise the edit must match exactly once. `expected-occurrences` asserts a known count. `fuzzy` (default true) falls back to EOL/BOM/Unicode-tolerant matching when no exact match exists. `atomic` (default true) means any validation failure returns an error without writing or backing up. The same containment, blocked-path, and Clojure-file guards as `file_write` apply, and a timestamped `.bak.<millis>` backup plus an atomic write protect the file on disk. Edits to the same path are serialized across threads.")
   (-input-schema [_] InputSchema:UpdateFile)
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
@@ -372,7 +372,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn write-file
-  "Return a new `file/write` Tool instance.
+ "Return a new `file_write` Tool instance.
 
   `opts` may provide `:max-write-bytes` (default
   [[fs/default-max-write-bytes]]), `:refuse-clojure?` (default true),
@@ -389,7 +389,7 @@
                     (boolean clojure-guard?))))
 
 (defn update-file
-  "Return a new `file/update` Tool instance.
+ "Return a new `file_update` Tool instance.
 
   `opts` accepts the same keys as [[write-file]]."
   ([] (update-file nil {}))

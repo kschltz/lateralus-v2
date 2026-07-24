@@ -1,8 +1,8 @@
 (ns kschltz.agent.tools.runtime.protocol
   "ClojureRuntime protocol for the lateralus runtime-eval tool suite.
 
-   The runtime tools (`clojure/eval`, `clojure/add-lib`,
-   `clojure/loaded-libs`) let the agent prototype by writing Clojure
+  The runtime tools (`clojure_eval`, `clojure_add_lib`,
+  `clojure_loaded_libs`) let the agent prototype by writing Clojure
    code and actually running it in-process, plus pull in new Maven
    dependencies at runtime (Clojure 1.12 `clojure.repl.deps/add-libs`).
 
@@ -31,7 +31,7 @@
    envelope    the model sees.")
 
 (defprotocol ClojureRuntime
-  "Pluggable backend for the `clojure/*` runtime-eval tool operations."
+  "Pluggable backend for the `clojure_*` runtime-eval tool operations."
   (-eval [rt code opts]
     "Evaluate the Clojure source string `code` in a persistent runtime
      namespace. `opts` may carry `:ns` (target namespace name string)

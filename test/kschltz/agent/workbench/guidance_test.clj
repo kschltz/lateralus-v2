@@ -6,9 +6,9 @@
             [kschltz.agent.workbench.tools :as tools]))
 
 (deftest guidance-mentions-portal-tools
-  (is (re-find #"portal/submit" guidance/portal-system-guidance))
-  (is (re-find #"portal/clear" guidance/portal-system-guidance))
-  (is (re-find #"portal/focus" guidance/portal-system-guidance))
+  (is (re-find #"portal_submit" guidance/portal-system-guidance))
+  (is (re-find #"portal_clear" guidance/portal-system-guidance))
+  (is (re-find #"portal_focus" guidance/portal-system-guidance))
   (is (re-find #"(?i)mandatory|MUST" guidance/portal-system-guidance))
   (is (re-find #"(?i)HTML/SVG|:cite|optimistically" guidance/portal-system-guidance))
   (is (re-find #"(?i)Never invent|exact `:cite`" guidance/portal-system-guidance)))
@@ -25,7 +25,7 @@
              (-snapshot [_] {})
              (-tools [_] {})
              (-close! [_] nil))
-        t (get (tools/registry wb) "portal/submit")
+        t (get (tools/registry wb) "portal_submit")
         d (tool/-description t)]
     (is (re-find #"PRIMARY visualization" d))
     (is (re-find #"(?i):cite|HTML/SVG|optimistically" d))

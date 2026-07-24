@@ -1,7 +1,7 @@
 (ns kschltz.agent.tools.file-write-test
   "Direct tests for the `file-write` factory functions.
 
-   The bulk of the `file/write` and `file/update` behavior is
+   The bulk of the `file_write` and `file_update` behavior is
    exercised end-to-end through the registry in
    `kschltz.agent.tools.filesystem-test`; this namespace exists
    primarily so the project quality gate (every src ns has a
@@ -35,24 +35,24 @@
 (def ^:private dummy-ctx {})
 
 (deftest write-file-factory-defaults
-  (testing "write-file with no args returns a working file/write Tool"
+  (testing "write-file with no args returns a working file_write Tool"
     (let [t (fw/write-file)]
       (is (tool/tool? t))
-      (is (= "file/write" (tool/-name t)))))
+      (is (= "file_write" (tool/-name t)))))
   (testing "write-file with a workspace-root string still returns a working tool"
     (let [t (fw/write-file (str @tmp-dir))]
       (is (tool/tool? t))
-      (is (= "file/write" (tool/-name t))))))
+      (is (= "file_write" (tool/-name t))))))
 
 (deftest update-file-factory-defaults
-  (testing "update-file with no args returns a working file/update Tool"
+  (testing "update-file with no args returns a working file_update Tool"
     (let [t (fw/update-file)]
       (is (tool/tool? t))
-      (is (= "file/update" (tool/-name t)))))
+      (is (= "file_update" (tool/-name t)))))
   (testing "update-file with a workspace-root string still returns a working tool"
     (let [t (fw/update-file (str @tmp-dir))]
       (is (tool/tool? t))
-      (is (= "file/update" (tool/-name t))))))
+      (is (= "file_update" (tool/-name t))))))
 
 (deftest write-file-roundtrips-through-tool-invocation
   (testing "a `fw/write-file` instance writes a new file and reports success"

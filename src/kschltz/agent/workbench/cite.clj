@@ -8,8 +8,8 @@
 
 (def repair-prompt
   (str "Workbench repair: you claimed a Portal visualization but either "
-       "did not call portal/submit, or cited a fake @portal id. "
-       "Call portal/submit now with the full artifact (prefer one HTML/SVG "
+       "did not call portal_submit, or cited a fake @portal id. "
+       "Call portal_submit now with the full artifact (prefer one HTML/SVG "
        "document for charts). In chat, cite ONLY the exact :cite string "
        "from the tool result. Do not invent ids."))
 
@@ -26,7 +26,7 @@
       (:output entry)))
 
 (defn parse-submit-result
-  "Parse a portal/submit tool result string/map → {:ok :cite :id} or nil."
+  "Parse a portal_submit tool result string/map → {:ok :cite :id} or nil."
   [body]
   (let [m (cond
             (map? body) body
@@ -46,10 +46,10 @@
          :viewer (:viewer m)}))))
 
 (defn portal-submit-results
-  "Successful portal/submit results from an exchange's tool list."
+  "Successful portal_submit results from an exchange's tool list."
   [tool-results]
   (->> (or tool-results [])
-       (filter #(= "portal/submit" (tool-name %)))
+       (filter #(= "portal_submit" (tool-name %)))
        (keep (fn [entry]
                (let [parsed (parse-submit-result (tool-result-body entry))]
                  (when (and parsed (:ok parsed) (:cite parsed))
@@ -90,8 +90,8 @@
   ([text known-ids]
    (sanitize-portal-cites text known-ids nil))
   ([text known-ids submit-cites]
-   (let [fallback (or (first submit-cites)
-                      "`(invalid @portal cite — call portal/submit and use its :cite)`")]
+  (let [fallback (or (first submit-cites)
+                     "`(invalid @portal cite — call portal_submit and use its :cite)`")]
      (str/replace
       (str text)
       cite-pattern

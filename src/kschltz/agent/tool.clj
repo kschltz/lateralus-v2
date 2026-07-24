@@ -31,6 +31,31 @@
   [x]
   (satisfies? Tool x))
 
+(def portable-tool-name-pattern
+  "Conservative function-name subset accepted across OpenAI-compatible,
+   Cerebras, Anthropic, Gemini, and Bedrock APIs: start with an ASCII
+   letter, then use only ASCII letters, digits, or underscores, with a
+   maximum length of 64 characters."
+  #"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+
+(defn portable-tool-name?
+  "True when `name` is safe to expose as a function tool across common
+   hosted inference APIs."
+  [name]
+  (and (string? name)
+       (boolean (re-matches portable-tool-name-pattern name))))
+
+(defn- assert-portable-tool-name!
+  [name]
+  (when-not (portable-tool-name? name)
+    (throw (ex-info
+            (str "Tool name must match " portable-tool-name-pattern
+                 " for cross-provider compatibility: " (pr-str name))
+            {:kind    :invalid-tool-name
+             :name    name
+             :pattern (str portable-tool-name-pattern)})))
+  name)
+
 (defn- parse-arguments
   "Parse the JSON arguments string that the model returned."
   [arguments]
@@ -90,9 +115,10 @@
 (defn tool-definition
   "Build an OpenAI-shaped function-tool definition map for `tool`."
   [tool]
-  (let [params (or (json-schema/transform (-input-schema tool)) {:type "object"})]
+  (let [name   (assert-portable-tool-name! (-name tool))
+        params (or (json-schema/transform (-input-schema tool)) {:type "object"})]
     {:type "function"
-     :function {:name        (-name tool)
+     :function {:name        name
                 :description (-description tool)
                 :parameters  params}}))
 

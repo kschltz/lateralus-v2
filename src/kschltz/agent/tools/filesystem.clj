@@ -7,13 +7,13 @@
    file. Paths may be absolute or relative; when a `:workspace-root` is
    provided, relative paths are resolved against it.
 
-   `file/read`, `file/list`, `file/info`, `file/search`, and
-   `file/create` are thin convenience wrappers that live in this
-   namespace. `file/create` is a create-only convenience that
+   `file_read`, `file_list`, `file_info`, `file_search`, and
+   `file_create` are thin convenience wrappers that live in this
+   namespace. `file_create` is a create-only convenience that
    silently overwrites and creates parent directories; it does NOT
    enforce containment, block paths, or back up the previous file.
 
-   `file/write` and `file/update` are the safe mutation tools. Their
+   `file_write` and `file_update` are the safe mutation tools. Their
    deftypes, schemas, edit-validation helpers, and factory functions
    live in `kschltz.agent.tools.file-write` so this namespace can
    stay under the project's per-file line budget. The behavior is
@@ -42,13 +42,13 @@
            [java.nio.file Files Path]))
 
 (def default-max-read-bytes
-  "Default hard ceiling on the byte length of `file/read`'s line-numbered
+  "Default hard ceiling on the byte length of `file_read`'s line-numbered
    `:content` string. Not a gate that refuses a file — reads beyond the
    budget return a window with a continuation marker."
   (* 256 1024))
 
 (def default-max-search-file-bytes
-  "Default upper bound on how many bytes `file/search` will read from a
+  "Default upper bound on how many bytes `file_search` will read from a
    single file while scanning."
   (* 128 1024))
 
@@ -62,21 +62,21 @@
    [:path :string]])
 
 (def InputSchema:ReadFile
-  "Input schema for `file/read`."
+  "Input schema for `file_read`."
   [:map
    [:path :string]
    [:offset {:optional true} :int]
    [:limit {:optional true} :int]])
 
 (def InputSchema:SearchFiles
-  "Input schema for `file/search`."
+  "Input schema for `file_search`."
   [:map
    [:path :string]
    [:pattern :string]
    [:max-results {:optional true} :int]])
 
 (def InputSchema:CreateFile
-  "Input schema for `file/create`."
+  "Input schema for `file_create`."
   [:map
    [:path :string]
    [:content {:optional true} [:maybe :string]]])
@@ -167,7 +167,7 @@
   [path-str offset lines-returned total-lines]
   (let [end (+ offset lines-returned -1)
         next (inc end)]
-    (format "\n\n[file-window: %s lines %d-%d of %d; call file/read again with offset=%d to continue]"
+   (format "\n\n[file-window: %s lines %d-%d of %d; call file_read again with offset=%d to continue]"
             path-str offset end total-lines next)))
 
 (defn- read-lines-with-window
@@ -267,7 +267,7 @@
    :size size})
 
 (defn- read-file-json
-  "Build the JSON string result for a `file/read` invocation.
+  "Build the JSON string result for a `file_read` invocation.
 
   Returns either the structured content map or the `{:error
   \"binary-file\" ...}` map, both as a JSON string. Unexpected I/O errors
@@ -360,7 +360,7 @@
 
 (deftype ReadFileTool [workspace-root max-read-bytes]
   tool/Tool
-  (-name [_] "file/read")
+  (-name [_] "file_read")
   (-description [_]
     "Read the contents of a UTF-8 text file with line numbers. `offset` is the 1-based line to start at (default 1); `limit` is the max number of lines returned (default 2000). Lines are prefixed with their absolute line number. Large files are returned as a window with a continuation marker rather than erroring. Binary files are reported, not thrown.")
   (-input-schema [_] InputSchema:ReadFile)
@@ -376,7 +376,7 @@
 
 (deftype ListDirectoryTool [workspace-root]
   tool/Tool
-  (-name [_] "file/list")
+  (-name [_] "file_list")
   (-description [_]
     "List the files and directories inside a directory. Returns a JSON object with an `entries` array; each entry has `name` and `type` (`file`, `directory`, or `other`).")
   (-input-schema [_] InputSchema:Path)
@@ -390,7 +390,7 @@
 
 (deftype FileInfoTool [workspace-root]
   tool/Tool
-  (-name [_] "file/info")
+  (-name [_] "file_info")
   (-description [_]
     "Return metadata for a path: whether it exists, its type (`file`, `directory`, or `other`), size in bytes, and last modified timestamp.")
   (-input-schema [_] InputSchema:Path)
@@ -404,7 +404,7 @@
 
 (deftype SearchFilesTool [workspace-root max-search-file-bytes default-max-search-results]
   tool/Tool
-  (-name [_] "file/search")
+  (-name [_] "file_search")
   (-description [_]
     "Recursively search files under a directory for a regex pattern. Returns up to `max-results` matches as JSON objects with `file`, `line`, and `text`. Files larger than the registry's `:max-search-file-bytes` setting are skipped.")
   (-input-schema [_] InputSchema:SearchFiles)
@@ -430,7 +430,7 @@
 
 (deftype CreateFileTool [workspace-root]
   tool/Tool
-  (-name [_] "file/create")
+  (-name [_] "file_create")
   (-description [_]
     "Create a new UTF-8 text file (and any missing parent directories) with the given content. Paths are resolved against the configured workspace root.")
   (-input-schema [_] InputSchema:CreateFile)
@@ -443,39 +443,39 @@
         (error-result t)))))
 
 (defn read-file
-  "Return a new `file/read` Tool instance."
+  "Return a new `file_read` Tool instance."
   ([] (read-file nil default-max-read-bytes))
   ([workspace-root] (read-file workspace-root default-max-read-bytes))
   ([workspace-root max-read-bytes]
    (->ReadFileTool workspace-root max-read-bytes)))
 
 (defn list-directory
-  "Return a new `file/list` Tool instance."
+  "Return a new `file_list` Tool instance."
   ([] (list-directory nil))
   ([workspace-root]
    (->ListDirectoryTool workspace-root)))
 
 (defn file-info
-  "Return a new `file/info` Tool instance."
+  "Return a new `file_info` Tool instance."
   ([] (file-info nil))
   ([workspace-root]
    (->FileInfoTool workspace-root)))
 
 (defn search-files
-  "Return a new `file/search` Tool instance."
+  "Return a new `file_search` Tool instance."
   ([] (search-files nil default-max-search-file-bytes default-max-search-results))
   ([workspace-root] (search-files workspace-root default-max-search-file-bytes default-max-search-results))
   ([workspace-root max-search-file-bytes default-max-search-results]
    (->SearchFilesTool workspace-root max-search-file-bytes default-max-search-results)))
 
 (defn create-file
-  "Return a new `file/create` Tool instance."
+  "Return a new `file_create` Tool instance."
   ([] (create-file nil))
   ([workspace-root]
    (->CreateFileTool workspace-root)))
 
 (defn write-file
-  "Return a new `file/write` Tool instance. Re-exported from
+  "Return a new `file_write` Tool instance. Re-exported from
    [[kschltz.agent.tools.file-write/write-file]] so callers can
    continue to use `kschltz.agent.tools.filesystem/write-file`."
   ([] (fw/write-file))
@@ -483,7 +483,7 @@
   ([workspace-root opts] (fw/write-file workspace-root opts)))
 
 (defn update-file
-  "Return a new `file/update` Tool instance. Re-exported from
+  "Return a new `file_update` Tool instance. Re-exported from
    [[kschltz.agent.tools.file-write/update-file]] so callers can
    continue to use `kschltz.agent.tools.filesystem/update-file`."
   ([] (fw/update-file))
@@ -495,12 +495,12 @@
 
    Accepts an optional `opts` map with:
      :workspace-root          — root for resolving relative paths
-     :max-read-bytes          — cap for `file/read` (default 256 KB)
-     :max-search-file-bytes   — per-file cap for `file/search`
+     :max-read-bytes          — cap for `file_read` (default 256 KB)
+     :max-search-file-bytes   — per-file cap for `file_search`
                                    (default 128 KB)
-     :max-search-results      — default hit cap for `file/search`
+     :max-search-results      — default hit cap for `file_search`
                                    (default 100)
-     :max-write-bytes         — cap for `file/write` and `file/update`
+     :max-write-bytes         — cap for `file_write` and `file_update`
                                    (default 10 MiB)
      :refuse-clojure?         — refuse Clojure/EDN targets unless a
                                    call sends `:clj-override`
@@ -511,9 +511,9 @@
                                    via rewrite-clj (default false)
 
    When `:workspace-root` is omitted, the current working directory is
-   used. `file/write` and `file/update` enforce workspace-root
+   used. `file_write` and `file_update` enforce workspace-root
    containment (per-call `:force` skips it) and always refuse blocked
-   path segments; `file/create` remains a thin create-only wrapper
+   path segments; `file_create` remains a thin create-only wrapper
    that does not enforce containment."
   ([] (filesystem-registry {}))
   ([{:keys [workspace-root
@@ -528,12 +528,12 @@
                      :refuse-clojure? refuse-clojure?
                      :blocked-paths   blocked-paths
                      :clojure-guard?  clojure-guard?}]
-     {"file/read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
-      "file/list"    (list-directory workspace-root)
-      "file/info"    (file-info workspace-root)
-      "file/create"  (create-file workspace-root)
-      "file/search"  (search-files workspace-root
+     {"file_read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
+      "file_list"    (list-directory workspace-root)
+      "file_info"    (file-info workspace-root)
+      "file_create"  (create-file workspace-root)
+      "file_search"  (search-files workspace-root
                                   (or max-search-file-bytes default-max-search-file-bytes)
                                   (or max-search-results default-max-search-results))
-      "file/write"   (fw/write-file workspace-root write-opts)
-      "file/update"  (fw/update-file workspace-root write-opts)})))
+      "file_write"   (fw/write-file workspace-root write-opts)
+      "file_update"  (fw/update-file workspace-root write-opts)})))

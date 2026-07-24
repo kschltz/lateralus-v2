@@ -97,9 +97,9 @@ For details, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Web tool
 
-The agent now ships `web/search`, `web/fetch`, and `web/extract` tools. The
+The agent now ships `web_search`, `web_fetch`, and `web_extract` tools. The
 default provider is `:none`, so **no API key, no paid service, and no network
-I/O** are required out of the box. `web/extract` still works on raw HTML in
+I/O** are required out of the box. `web_extract` still works on raw HTML in
 air-gapped mode. Live web access is opt-in via `:provider :mojeek` or `:provider :ddg`.
 
 The `:mojeek` provider parses Mojeek's public HTML result pages with
@@ -119,14 +119,14 @@ The agent ships a Clojure runtime-eval suite for prototyping: it can write
 Clojure code and actually run it, then pull in missing dependencies at
 runtime without a JVM restart.
 
-- `clojure/eval` — evaluate Clojure source in a **persistent** runtime
+- `clojure_eval` — evaluate Clojure source in a **persistent** runtime
   namespace (`def`s and `require`s persist across calls). Returns the
   last form's value, captured stdout, and any exception. Each call is
   bounded by a configurable timeout so runaway loops are cancelled.
-- `clojure/add-lib` — load a Maven (or Git) dependency onto the live
+- `clojure_add_lib` — load a Maven (or Git) dependency onto the live
   classpath via Clojure 1.12's `clojure.repl.deps/add-libs`. After it
-  returns, `require` the new namespaces from `clojure/eval`.
-- `clojure/loaded-libs` — list the libs currently loaded in the JVM.
+ returns, `require` the new namespaces from `clojure_eval`.
+- `clojure_loaded_libs` — list the libs currently loaded in the JVM.
 
 The suite sits behind the `ClojureRuntime` protocol with a
 Malli-instrumented network boundary, and is wired via the
@@ -287,7 +287,7 @@ Notes and limitations:
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
 | [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
-| [`docs/runtime-eval.md`](docs/runtime-eval.md) | Runtime-eval tool suite: `clojure/eval`, `clojure/add-lib`, `clojure/loaded-libs` |
+| [`docs/runtime-eval.md`](docs/runtime-eval.md) | Runtime-eval tool suite: `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |
@@ -304,14 +304,14 @@ Notes and limitations:
 | [`src/kschltz/agent/tools/runtime/protocol.clj`](src/kschltz/agent/tools/runtime/protocol.clj) | `ClojureRuntime` protocol (runtime-eval boundary) |
 | [`src/kschltz/agent/tools/runtime/schemas.clj`](src/kschltz/agent/tools/runtime/schemas.clj) | Runtime-eval Malli schemas + config |
 | [`src/kschltz/agent/tools/runtime/jvm.clj`](src/kschltz/agent/tools/runtime/jvm.clj) | In-process `ClojureRuntime` impl (eval + `add-libs`), Malli-instrumented |
-| [`src/kschltz/agent/tools/runtime/tools.clj`](src/kschltz/agent/tools/runtime/tools.clj) | `clojure/eval`, `clojure/add-lib`, `clojure/loaded-libs` Tool implementations |
+| [`src/kschltz/agent/tools/runtime/tools.clj`](src/kschltz/agent/tools/runtime/tools.clj) | `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` Tool implementations |
 | [`src/kschltz/agent/tools/web/protocol.clj`](src/kschltz/agent/tools/web/protocol.clj) | `WebProvider` protocol |
 | [`src/kschltz/agent/tools/web/schemas.clj`](src/kschltz/agent/tools/web/schemas.clj) | Web tool Malli schemas |
 | [`src/kschltz/agent/tools/web/guards.clj`](src/kschltz/agent/tools/web/guards.clj) | URL/query/snippet guard pipeline |
 | [`src/kschltz/agent/tools/web/none.clj`](src/kschltz/agent/tools/web/none.clj) | `:none` provider (air-gapped default) |
 | [`src/kschltz/agent/tools/web/mojeek.clj`](src/kschltz/agent/tools/web/mojeek.clj) | `:mojeek` live provider (JVM-only, opt-in) |
 | [`src/kschltz/agent/tools/web/ddg.clj`](src/kschltz/agent/tools/web/ddg.clj) | `:ddg` live provider (JVM-only, opt-in; impersonator TLS fingerprint) |
-| [`src/kschltz/agent/tools/web/web.clj`](src/kschltz/agent/tools/web/web.clj) | `web/search`, `web/fetch`, `web/extract` Tool implementations |
+| [`src/kschltz/agent/tools/web/web.clj`](src/kschltz/agent/tools/web/web.clj) | `web_search`, `web_fetch`, `web_extract` Tool implementations |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
 | [`src/kschltz/agent/llm/client.clj`](src/kschltz/agent/llm/client.clj) | `LlmClient` protocol + stub + HTTP wrapper |
@@ -347,7 +347,7 @@ Recently completed:
 - [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
 - [011] Promote tool-calling loop into the base plugin + filesystem tools example
 - [web] Revive web tool: `:none` default, `:mojeek`/`:ddg` opt-in live providers, full guard pipeline (SSRF/UA/redirect), Integrant wiring, docs
-- [runtime-eval] Clojure runtime-eval tool suite: `clojure/eval` (persistent runtime ns + timeout), `clojure/add-lib` (Clojure 1.12 runtime dependency loading), `clojure/loaded-libs`, behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary
+- [runtime-eval] Clojure runtime-eval tool suite: `clojure_eval` (persistent runtime ns + timeout), `clojure_add_lib` (Clojure 1.12 runtime dependency loading), `clojure_loaded_libs`, behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary
 
 Deferred:
 - Async worker thread for the runtime

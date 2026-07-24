@@ -45,34 +45,34 @@
   (testing "runtime-registry returns the three runtime-eval tools"
     (let [reg (rt/runtime-registry {:runtime (stub)})]
       (is (= 3 (count reg)))
-      (is (contains? reg "clojure/eval"))
-      (is (contains? reg "clojure/add-lib"))
-      (is (contains? reg "clojure/loaded-libs"))
+      (is (contains? reg "clojure_eval"))
+      (is (contains? reg "clojure_add_lib"))
+      (is (contains? reg "clojure_loaded_libs"))
       (is (every? tool/tool? (vals reg))))))
 
 (deftest registry-tool-names-are-exact
   (testing "the (-name _) values match the registry keys"
     (let [reg (rt/runtime-registry {:runtime (stub)})]
-      (is (= "clojure/eval"        (tool/-name (get reg "clojure/eval"))))
-      (is (= "clojure/add-lib"     (tool/-name (get reg "clojure/add-lib"))))
-      (is (= "clojure/loaded-libs" (tool/-name (get reg "clojure/loaded-libs")))))))
+      (is (= "clojure_eval"        (tool/-name (get reg "clojure_eval"))))
+      (is (= "clojure_add_lib"     (tool/-name (get reg "clojure_add_lib"))))
+      (is (= "clojure_loaded_libs" (tool/-name (get reg "clojure_loaded_libs")))))))
 
 (deftest registry-builds-jvm-runtime-by-default
   (testing "with no injected :runtime the registry evaluates real code"
     (let [reg (rt/runtime-registry {})
-          out (parse (tool/invoke-tool (get reg "clojure/eval") {:code "(+ 1 2)"} {}))]
+          out (parse (tool/invoke-tool (get reg "clojure_eval") {:code "(+ 1 2)"} {}))]
       (is (= "3" (:value out)))
       (is (nil? (:error out))))))
 
 ;; ---------------------------------------------------------------------------
-;; clojure/eval
+;; clojure_eval
 ;; ---------------------------------------------------------------------------
 
 (deftest eval-tool-returns-envelope-from-runtime
   (testing "the eval tool serializes the runtime result and forwards :ns"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})
-          out (parse (tool/invoke-tool (get reg "clojure/eval")
+          out (parse (tool/invoke-tool (get reg "clojure_eval")
                                        {:code "(+ 1 2)" :ns "my.ns"} {}))]
       (is (= "3" (:value out)))
       (is (= "(+ 1 2)" (:code @cap)))
@@ -82,25 +82,25 @@
   (testing "no :ns argument means the runtime gets an empty opts map"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})]
-      (tool/invoke-tool (get reg "clojure/eval") {:code "(+ 1 2)"} {})
+      (tool/invoke-tool (get reg "clojure_eval") {:code "(+ 1 2)"} {})
       (is (not (contains? (:opts @cap) :ns))))))
 
 (deftest eval-tool-disabled-envelope
   (testing ":enabled? false short-circuits to a disabled envelope"
     (let [reg (rt/runtime-registry {:runtime (stub) :enabled? false})
-          out (parse (tool/invoke-tool (get reg "clojure/eval") {:code "(+ 1 2)"} {}))]
+          out (parse (tool/invoke-tool (get reg "clojure_eval") {:code "(+ 1 2)"} {}))]
       (is (= "disabled" (:phase out)))
       (is (some? (:error out))))))
 
 ;; ---------------------------------------------------------------------------
-;; clojure/add-lib
+;; clojure_add_lib
 ;; ---------------------------------------------------------------------------
 
 (deftest add-lib-tool-builds-mvn-coords-from-lib-and-version
   (testing "lib + version becomes {lib {:mvn/version version}}"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})
-          out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+          out (parse (tool/invoke-tool (get reg "clojure_add_lib")
                                        {:lib "org.clojure/data.json" :version "2.5.0"} {}))]
       (is (= ["org.clojure/data.json"] (:added out)))
       (is (= '{org.clojure/data.json {:mvn/version "2.5.0"}} (:coords @cap))))))
@@ -109,21 +109,21 @@
   (testing "lib without version defaults to the RELEASE coordinate"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})]
-      (tool/invoke-tool (get reg "clojure/add-lib") {:lib "org.clojure/data.json"} {})
+      (tool/invoke-tool (get reg "clojure_add_lib") {:lib "org.clojure/data.json"} {})
       (is (= '{org.clojure/data.json {:mvn/version "RELEASE"}} (:coords @cap))))))
 
 (deftest add-lib-tool-parses-coords-edn
   (testing "an explicit :coords EDN map is parsed and symbol-keyed"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})]
-      (tool/invoke-tool (get reg "clojure/add-lib")
+      (tool/invoke-tool (get reg "clojure_add_lib")
                         {:coords "{org.clojure/data.json {:mvn/version \"2.5.0\"}}"} {})
       (is (= '{org.clojure/data.json {:mvn/version "2.5.0"}} (:coords @cap))))))
 
 (deftest add-lib-tool-network-disabled-envelope
   (testing ":network? false blocks add-lib with a network-disabled envelope"
     (let [reg (rt/runtime-registry {:runtime (stub) :network? false})
-          out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+          out (parse (tool/invoke-tool (get reg "clojure_add_lib")
                                        {:lib "org.clojure/data.json"} {}))]
       (is (= "network-disabled" (:phase out)))
       (is (= [] (:added out))))))
@@ -131,7 +131,7 @@
 (deftest add-lib-tool-error-envelope-on-bad-args
   (testing "missing lib and coords yields a tool error envelope"
     (let [reg (rt/runtime-registry {:runtime (stub)})
-          out (parse (tool/invoke-tool (get reg "clojure/add-lib") {} {}))]
+          out (parse (tool/invoke-tool (get reg "clojure_add_lib") {} {}))]
       (is (= "tool" (:phase out)))
       (is (some? (:error out))))))
 
@@ -139,7 +139,7 @@
   (testing "lib + require + alias evaluates a require form after loading"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})]
-      (tool/invoke-tool (get reg "clojure/add-lib")
+      (tool/invoke-tool (get reg "clojure_add_lib")
                         {:lib "ring/ring-jetty-adapter" :version "1.13.0"
                          :require "ring.adapter.jetty" :alias "jetty"}
                         {})
@@ -152,7 +152,7 @@
             coordinate map for audit/version retries"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})
-          out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+          out (parse (tool/invoke-tool (get reg "clojure_add_lib")
                                        {:lib "org.clojure/data.json" :version "2.5.0"} {}))]
       (is (= {:org.clojure/data.json {:mvn/version "2.5.0"}} (:coord out))
           ":coord echoes the resolved coordinate map (JSON round-trip turns symbol keys into keywords)")
@@ -168,7 +168,7 @@
                                      {:added ["some/lib"] :error nil}
                                      ["clojure.string" "clojure.test"]
                                      cap)})]
-      (let [out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+      (let [out (parse (tool/invoke-tool (get reg "clojure_add_lib")
                                          {:lib "some/lib" :require "missing.ns"}
                                          {}))]
         (is (= ["some/lib"] (:added out)))
@@ -177,19 +177,19 @@
         (is (= "FileNotFoundException" (:required-error out)))))))
 
 ;; ---------------------------------------------------------------------------
-;; clojure/loaded-libs
+;; clojure_loaded_libs
 ;; ---------------------------------------------------------------------------
 
 (deftest loaded-libs-tool-returns-libs
   (testing "the loaded-libs tool wraps the runtime's lib list"
     (let [reg (rt/runtime-registry {:runtime (stub)})
-          out (parse (tool/invoke-tool (get reg "clojure/loaded-libs") {} {}))]
+          out (parse (tool/invoke-tool (get reg "clojure_loaded_libs") {} {}))]
       (is (= ["clojure.string" "clojure.test"] (:libs out))))))
 
 (deftest loaded-libs-tool-rejects-arguments
   (testing "the loaded-libs input schema is closed; extra args are rejected"
     (let [reg (rt/runtime-registry {:runtime (stub)})
-          out (tool/invoke-tool (get reg "clojure/loaded-libs") {:extra true} {})]
+          out (tool/invoke-tool (get reg "clojure_loaded_libs") {:extra true} {})]
       (is (string? out))
       (is (re-find #"validation" out)))))
 
@@ -217,10 +217,10 @@
 ;; ---- paren-repair integration (2026-06-22) ----
 
 (deftest eval-tool-repairs-broken-code-before-evaluating
-  (testing "clojure/eval repairs missing delimiters before running the code,
+  (testing "clojure_eval repairs missing delimiters before running the code,
             and flags :paren-repaired? in the JSON envelope"
     (let [reg  (rt/runtime-registry {:enabled? true})
-          etool (get reg "clojure/eval")
+          etool (get reg "clojure_eval")
           out   (json/parse-string (tool/invoke-tool etool {:code "(+ 1 2"} {}) true)]
       (is (= 3 (-> out :value read-string))
           "the broken (+ 1 2 was repaired to (+ 1 2) and evaluated to 3")
@@ -232,7 +232,7 @@
 (deftest eval-tool-leaves-balanced-code-unrepaired
   (testing "balanced code is not flagged as repaired"
     (let [reg  (rt/runtime-registry {:enabled? true})
-          etool (get reg "clojure/eval")
+          etool (get reg "clojure_eval")
           out   (json/parse-string (tool/invoke-tool etool {:code "(+ 1 2)"} {}) true)]
       (is (= 3 (-> out :value read-string)))
       (is (nil? (:paren-repaired? out))
@@ -244,7 +244,7 @@
             render can request a bigger output window / longer timeout"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})]
-      (tool/invoke-tool (get reg "clojure/eval")
+      (tool/invoke-tool (get reg "clojure_eval")
                         {:code "(+ 1 2)"
                          :max-output-bytes 131072
                          :eval-timeout-ms 60000}
@@ -257,13 +257,13 @@
             runtime opts stay empty (default config applies)"
     (let [cap (atom nil)
           reg (rt/runtime-registry {:runtime (stub cap)})]
-      (tool/invoke-tool (get reg "clojure/eval") {:code "(+ 1 2)"} {})
+      (tool/invoke-tool (get reg "clojure_eval") {:code "(+ 1 2)"} {})
       (is (not (contains? (:opts @cap) :max-output-bytes)))
       (is (not (contains? (:opts @cap) :eval-timeout-ms))))))
 
 ;; ---- verify-round-3 FIX 1: AOT-transitive add-lib regression (network) ----
 ;;
-;; The round-2 failure: clojure/add-lib of `com.taoensso/nippy` (whose
+;; The round-2 failure: clojure_add_lib of `com.taoensso/nippy` (whose
 ;; `taoensso.nippy.impl` references `taoensso.encore`) downloaded the jar
 ;; (+ transitives) and the `:reload` auto-require retry fired, but
 ;; `loaded?` stayed FALSE in every envelope with a persistent
@@ -275,12 +275,12 @@
 ;; suite; run with `clojure -M:e2e`.
 
 (deftest ^:e2e add-lib-tool-loads-aot-transitive-lib-with-require
-  (testing "verify-round-3 FIX 1: clojure/add-lib of an AOT-transitive lib
+  (testing "verify-round-3 FIX 1: clojure_add_lib of an AOT-transitive lib
             (com.taoensso/nippy -> taoensso.encore) with :require returns
             loaded? TRUE after the post-add-libs classloader refresh — not
             merely the jar on the classpath"
     (let [reg (rt/runtime-registry {:enabled? true :network? true})
-          out (parse (tool/invoke-tool (get reg "clojure/add-lib")
+          out (parse (tool/invoke-tool (get reg "clojure_add_lib")
                      {:lib     "com.taoensso/nippy"
                       :version "3.4.2"
                       :require "taoensso.nippy"

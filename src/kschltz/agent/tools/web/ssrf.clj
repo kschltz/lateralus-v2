@@ -93,7 +93,7 @@
 
 (def ^:private snippet-truncation-hint-text
   "IMPORTANT: these are only short snippets. To get the full page content,
-   call web/search with the url parameter (e.g. {\"url\": \"https://...\"}).")
+  call web_search with the url parameter (e.g. {\"url\": \"https://...\"}).")
 
 (defn snippet-truncation-hint
   "Return the snippet-truncation hint string. Exposed so the tool layer

@@ -4,9 +4,9 @@
    Three `Tool` implementations let the agent prototype in Clojure by
    actually running code, and pull in dependencies on the fly:
 
-     - `EvalTool`        — `clojure/eval`
-     - `AddLibTool`      — `clojure/add-lib`
-     - `LoadedLibsTool`  — `clojure/loaded-libs`
+    - `EvalTool`        — `clojure_eval`
+    - `AddLibTool`      — `clojure_add_lib`
+    - `LoadedLibsTool`  — `clojure_loaded_libs`
 
    Each tool holds a `ClojureRuntime` (default: the in-process JVM
    runtime) plus the merged config map and dispatches through the
@@ -15,8 +15,8 @@
    structured result.
 
    Safety toggles live in the config: `:enabled?` (master switch, default
-   true) and `:network?` (gates `clojure/add-lib`, default true).
-   `clojure/eval` runs arbitrary Clojure in-process — operators who want
+  true) and `:network?` (gates `clojure_add_lib`, default true).
+  `clojure_eval` runs arbitrary Clojure in-process — operators who want
    an air-gapped, read-only agent should set `:enabled? false`."
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
@@ -56,7 +56,7 @@
                   :phase "disabled"}))
 
 (defn- network-disabled-envelope
-  "Returned when `clojure/add-lib` is invoked but `:network?` is false."
+ "Returned when `clojure_add_lib` is invoked but `:network?` is false."
   []
   (json-envelope {:error "runtime dependency loading is disabled (runtime config :network? is false)"
                   :phase "network-disabled"
@@ -71,7 +71,7 @@
   (get config :network? true))
 
 ;; ---------------------------------------------------------------------------
-;; Coordinate parsing for clojure/add-lib
+;; Coordinate parsing for clojure_add_lib
 ;; ---------------------------------------------------------------------------
 
 (defn- coerce-coord-keys
@@ -86,7 +86,7 @@
         m))
 
 (defn parse-coords
-  "Turn `clojure/add-lib` args into a coords map of lib-symbol ->
+ "Turn `clojure_add_lib` args into a coords map of lib-symbol ->
    coordinate-map. Prefers an explicit `:coords` EDN string; otherwise
    builds `{lib {:mvn/version version}}` from `:lib` (+ optional
    `:version`, defaulting to \"RELEASE\"). Throws ex-info on bad input."
@@ -103,7 +103,7 @@
     {(symbol lib) {:mvn/version (or (not-empty version) "RELEASE")}}
 
     :else
-    (throw (ex-info "clojure/add-lib requires `lib` (+ optional `version`) or `coords`"
+   (throw (ex-info "clojure_add_lib requires `lib` (+ optional `version`) or `coords`"
                     {}))))
 
 (defn- require-form
@@ -120,7 +120,7 @@
    `:reload` flag forces Clojure to re-read the namespace source from
    the classpath instead of trusting AOT-compiled classes, which is the
    standard workaround for the classloader/AOT-staleness failure where
-   `clojure/add-lib` mutates the classpath but the first `require` of a
+  `clojure_add_lib` mutates the classpath but the first `require` of a
    freshly-added lib with AOT classes fails (verify-round-1: nippy
    `CompilerException` despite the jar + source being present). Returns
    nil when no :require is provided."
@@ -174,7 +174,7 @@
    `:required-error` is the LAST attempt's error. On a retry that STILL
    fails, a `:hint` string is attached so the model does not spiral into
    jar-entry enumeration — it tells the model the jars are present but
-   the namespace is unresolvable and to retry via `clojure/eval` with
+  the namespace is unresolvable and to retry via `clojure_eval` with
    `:reload` or try a sub-namespace."
   [added-result require-form eval-result coords
    {:keys [retried? reload-form reload-result] :as _retry}]
@@ -195,12 +195,12 @@
                   "namespace could not be required even after a :reload retry "
                   "(likely classloader/AOT staleness, not a missing dependency). "
                   "Do NOT enumerate jar entries. Options: (1) retry the require "
-                  "with :reload via clojure/eval, (2) require a sub-namespace, "
+                 "with :reload via clojure_eval, (2) require a sub-namespace, "
                   "or (3) summarize the partial result.")))))
 
 (deftype EvalTool [runtime config]
   tool/Tool
-  (-name [_] "clojure/eval")
+ (-name [_] "clojure_eval")
   (-description [_]
     "Evaluate Clojure code in a persistent in-process runtime namespace and return the result. The `code` string may contain multiple top-level forms; `def`s and `require`s persist across calls so you can build up state incrementally while prototyping. Returns JSON with `ns`, `forms` (count evaluated), `value` (pr-str of the last form), `values` (pr-str of EVERY form in evaluation order — use this when a multi-form showcase produces several results you need, e.g. def data -> show! -> port), `output` (captured stdout), `status` (`:ok`, `:truncated` when stdout was clipped, `:timeout`, or `:error`), `truncated?` (bool), `reader-eval-disabled?` (always true — reader-eval `#=` is OFF, so `#=` will NOT execute at read time), `error` (one-line exception or null), and `error-detail` (structured `{class message cause data trace}` on failure, null on success). Optional `ns` selects the target namespace. Optional `max-output-bytes` (int) raises the captured-stdout cap for THIS call — pass it when a render (e.g. a Clerk `show!` trace) exceeds the default 64KB cap so the output is not clipped mid-value. Optional `eval-timeout-ms` (int) widens the per-call timeout for a long-running render. Evaluation is time-limited; runaway loops are cancelled — on timeout `status` is `:timeout` and `error-detail` carries the timeout exception, so retry with a smaller computation rather than an identical call. Reader-eval (`#=`) is disabled; reader conditionals are allowed.")
   (-input-schema [_] schemas/EvalInput)
@@ -208,7 +208,7 @@
   (-invoke [_ args _ctx]
     (try
       (if-not (enabled? config)
-        (disabled-envelope "clojure/eval")
+       (disabled-envelope "clojure_eval")
         (let [{:keys [code repaired? method]} (paren-repair/repair-code (:code args))
               opts (cond-> {}
                      (:ns args) (assoc :ns (:ns args))
@@ -224,15 +224,15 @@
 
 (deftype AddLibTool [runtime config]
   tool/Tool
-  (-name [_] "clojure/add-lib")
+ (-name [_] "clojure_add_lib")
   (-description [_]
-    "Load any Maven or Git dependency into the running JVM at runtime, without restarting, using Clojure 1.12's runtime dependency loading. This is the explicit tool for adding libraries that are NOT on the default classpath — for example, ring/ring-jetty-adapter to start a web server, org.clojure/data.json for JSON handling, metosin/reitit for routing, etc.\n\nProvide `lib` (e.g. \"org.clojure/data.json\") with an optional `version` (defaults to the latest RELEASE), or pass `coords`: an EDN map string of lib -> coordinate map for advanced/git coordinates. After the dependency loads, optionally pass `require` (namespace string, e.g. \"ring.adapter.jetty\") and `alias` (e.g. \"jetty\") to automatically require the namespace in the persistent runtime namespace so it is immediately usable. Returns JSON with `added` (libs loaded), `coord` (the resolved coordinate map that was actually used, for audit/version retries), `status` (`:ok`/`:error`), `required` (the require form that ran, if any), `loaded?` (true ONLY when a `:require` was requested AND that require succeeded — absent when no `:require` was passed, so do NOT assume the lib is usable without requiring it), `required-error` (if the require failed), `require-retried?` (true when the first require failed with a namespace/classloader error and was retried with `:reload` to force a source recompile past AOT staleness), `hint` (a recovery hint present when the `:reload` retry ALSO failed - do not enumerate jar entries; retry the require with `:reload` via clojure/eval or try a sub-namespace), `error` (one-line, null on success), and `error-detail` (structured `{class message cause data trace}` on failure). Always pass `:require` for the namespace you intend to call next, then check `loaded?` before using it. Requires the agent to run under the Clojure CLI; will fail with `:status :error` (not a crash) under the uberjar or native-image.")
+   "Load any Maven or Git dependency into the running JVM at runtime, without restarting, using Clojure 1.12's runtime dependency loading. This is the explicit tool for adding libraries that are NOT on the default classpath — for example, ring/ring-jetty-adapter to start a web server, org.clojure/data.json for JSON handling, metosin/reitit for routing, etc.\n\nProvide `lib` (e.g. \"org.clojure/data.json\") with an optional `version` (defaults to the latest RELEASE), or pass `coords`: an EDN map string of lib -> coordinate map for advanced/git coordinates. After the dependency loads, optionally pass `require` (namespace string, e.g. \"ring.adapter.jetty\") and `alias` (e.g. \"jetty\") to automatically require the namespace in the persistent runtime namespace so it is immediately usable. Returns JSON with `added` (libs loaded), `coord` (the resolved coordinate map that was actually used, for audit/version retries), `status` (`:ok`/`:error`), `required` (the require form that ran, if any), `loaded?` (true ONLY when a `:require` was requested AND that require succeeded — absent when no `:require` was passed, so do NOT assume the lib is usable without requiring it), `required-error` (if the require failed), `require-retried?` (true when the first require failed with a namespace/classloader error and was retried with `:reload` to force a source recompile past AOT staleness), `hint` (a recovery hint present when the `:reload` retry ALSO failed - do not enumerate jar entries; retry the require with `:reload` via clojure_eval or try a sub-namespace), `error` (one-line, null on success), and `error-detail` (structured `{class message cause data trace}` on failure). Always pass `:require` for the namespace you intend to call next, then check `loaded?` before using it. Requires the agent to run under the Clojure CLI; will fail with `:status :error` (not a crash) under the uberjar or native-image.")
   (-input-schema [_] schemas/AddLibInput)
   (-output-schema [_] schemas/OutputString)
   (-invoke [_ args _ctx]
     (try
       (cond
-        (not (enabled? config))         (disabled-envelope "clojure/add-lib")
+       (not (enabled? config))         (disabled-envelope "clojure_add_lib")
         (not (network-allowed? config)) (network-disabled-envelope)
                 :else
         (let [coords        (parse-coords args)
@@ -263,15 +263,15 @@
 
 (deftype LoadedLibsTool [runtime config]
   tool/Tool
-  (-name [_] "clojure/loaded-libs")
+ (-name [_] "clojure_loaded_libs")
   (-description [_]
-    "List the Clojure libs currently loaded in the running JVM. No arguments. Returns JSON with a `libs` array. Useful for checking whether a dependency added via clojure/add-lib is available before requiring it.")
+   "List the Clojure libs currently loaded in the running JVM. No arguments. Returns JSON with a `libs` array. Useful for checking whether a dependency added via clojure_add_lib is available before requiring it.")
   (-input-schema [_] schemas/LoadedLibsInput)
   (-output-schema [_] schemas/OutputString)
   (-invoke [_ _args _ctx]
     (try
       (if-not (enabled? config)
-        (disabled-envelope "clojure/loaded-libs")
+       (disabled-envelope "clojure_loaded_libs")
         (json-envelope {:libs (proto/-loaded-libs runtime)}))
       (catch Throwable t
         (error-envelope t)))))
@@ -290,9 +290,9 @@
    from the config.
 
    Returns:
-     {\"clojure/eval\"        EvalTool
-      \"clojure/add-lib\"     AddLibTool
-      \"clojure/loaded-libs\" LoadedLibsTool}"
+    {\"clojure_eval\"        EvalTool
+     \"clojure_add_lib\"     AddLibTool
+     \"clojure_loaded_libs\" LoadedLibsTool}"
   ([] (runtime-registry {}))
   ([config]
    (let [config (or config {})
@@ -300,6 +300,6 @@
                   (if (proto/capabilities? r)
                     r
                     (jvm/jvm-runtime (dissoc config :runtime))))]
-     {"clojure/eval"        (->EvalTool rt config)
-      "clojure/add-lib"     (->AddLibTool rt config)
-      "clojure/loaded-libs" (->LoadedLibsTool rt config)})))
+    {"clojure_eval"        (->EvalTool rt config)
+     "clojure_add_lib"     (->AddLibTool rt config)
+     "clojure_loaded_libs" (->LoadedLibsTool rt config)})))

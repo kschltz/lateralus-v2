@@ -29,7 +29,7 @@
            [java.util.concurrent TimeoutException]))
 
 (def default-eval-ns
-  "Default persistent namespace used by `clojure/eval`."
+ "Default persistent namespace used by `clojure_eval`."
   "lateralus.repl")
 
 (def default-eval-timeout-ms
@@ -136,7 +136,7 @@
    `clojure.repl.deps/add-libs` requires the thread context classloader
    to be a `DynamicClassLoader`, and Clojure's `require` resolves through
    the context classloader, so one shared instance per runtime lets a
-   `clojure/add-lib` followed by a `clojure/eval` see the new namespaces."
+  `clojure_add_lib` followed by a `clojure_eval` see the new namespaces."
   ^DynamicClassLoader []
   (DynamicClassLoader. (RT/baseLoader)))
 
@@ -190,7 +190,7 @@
    `ns-sym`. Returns an `EvalResult` map. `config` supplies
    `:eval-timeout-ms` and `:max-output-bytes` overrides. `cl` is the
    shared `DynamicClassLoader` installed as the context classloader so
-   namespaces added via `clojure/add-lib` are visible (may be nil).
+  namespaces added via `clojure_add_lib` are visible (may be nil).
 
    The envelope carries a structural `:status` keyword
    (`:ok`/`:error`/`:timeout`/`:truncated`) so the model can branch
@@ -332,7 +332,7 @@
     ;; refresh the classloader: wrap the mutated loader in a fresh
     ;; `DynamicClassLoader` and install it as the runtime's classloader so
     ;; the NEXT `-eval` (the AddLibTool auto-require, or a follow-up
-    ;; `clojure/eval`) resolves AOT-transitive classes through a clean
+   ;; `clojure_eval`) resolves AOT-transitive classes through a clean
     ;; loader state. See `refresh-classloader` for the why. Refresh only
     ;; when the current loader is a `DynamicClassLoader` (it always is for
     ;; `jvm-runtime`, but a test seam could pass something else).

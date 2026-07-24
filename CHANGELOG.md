@@ -5,7 +5,7 @@ All notable changes to `lateralus-v2`.
 ## [Unreleased]
 
 ### Added
-- **Runtime-eval tool suite** (`kschltz.agent.tools.runtime.*`): `clojure/eval` (evaluate Clojure in a persistent runtime namespace, with stdout/value/exception capture and a per-call timeout), `clojure/add-lib` (load Maven/Git dependencies at runtime via Clojure 1.12 `clojure.repl.deps/add-libs`), and `clojure/loaded-libs`. Isolated behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary; wired via the `:lateralus/runtime-tools` Integrant key (JVM config + `default-config`; native-image enables eval with `:network? false`). Guarded by `:enabled?` / `:network?` toggles. See `docs/runtime-eval.md`.
+- **Runtime-eval tool suite** (`kschltz.agent.tools.runtime.*`): `clojure_eval` (evaluate Clojure in a persistent runtime namespace, with stdout/value/exception capture and a per-call timeout), `clojure_add_lib` (load Maven/Git dependencies at runtime via Clojure 1.12 `clojure.repl.deps/add-libs`), and `clojure_loaded_libs`. Isolated behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary; wired via the `:lateralus/runtime-tools` Integrant key (JVM config + `default-config`; native-image enables eval with `:network? false`). Guarded by `:enabled?` / `:network?` toggles. See `docs/runtime-eval.md`.
 - Bootstrap: new repo at `net.clojars.kschltz/lateralus-v2`, Clojure 1.12.5, Integrant, Malli, hato.
 - Chain engine (`kschltz.agent.chain`): Pedestal-style enter/leave/error interceptor engine with pure context maps.
 - Plugin system (`kschltz.agent.plugin`) + default exchange chain (`kschltz.agent.exchange`).
@@ -23,6 +23,7 @@ All notable changes to `lateralus-v2`.
 - JVM flags for Proximum (`--add-modules=jdk.incubator.vector`, `--enable-native-access=ALL-UNNAMED`) wired into `deps.edn` `:test`, `build.clj`, and the launcher script.
 
 ### Changed
+- Tool names now use portable snake_case and are validated before request serialization, replacing slash-delimited names that Cerebras and other hosted inference APIs reject.
 - `src/kschltz/lateralus.clj` now delegates to `kschltz.agent.cli/-main` instead of printing a stub message.
 - `:lateralus/memory-backend` now receives the resolved `:embedder` so real backends can embed message content at store time.
 - `resources/lateralus/config.edn` now defaults to Proximum in-memory memory + LangChain4j ONNX embedding (was noop backend + noop embedder).

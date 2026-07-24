@@ -43,19 +43,19 @@
 (deftest clojure-registry-contains-seven-tools
   (let [registry (tools.clojure/clojure-registry)]
     (is (= 7 (count registry)))
-    (is (contains? registry "clojure/query"))
-    (is (contains? registry "clojure/add-require"))
-    (is (contains? registry "clojure/remove-def"))
-    (is (contains? registry "clojure/rename-symbol"))
-    (is (contains? registry "clojure/insert-form"))
-    (is (contains? registry "clojure/edit-def"))
-    (is (contains? registry "clojure/format-file"))
+    (is (contains? registry "clojure_query"))
+    (is (contains? registry "clojure_add_require"))
+    (is (contains? registry "clojure_remove_def"))
+    (is (contains? registry "clojure_rename_symbol"))
+    (is (contains? registry "clojure_insert_form"))
+    (is (contains? registry "clojure_edit_def"))
+    (is (contains? registry "clojure_format_file"))
     (is (every? tool/tool? (vals registry)))))
 
 (deftest query-lists-defs-and-requires
   (temp-file "sample.clj" "(ns sample (:require [clojure.string :as str]))\n(defn foo [] 1)\n(def bar 2)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/query" {:path "sample.clj"})]
+        parsed (invoke reg "clojure_query" {:path "sample.clj"})]
     (is (vector? (:defs parsed)))
     (is (some #(= "foo" %) (:defs parsed)))
     (is (some #(= "bar" %) (:defs parsed)))
@@ -64,20 +64,20 @@
 (deftest add-require-appends-new-libspec
   (temp-file "sample.clj" "(ns sample (:require [clojure.string :as str]))\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/add-require" {:path "sample.clj" :libspec "clojure.set"})]
+        parsed (invoke reg "clojure_add_require" {:path "sample.clj" :libspec "clojure.set"})]
     (is (:changed parsed))
     (is (str/includes? (slurp (io/file @tmp-dir "sample.clj")) "clojure.set"))))
 
 (deftest add-require-is-idempotent
   (temp-file "sample.clj" "(ns sample (:require [clojure.string :as str]))\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/add-require" {:path "sample.clj" :libspec "clojure.string"})]
+        parsed (invoke reg "clojure_add_require" {:path "sample.clj" :libspec "clojure.string"})]
     (is (not (:changed parsed)))))
 
 (deftest add-require-creates-section-without-existing-requires
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg     (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed  (invoke reg "clojure/add-require" {:path "sample.clj" :libspec "clojure.string" :alias "str"})
+        parsed  (invoke reg "clojure_add_require" {:path "sample.clj" :libspec "clojure.string" :alias "str"})
         content (slurp (io/file @tmp-dir "sample.clj"))]
     (is (:changed parsed))
     (is (str/includes? content "(:require"))
@@ -87,7 +87,7 @@
 (deftest remove-def-deletes-definition
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)\n(def bar 2)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/remove-def" {:path "sample.clj" :name "foo"})
+        parsed (invoke reg "clojure_remove_def" {:path "sample.clj" :name "foo"})
         content (slurp (io/file @tmp-dir "sample.clj"))]
     (is (:changed parsed))
     (is (not (str/includes? content "(defn foo")))
@@ -96,14 +96,14 @@
 (deftest remove-def-missing-definition
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/remove-def" {:path "sample.clj" :name "bar"})]
+        parsed (invoke reg "clojure_remove_def" {:path "sample.clj" :name "bar"})]
     (is (not (:changed parsed)))
     (is (= "definition not found" (:reason parsed)))))
 
 (deftest rename-symbol-replaces-occurrences
   (temp-file "sample.clj" "(ns sample)\n(defn foo [x] (foo x))\n(def bar (foo 1))")
   (let [reg     (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed  (invoke reg "clojure/rename-symbol" {:path "sample.clj" :old "foo" :new "qux"})
+        parsed  (invoke reg "clojure_rename_symbol" {:path "sample.clj" :old "foo" :new "qux"})
         content (slurp (io/file @tmp-dir "sample.clj"))]
     (is (:changed parsed))
     (is (= 3 (:renamed parsed)))
@@ -113,35 +113,35 @@
 (deftest rename-symbol-missing-symbol
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/rename-symbol" {:path "sample.clj" :old "bar" :new "qux"})]
+        parsed (invoke reg "clojure_rename_symbol" {:path "sample.clj" :old "bar" :new "qux"})]
     (is (not (:changed parsed)))
     (is (= "symbol not found" (:reason parsed)))))
 
 (deftest insert-form-at-end
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/insert-form" {:path "sample.clj" :form "(def bar 2)" :position :end})]
+        parsed (invoke reg "clojure_insert_form" {:path "sample.clj" :form "(def bar 2)" :position :end})]
     (is (:changed parsed))
     (is (str/includes? (slurp (io/file @tmp-dir "sample.clj")) "(def bar 2)"))))
 
 (deftest insert-form-at-beginning
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/insert-form" {:path "sample.clj" :form "(def bar 2)" :position :beginning})]
+        parsed (invoke reg "clojure_insert_form" {:path "sample.clj" :form "(def bar 2)" :position :beginning})]
     (is (:changed parsed))
     (is (str/includes? (slurp (io/file @tmp-dir "sample.clj")) "(def bar 2)"))))
 
 (deftest edit-def-replaces-body
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/edit-def" {:path "sample.clj" :name "foo" :body "(inc 1)"})]
+        parsed (invoke reg "clojure_edit_def" {:path "sample.clj" :name "foo" :body "(inc 1)"})]
     (is (:changed parsed))
     (is (str/includes? (slurp (io/file @tmp-dir "sample.clj")) "(defn foo [] (inc 1))"))))
 
 (deftest edit-def-preserves-docstring
   (temp-file "sample.clj" "(ns sample)\n(defn foo \"docs\" [] 1)")
   (let [reg     (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed  (invoke reg "clojure/edit-def" {:path "sample.clj" :name "foo" :body "(inc 1)"})
+        parsed  (invoke reg "clojure_edit_def" {:path "sample.clj" :name "foo" :body "(inc 1)"})
         content (slurp (io/file @tmp-dir "sample.clj"))]
     (is (:changed parsed))
     (is (str/includes? content "\"docs\""))
@@ -150,19 +150,19 @@
 (deftest format-file-works
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        parsed (invoke reg "clojure/format-file" {:path "sample.clj"})]
+        parsed (invoke reg "clojure_format_file" {:path "sample.clj"})]
     (is (contains? parsed :changed))))
 
 (deftest write-creates-backup
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})]
-    (invoke reg "clojure/remove-def" {:path "sample.clj" :name "foo"})
+    (invoke reg "clojure_remove_def" {:path "sample.clj" :name "foo"})
     (is (.exists (io/file @tmp-dir "sample.clj.bak")))))
 
 (deftest malformed-edit-is-rejected
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg     (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        result  (tool/invoke-tool (get reg "clojure/insert-form")
+        result  (tool/invoke-tool (get reg "clojure_insert_form")
                                 {:path "sample.clj" :form "(def" :position :end} dummy-ctx)
         content (slurp (io/file @tmp-dir "sample.clj"))]
     (is (str/starts-with? result "Clojure tool error:"))
@@ -170,5 +170,5 @@
 
 (deftest missing-file-returns-error
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        result (tool/invoke-tool (get reg "clojure/query") {:path "missing.clj"} dummy-ctx)]
+        result (tool/invoke-tool (get reg "clojure_query") {:path "missing.clj"} dummy-ctx)]
     (is (str/starts-with? result "Clojure tool error:"))))

@@ -15,7 +15,7 @@
     :ref :lateralus/file-tools}
    {:id :self
     :label "self"
-    :description "self/status awareness"
+   :description "self_status awareness"
     :ref :lateralus/self-awareness-tools}
    {:id :clojure
     :label "clojure"
@@ -27,7 +27,7 @@
     :ref :lateralus/web-tools}
    {:id :runtime
     :label "runtime"
-    :description "clojure/eval + add-lib"
+   :description "clojure_eval + dependency loading"
     :ref :lateralus/runtime-tools}
    {:id :workbench
     :label "workbench"
@@ -160,8 +160,8 @@
                                                :network? true}
               :lateralus/loop-opts            {:max-tool-calls-per-turn 100
                                                :max-tool-calls-per-exchange 20
-                                               :tool-content-caps {"clojure/eval" 12000
-                                                                   "clojure/add-lib" 12000}}
+                                               :tool-content-caps {"clojure_eval" 12000
+                                                                   "clojure_add_lib" 12000}}
               :lateralus/tool-registry        (tool-registry groups)
               :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
               :lateralus/plugins              (plugins wb?)

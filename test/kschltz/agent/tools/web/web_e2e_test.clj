@@ -12,7 +12,7 @@
        LATERALUS_E2E_WEB=true clojure -M:e2e
 
    The tests verify that the `:mojeek` provider can parse a real Mojeek
-   result page and that `web/fetch` can retrieve a public page. They
+   result page and that `web_fetch` can retrieve a public page. They
    are intentionally lenient — markup drift should not break the build,
    but it should surface in the e2e run so an operator can decide to
    update the selector map."
@@ -43,7 +43,7 @@
         (is (string? (:snippet r)))))))
 
 (deftest ^:e2e mojeek-fetch-returns-page-text
-  (testing "web/fetch can retrieve and strip a public page"
+  (testing "web_fetch can retrieve and strip a public page"
     (let [provider (mojeek/provider {})
           result   (protocol/-fetch provider "https://example.com/" {})]
       (is (= 200 (:status result)))

@@ -58,7 +58,7 @@
    `allowed-schemes` is `#{\"http\" \"https\"}`.
    `allowed-ports` is `#{80 443}`."
   ;; NOTE: do NOT put provider-specific keys here (`:base-url`, `:user-agent`).
-  ;; `web/search` merges this map into provider opts; a shared Mojeek `:base-url`
+ ;; `web_search` merges this map into provider opts; a shared Mojeek `:base-url`
   ;; previously made `:provider :ddg` hit `https://www.mojeek.com/html/...` (404).
   ;; Each provider owns its own default base URL / browser UA.
   {:max-query-length            400

@@ -4,9 +4,9 @@
    Three `Tool` implementations back the registry that the agent loop
    dispatches to:
 
-     - `WebSearchTool`  — `web/search`
-     - `WebFetchTool`   — `web/fetch`
-     - `WebExtractTool` — `web/extract`
+    - `WebSearchTool`  — `web_search`
+    - `WebFetchTool`   — `web_fetch`
+    - `WebExtractTool` — `web_extract`
 
    Each tool holds a merged `config` map and dispatches through the
    `WebProvider` protocol to whatever provider was wired in by the
@@ -37,11 +37,11 @@
             [kschltz.agent.tools.web.ssrf :as ssrf]))
 
 ;; Phase 3 duplicate-query circuit breaker: a per-process atom holding the
-;; last normalized search query. If the model calls web/search with the
+;; last normalized search query. If the model calls web_search with the
 ;; exact same query twice in a row, the second call short-circuits to a
 ;; :duplicate-query envelope instead of re-hitting the network — preventing
 ;; agent loops. lateralus-v2 is single-user/single-agent MVP, so one
-;; web/search tool per process is the norm.
+;; web_search tool per process is the norm.
 (def ^:private last-search-query (atom nil))
 
 ;; `:mojeek` is JVM-only (it depends on hickory, which the native-image
@@ -138,9 +138,9 @@
 (deftype WebSearchTool [config]
   tool/Tool
   (-name [_]
-    "web/search")
+   "web_search")
   (-description [_]
-    "Search the public web. Returns a JSON envelope with :results [{title,url,snippet}]. Default provider (:none) does no network I/O; configure :ddg (recommended) or :mojeek for live results. Arguments: query (string, required), result-count (int, default 5, max 20). On success, follow interesting URLs with web/fetch.")
+   "Search the public web. Returns a JSON envelope with :results [{title,url,snippet}]. Default provider (:none) does no network I/O; configure :ddg (recommended) or :mojeek for live results. Arguments: query (string, required), result-count (int, default 5, max 20). On success, follow interesting URLs with web_fetch.")
   (-input-schema [_] schemas/WebSearchInput)
   (-output-schema [_] schemas/WebSearchOutput)
   (-invoke [_ args _ctx]
@@ -155,7 +155,7 @@
                 normalized (str/lower-case (str/trim cleaned))]
             ;; Phase 3 duplicate-query circuit breaker
             (if (and (:block-duplicate-query? cfg) (= normalized @last-search-query))
-              (guard-error-envelope "duplicate query (circuit breaker engaged) — refine the query or use web/fetch"
+             (guard-error-envelope "duplicate query (circuit breaker engaged) — refine the query or use web_fetch"
                                     :duplicate-query provider-name)
               (do
                 (reset! last-search-query normalized)
@@ -169,7 +169,7 @@
                             :query    cleaned
                             :results  guarded}
                      ;; Phase 3 snippet-truncation hint: nudge the model
-                     ;; toward web/fetch for full content.
+                    ;; toward web_fetch for full content.
                      (seq guarded) (assoc :note (ssrf/snippet-truncation-hint)))
                    {:pretty true}))))))
         (catch Throwable t
@@ -182,7 +182,7 @@
 (deftype WebFetchTool [config]
   tool/Tool
   (-name [_]
-    "web/fetch")
+   "web_fetch")
   (-description [_]
     "Fetch a URL and return the body as plain text. Default provider (:none) returns a disabled envelope. Configure :ddg or :mojeek to enable. Arguments: url (string, required), max-bytes (int, optional override).")
   (-input-schema [_] schemas/WebFetchInput)
@@ -217,7 +217,7 @@
 (deftype WebExtractTool [config]
   tool/Tool
   (-name [_]
-    "web/extract")
+   "web_extract")
   (-description [_]
     "Extract structured text from a snippet of HTML. No network I/O. Arguments: html (string, required), selector (string, optional).")
   (-input-schema [_] schemas/WebExtractInput)
@@ -288,11 +288,11 @@
    each tool's `WebProvider` method via the merged `opts` map.
 
    Returns:
-     {\"web/search\"  WebSearchTool
-      \"web/fetch\"   WebFetchTool
-      \"web/extract\" WebExtractTool}"
+    {\"web_search\"  WebSearchTool
+     \"web_fetch\"   WebFetchTool
+     \"web_extract\" WebExtractTool}"
   [config]
   (let [cfg (resolve-provider config)]
-    {"web/search"  (->WebSearchTool cfg)
-     "web/fetch"   (->WebFetchTool cfg)
-     "web/extract" (->WebExtractTool cfg)}))
+   {"web_search"  (->WebSearchTool cfg)
+    "web_fetch"   (->WebFetchTool cfg)
+    "web_extract" (->WebExtractTool cfg)}))

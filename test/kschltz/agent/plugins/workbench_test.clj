@@ -17,7 +17,7 @@
     (-submit-portal! [_ _ _] {:id "1" :preview "p"})
     (-clear-portal! [_] {:ok true})
     (-snapshot [_] {})
-    (-tools [_] {"portal/submit" :tool})
+    (-tools [_] {"portal_submit" :tool})
     (-close! [_] nil)))
 
 (deftest workbench-plugin-seeds-tools-and-guidance
@@ -32,7 +32,7 @@
           ctx1 ((:enter seed) {})
           ctx2 ((:enter guide) ctx1)]
       (is (= wb (:agent/workbench ctx2)))
-      (is (= "portal/submit" (first (keys (:agent/tool-registry ctx2)))))
+      (is (= "portal_submit" (first (keys (:agent/tool-registry ctx2)))))
       (is (string? (:agent/system-append ctx2)))
       (is (re-find #"PORTAL IS THE RICH" (:agent/system-append ctx2)))
       (is (re-find #":cite" (:agent/system-append ctx2))))))
@@ -53,7 +53,7 @@
           out   ((:enter ix/compose-context) ctx)
           sys   (-> out :llm/request :messages first :content)]
       (is (re-find #"base-sys" sys))
-      (is (re-find #"portal/submit" sys))
+      (is (re-find #"portal_submit" sys))
       (is (re-find #"PORTAL IS THE RICH" sys))
       (is (= guidance/portal-system-guidance
              (when (string? (:agent/system-append ctx))

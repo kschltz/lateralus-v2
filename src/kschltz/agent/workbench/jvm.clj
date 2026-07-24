@@ -114,7 +114,7 @@
                         :text (str "Workbench ready — CHAT left | PORTAL right ("
                                    (:url server)
                                    "). Agents should optimistically use "
-                                   "portal/submit for HTML/SVG charts, tables, "
+                                  "portal_submit for HTML/SVG charts, tables, "
                                    "and other rich visuals; cite only :cite "
                                    "from the tool (chat stays thin).")})
     (binding [*out* *err*]

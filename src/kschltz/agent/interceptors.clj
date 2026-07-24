@@ -117,7 +117,7 @@
    This is the DEFAULT cap; a per-tool override map
    (`:tool-content-caps` in `:lateralus/loop-opts`) can raise it for
    tools whose results are structurally large and must survive intact
-   (e.g. `clojure/eval` / `clojure/add-lib` Clerk render traces) — see
+  (e.g. `clojure_eval` / `clojure_add_lib` Clerk render traces) — see
    `truncate-tool-content`."
   2000)
 
@@ -132,7 +132,7 @@
    int) is supplied AND the message carries a `:name` (the tool name,
    stamped onto tool-result messages by the loop), the per-tool cap is
    used; otherwise `max-tool-content-chars` (the default 2000) applies.
-   This lets `clojure/eval` / `clojure/add-lib` keep their (structurally
+  This lets `clojure_eval` / `clojure_add_lib` keep their (structurally
    large) Clerk render traces intact while every other tool result is
    still bounded by the default cap (audit 2026-07 rec #5: the old
    fixed 2000-char cap silently destroyed Clerk's >2KB output, so the
@@ -343,7 +343,7 @@
 
    `caps` (optional) is a map of tool-name -> char cap passed through to
    `truncate-tool-content` so tools with structurally large results
-   (e.g. `clojure/eval` Clerk traces) can keep a higher cap than the
+  (e.g. `clojure_eval` Clerk traces) can keep a higher cap than the
    default. Returns a vector of messages in original order."
   ([messages] (trim-history messages nil))
   ([messages caps]

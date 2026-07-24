@@ -7,7 +7,7 @@
         cheshire/cheshire {:mvn/version "6.2.0"}
         rewrite-clj/rewrite-clj {:mvn/version "1.2.54"}
         ;; edamame + parinferish: paren/delimiter rebalancing for the
-        ;; clojure/eval tool. edamame detects delimiter errors (fast,
+        ;; clojure_eval tool. edamame detects delimiter errors (fast,
         ;; native-safe); parinferish (pure-Clojure parinfer, indent mode)
         ;; repairs them. Both are pure Clojure and GraalVM-safe, so they
         ;; are also listed in :native :replace-deps below.
@@ -28,7 +28,7 @@
         ;; :lateralus/memory-backend {:impl :proximum ...} is configured.
         ;; It requires Java 22+ and the incubator Vector/FFM JVM flags.
         ;; Proximum -> trove -> timbre 6.0.1 -> encore 3.31.0, but the
-        ;; `clojure/add-lib` tool loads libs (e.g. io.github.nextjournal/clerk)
+        ;; `clojure_add_lib` tool loads libs (e.g. io.github.nextjournal/clerk)
         ;; whose transitives (nippy 3.4.2) require encore >= 3.148.0
         ;; (for `enc/latom`). Parent-first class resolution kept the stale
         ;; 3.31.0 even after add-lib appended the newer jar, so clerk's

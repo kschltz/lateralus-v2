@@ -1,8 +1,8 @@
 (ns kschltz.agent.tools.web.none
   "`:none` provider — the air-gapped default for the web tool suite.
 
-   Implements `WebProvider` with zero network I/O. `web/search` and
-   `web/fetch` raise `ex-info` with `:phase :disabled`; `web/extract`
+  Implements `WebProvider` with zero network I/O. `web_search` and
+  `web_fetch` raise `ex-info` with `:phase :disabled`; `web_extract`
    works via the shared zero-dep regex stripper in `guards.clj`, so
    the op is still useful for callers that already have HTML on hand.
 

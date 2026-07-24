@@ -1,7 +1,7 @@
 (ns kschltz.agent.tools.web.protocol
   "WebProvider protocol for the lateralus web tool suite.
 
-   The web tool surface (`web/search`, `web/fetch`, `web/extract`)
+  The web tool surface (`web_search`, `web_fetch`, `web_extract`)
    dispatches through this protocol. Each provider implements four
    methods:
 
@@ -27,7 +27,7 @@
   (:require [clojure.string :as str]))
 
 (defprotocol WebProvider
-  "Pluggable backend for the `web/*` tool operations.
+  "Pluggable backend for the `web_*` tool operations.
 
    The first three methods raise `ex-info` on failure with a `:phase`
    keyword describing where the failure occurred. `-capabilities`

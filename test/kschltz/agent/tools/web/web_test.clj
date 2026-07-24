@@ -225,9 +225,9 @@
                 nil nil nil)
           reg   (web/web-registry (stub-config stub))]
       (is (= 3 (count reg)))
-      (is (contains? reg "web/search"))
-      (is (contains? reg "web/fetch"))
-      (is (contains? reg "web/extract"))
+      (is (contains? reg "web_search"))
+      (is (contains? reg "web_fetch"))
+      (is (contains? reg "web_extract"))
       (doseq [[n t] reg]
         (is (satisfies? tool/Tool t)
             (str "registry key " n " must hold a Tool"))
@@ -235,16 +235,16 @@
 
 (deftest web-registry-tool-names-are-exact
   (testing "the tool names returned by (-name _) are exactly
-            'web/search', 'web/fetch', 'web/extract'"
+            'web_search', 'web_fetch', 'web_extract'"
     (let [stub (->StubProvider
                 {:provider :stub :results []}
                 {:url "https://example.com/" :body "" :bytes 0 :status 200}
                 {:text "" :title nil :selectors-hit [] :provider :stub}
                 nil nil nil)
           reg   (web/web-registry (stub-config stub))]
-      (is (= "web/search"  (tool/-name (get reg "web/search"))))
-      (is (= "web/fetch"   (tool/-name (get reg "web/fetch"))))
-      (is (= "web/extract" (tool/-name (get reg "web/extract")))))))
+      (is (= "web_search"  (tool/-name (get reg "web_search"))))
+      (is (= "web_fetch"   (tool/-name (get reg "web_fetch"))))
+      (is (= "web_extract" (tool/-name (get reg "web_extract")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocol-method contract
@@ -280,7 +280,7 @@
   (testing "web-registry with {:provider :none} dispatches through the provider, not the keyword"
     (let [reg (web/web-registry {:provider :none})
           out (json/parse-string
-                 (tool/-invoke (get reg "web/search") {:query "clojure"} nil)
+                 (tool/-invoke (get reg "web_search") {:query "clojure"} nil)
                  true)]
       (is (= "none" (:provider out)))
       (is (= "disabled" (:phase out)))

@@ -5,14 +5,14 @@ operations for the lateralus agent loop:
 
 | Tool | Input | Output |
 |---|---|---|
-| `web/search` | `{:query string, :result-count? int}` | JSON envelope with `:provider`, `:query`, `:results` |
-| `web/fetch`  | `{:url string, :max-bytes? int}`      | JSON envelope with `:url`, `:title`, `:body`, `:bytes`, `:status` |
-| `web/extract` | `{:html string, :selector? string}`  | JSON envelope with `:text`, `:title`, `:selectors-hit`, `:provider` |
+| `web_search` | `{:query string, :result-count? int}` | JSON envelope with `:provider`, `:query`, `:results` |
+| `web_fetch`  | `{:url string, :max-bytes? int}`      | JSON envelope with `:url`, `:title`, `:body`, `:bytes`, `:status` |
+| `web_extract` | `{:html string, :selector? string}`  | JSON envelope with `:text`, `:title`, `:selectors-hit`, `:provider` |
 
 All three return JSON strings, matching the `Tool` protocol contract. The
 default provider is `:none`, which performs **no network I/O** and returns a
-structured disabled envelope for `web/search` and `web/fetch` while still
-offering a useful `web/extract` transform over raw HTML. Live web access is
+structured disabled envelope for `web_search` and `web_fetch` while still
+offering a useful `web_extract` transform over raw HTML. Live web access is
 opt-in via `:provider :mojeek`.
 
 ## Design constraints
@@ -30,7 +30,7 @@ provider call.
 
 | Provider | Config | Notes |
 |---|---|---|
-| `:none` (default) | none required | Zero I/O. `web/extract` still works via a zero-dep regex stripper. |
+| `:none` (default) | none required | Zero I/O. `web_extract` still works via a zero-dep regex stripper. |
 | `:mojeek` | none required | JVM-only. Uses `hickory` to parse Mojeek's public HTML result pages. **Opt-in** because HTML scraping can break if markup changes. |
 | `:ddg` | none required | JVM-only. **Recommended live provider.** Keyless DuckDuckGo search via `html.duckduckgo.com/html`, reached with a browser JA3/JA4 + HTTP/2 fingerprint (`impersonator-okhttp`) so DDG returns real HTML instead of a CAPTCHA page. Default preset is `android` (only preset that completes the TLS handshake with this bctls version); override via `:impersonate` in config. **Opt-in**. Provider owns its own base URL — shared guard defaults must not set `:base-url`. |
 | `:searxng` | not shipped | Planned self-hosted follow-up. |

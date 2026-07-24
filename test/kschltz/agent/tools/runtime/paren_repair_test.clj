@@ -1,6 +1,6 @@
 (ns kschltz.agent.tools.runtime.paren-repair-test
   "Tests for the paren/delimiter rebalancing module that runs before
-   clojure/eval. Covers: balanced passthrough, missing closing delimiters
+   clojure_eval. Covers: balanced passthrough, missing closing delimiters
    (single + nested), stray extra delimiters, nil/empty passthrough,
    unrepairable code returns the original, and that the repaired code
    actually evaluates."

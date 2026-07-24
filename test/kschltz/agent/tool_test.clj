@@ -8,7 +8,7 @@
 (deftest tool?-recognizes-tool-instances
   (testing "tool? returns true for reifies implementing Tool"
     (let [t (reify tool/Tool
-              (-name [_] "test/tool")
+              (-name [_] "test_tool")
               (-description [_] "desc")
               (-input-schema [_] [:map])
               (-output-schema [_] :string)
@@ -16,6 +16,15 @@
       (is (tool/tool? t))
       (is (not (tool/tool? {})))
       (is (not (tool/tool? nil))))))
+
+(deftest portable-tool-name-validation
+  (testing "portable names use conservative snake_case"
+    (is (tool/portable-tool-name? "file_read"))
+    (is (tool/portable-tool-name? "tool2"))
+    (is (not (tool/portable-tool-name? "file/read")))
+    (is (not (tool/portable-tool-name? "file-read")))
+    (is (not (tool/portable-tool-name? "2file_read")))
+    (is (not (tool/portable-tool-name? (apply str (repeat 65 "a")))))))
 
 (deftest invoke-tool-validates-input
   (testing "invoke-tool returns an error string for invalid input"
@@ -63,16 +72,25 @@
 (deftest tool-definition-shape
   (testing "tool-definition produces OpenAI function-tool shape"
     (let [t (reify tool/Tool
-              (-name [_] "calc/add")
+              (-name [_] "calc_add")
               (-description [_] "adds numbers")
               (-input-schema [_] [:map [:a :int] [:b :int]])
               (-output-schema [_] :string)
               (-invoke [_ _ _] ""))
           def (tool/tool-definition t)]
       (is (= "function" (:type def)))
-      (is (= "calc/add" (get-in def [:function :name])))
+      (is (= "calc_add" (get-in def [:function :name])))
       (is (= "adds numbers" (get-in def [:function :description])))
       (is (map? (get-in def [:function :parameters]))))))
+
+(deftest tool-definition-rejects-non-portable-name
+  (let [t (reify tool/Tool
+            (-name [_] "calc/add")
+            (-description [_] "invalid name")
+            (-input-schema [_] [:map])
+            (-output-schema [_] :string)
+            (-invoke [_ _ _] ""))]
+    (is (thrown? clojure.lang.ExceptionInfo (tool/tool-definition t)))))
 
 (deftest execute-tools-with-empty-registry
   (testing "execute-tools returns a human-readable error for unknown tools"
@@ -101,13 +119,13 @@
             failing key path so the model can fix the call, not just learn
             that 'something' failed"
     (let [t (reify tool/Tool
-              (-name [_] "add/lib")
+              (-name [_] "add_lib")
               (-description [_] "adds a lib")
               (-input-schema [_] [:map [:lib [:string {:min 1}]]])
               (-output-schema [_] :string)
               (-invoke [_ _ _] "ok"))
           err (tool/invoke-tool t {:lib ""} {})]
-      (is (str/includes? err "add/lib") "names the tool")
+      (is (str/includes? err "add_lib") "names the tool")
       (is (str/includes? err "input validation failed") "phase is input")
       (is (str/includes? err ":lib") "humanized key path is present"))))
 

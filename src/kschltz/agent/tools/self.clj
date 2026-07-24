@@ -17,7 +17,7 @@
 
 (defrecord SelfAwarenessTool [workspace-root]
   tool/Tool
-  (-name [_] "self/status")
+  (-name [_] "self_status")
   (-description [_]
     "Return information about the agent's current runtime environment:
      current time, active configuration, current directory, context
@@ -55,10 +55,10 @@
       (json/generate-string payload {:pretty true}))))
 
 (defn self-awareness-registry
-  "Return a tool registry containing only the self/status tool.
+  "Return a tool registry containing only the self_status tool.
 
    `workspace-root` is the optional configured workspace root string
    for filesystem-aware agents."
   ([] (self-awareness-registry nil))
   ([workspace-root]
-   {"self/status" (->SelfAwarenessTool workspace-root)}))
+   {"self_status" (->SelfAwarenessTool workspace-root)}))

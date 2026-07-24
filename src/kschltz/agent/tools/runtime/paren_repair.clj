@@ -1,7 +1,7 @@
 (ns kschltz.agent.tools.runtime.paren-repair
   "Paren/delimiter rebalancing for model-generated Clojure code.
 
-   Before `clojure/eval` runs a code string, `repair-code` closes missing
+  Before `clojure_eval` runs a code string, `repair-code` closes missing
    delimiters and re-balances stray ones so the model's output is more
    likely to read cleanly. This cuts down the most common LLM Clojure
    failure mode — forgetting a closing `)`/`]`/`}` or dropping one
@@ -17,7 +17,7 @@
                   now balanced do we accept the repair.
 
    If the repair still does not parse, `repair-code` returns the ORIGINAL
-   string unchanged so `clojure/eval` surfaces the genuine reader error
+  string unchanged so `clojure_eval` surfaces the genuine reader error
    rather than silently worse code. Both libraries are pure Clojure and
    GraalVM-native-safe, so the repair runs identically on the JVM and in
    the native-image build. parinfer-rust (the fastest backend) is an

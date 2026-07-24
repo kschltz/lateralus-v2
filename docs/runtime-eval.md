@@ -8,9 +8,9 @@ scratch REPL baked directly into the agent loop.
 
 | Tool | Purpose |
 |------|---------|
-| `clojure/eval` | Evaluate Clojure source in a persistent runtime namespace. |
-| `clojure/add-lib` | Load a Maven/Git dependency onto the live classpath (Clojure 1.12 `add-libs`). |
-| `clojure/loaded-libs` | List the libs currently loaded in the JVM. |
+| `clojure_eval` | Evaluate Clojure source in a persistent runtime namespace. |
+| `clojure_add_lib` | Load a Maven/Git dependency onto the live classpath (Clojure 1.12 `add-libs`). |
+| `clojure_loaded_libs` | List the libs currently loaded in the JVM. |
 
 All three are isolated behind the `ClojureRuntime` protocol
 (`kschltz.agent.tools.runtime.protocol`) so the network boundary can be
@@ -34,20 +34,20 @@ protocol-bound and schema-checked.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `:eval-ns` | `"lateralus.repl"` | Persistent namespace `clojure/eval` evaluates in. |
-| `:eval-timeout-ms` | `30000` | Hard cap per `clojure/eval` call; runaway loops are cancelled. |
+| `:eval-ns` | `"lateralus.repl"` | Persistent namespace `clojure_eval` evaluates in. |
+| `:eval-timeout-ms` | `30000` | Hard cap per `clojure_eval` call; runaway loops are cancelled. |
 | `:max-output-bytes` | `65536` | Cap on captured stdout returned to the model. |
 | `:enabled?` | `true` | Master switch; when `false`, every tool returns a `disabled` envelope. |
-| `:network?` | `true` | When `false`, `clojure/add-lib` refuses to resolve deps; `clojure/eval` is unaffected. |
+| `:network?` | `true` | When `false`, `clojure_add_lib` refuses to resolve deps; `clojure_eval` is unaffected. |
 | `:runtime` | — | Inject a pre-built `ClojureRuntime` (test seam). |
 
 It is wired into the JVM runtime config (`resources/lateralus/config.edn`)
 and the in-memory `system/default-config`. The native-image config
-(`resources/lateralus/native.edn`) enables `clojure/eval` with
-`:network? false` so `clojure/add-lib` is blocked (`add-libs` needs the
+(`resources/lateralus/native.edn`) enables `clojure_eval` with
+`:network? false` so `clojure_add_lib` is blocked (`add-libs` needs the
 Clojure CLI basis, which native-image does not ship).
 
-## clojure/eval
+## clojure_eval
 
 Input: `{:code "..." :ns "optional.ns" :max-output-bytes int? :eval-timeout-ms int?}`. The `code` string may contain
 multiple top-level forms. The runtime keeps a **persistent** namespace
@@ -87,7 +87,7 @@ future is cancelled and `error` reports the timeout. The reader runs with
 `*read-eval*` bound `false` so `#=` cannot execute code at read time;
 evaluation happens explicitly.
 
-## clojure/add-lib
+## clojure_add_lib
 
 Input (one of):
 
@@ -108,13 +108,13 @@ assume the lib is usable without requiring it), and `required-error`.
 
 Under the hood this delegates to Clojure 1.12's
 `clojure.repl.deps/add-libs`. The runtime owns a single
-`DynamicClassLoader` shared by `clojure/eval` and `clojure/add-lib`, and
+`DynamicClassLoader` shared by `clojure_eval` and `clojure_add_lib`, and
 binds `clojure.core/*repl*` true around the call, so a freshly added
-dependency is immediately `require`-able from the next `clojure/eval`:
+dependency is immediately `require`-able from the next `clojure_eval`:
 
 ```text
-clojure/add-lib  {:lib "org.clojure/data.json" :version "2.5.0"}
-clojure/eval     (require '[clojure.data.json :as json]) (json/write-str {:a 1})
+clojure_add_lib  {:lib "org.clojure/data.json" :version "2.5.0"}
+clojure_eval     (require '[clojure.data.json :as json]) (json/write-str {:a 1})
 => "{\"a\":1}"
 ```
 
@@ -137,14 +137,14 @@ Resolution requires the agent to run under the Clojure CLI (a
 `clojure.basis` must be present). Network/resolution failures are reported
 in `error` rather than raised.
 
-## clojure/loaded-libs
+## clojure_loaded_libs
 
 No arguments. Returns `{"libs": ["clojure.string", ...]}` — handy for
 checking whether an added dependency is available before requiring it.
 
 ## Safety
 
-`clojure/eval` runs **arbitrary Clojure in-process** with the agent's full
+`clojure_eval` runs **arbitrary Clojure in-process** with the agent's full
 permissions. Operators who want an air-gapped or read-only agent should
 set `:enabled? false` (disables all three tools) or `:network? false`
 (keeps eval, blocks runtime dependency loading). The eval timeout and
