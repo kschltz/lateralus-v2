@@ -73,10 +73,31 @@
     }
   }
 
+  // Portal's session query must remain a bare UUID (`?<uuid>`). Cache-bust
+  // with a hash fragment so we never corrupt session parsing.
   function bustPortalUrl(url) {
     if (!url) return url;
-    const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}_wb=${Date.now()}`;
+    try {
+      const u = new URL(url, window.location.origin);
+      u.hash = "wb=" + Date.now();
+      return u.toString();
+    } catch (_) {
+      return url;
+    }
+  }
+
+  // Embed Portal on the CHAT origin/port. Remote viewers (Tailscale MagicDNS)
+  // only need :7860 — the workbench mounts Portal's /rpc + assets in-process.
+  function browserPortalUrl(url) {
+    if (!url) return url;
+    try {
+      const u = new URL(url, window.location.origin);
+      const session = (u.search || "").replace(/^\?/, "").split("&")[0];
+      if (!session) return window.location.origin + "/";
+      return `${window.location.origin}/?${session}`;
+    } catch (_) {
+      return url;
+    }
   }
 
   function setPortalUrl(url, { forceReload = false } = {}) {
@@ -85,11 +106,12 @@
       portalFallback.classList.remove("hidden");
       return;
     }
-    portalLink.href = url;
+    const resolved = browserPortalUrl(url);
+    portalLink.href = resolved;
     portalFallback.classList.add("hidden");
-    if (forceReload || lastPortalUrl !== url || !portalFrame.src) {
-      portalFrame.src = bustPortalUrl(url);
-      lastPortalUrl = url;
+    if (forceReload || lastPortalUrl !== resolved || !portalFrame.src) {
+      portalFrame.src = bustPortalUrl(resolved);
+      lastPortalUrl = resolved;
     }
   }
 

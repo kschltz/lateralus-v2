@@ -268,13 +268,34 @@
       (not-empty (str bind-host))
       "localhost"))
 
+(defn- rewrite-url-host
+  "Replace host in `url` with `hostname` (keep scheme/port/path/query)."
+  [url hostname]
+  (if (or (str/blank? (str url)) (str/blank? (str hostname)))
+    url
+    (try
+      (let [uri    (java.net.URI. (str url))
+            scheme (or (.getScheme uri) "http")
+            port   (.getPort uri)
+            path   (let [p (.getRawPath uri)]
+                     (if (str/blank? p) "" p))
+            query  (.getRawQuery uri)]
+        (str scheme "://" hostname
+             (when (pos? port) (str ":" port))
+             path
+             (when query (str "?" query))))
+      (catch Exception _
+        url))))
+
 (defn open!
   "Open a Portal session for visualization (no sticky composer).
    Returns {:portal :url :viz-atom}. opts keys validated as WorkbenchConfig subset.
 
-   In Docker, set `LATERALUS_PORTAL_PORT` (and publish it) plus
-   `LATERALUS_WORKBENCH_PUBLIC_HOST=localhost` so the iframe is reachable
-   from the host browser."
+   Bind host follows `:portal-host`, else `LATERALUS_WORKBENCH_HOST`, else the
+   CHAT `:host`, else loopback — so a Tailscale-reachable CHAT bind also opens
+   Portal on that interface. The iframe URL host is rewritten per-request from
+   the browser Host header (see `http/portal-url-for-request`);
+   `LATERALUS_WORKBENCH_PUBLIC_HOST` only seeds the startup advertise URL."
   [opts]
   (schemas/decode-config (select-keys (or opts {})
                                       [:enabled? :host :port :portal-port :portal-host
@@ -282,23 +303,44 @@
                                        :app :window-title :open?]))
   (let [open     (requiring-resolve 'portal.api/open)
         url      (requiring-resolve 'portal.api/url)
-       viz-atom (atom {:lateralus/workbench "ready"
-                       :hint "Use portal_submit for HTML/SVG charts, tables, demos — chat stays thin."})
+        viz-atom (atom {:lateralus/workbench "ready"
+                        :hint "Use portal_submit for HTML/SVG charts, tables, demos — chat stays thin."})
         portal-port (or (:portal-port opts) (env-int "LATERALUS_PORTAL_PORT"))
+        ;; Prefer an explicit portal bind, then the shared workbench bind, then
+        ;; the CHAT host. Loopback last — remote CHAT (0.0.0.0 / Tailscale)
+        ;; must not leave Portal stranded on 127.0.0.1.
         portal-host (or (not-empty (:portal-host opts))
                         (not-empty (System/getenv "LATERALUS_WORKBENCH_HOST"))
+                        (not-empty (:host opts))
                         "127.0.0.1")
         p        (open (cond-> {:window-title (or (:window-title opts) "lateralus portal")
-                                :value        viz-atom}
+                                :value        viz-atom
+                                ;; Workbench embeds Portal in an iframe — never
+                                ;; spawn a separate browser window.
+                                :launcher     false}
                          (contains? opts :app) (assoc :app (:app opts))
                          (:theme opts)         (assoc :theme (:theme opts))
                          portal-port           (assoc :port portal-port)
                          portal-host           (assoc :host portal-host)))
         raw-url  (try (url p) (catch Throwable _ nil))
-        pub-url  (cond
-                   portal-port (str "http://" (advertise-host portal-host) ":" portal-port)
-                   raw-url     raw-url
-                   :else       nil)]
+        adv-host (advertise-host portal-host)
+        ;; Prefer Portal's own URL (includes ?<session-uuid>), but advertise
+        ;; on the public host / configured port. Dropping the session id used
+        ;; to break the iframe (empty Portal session + unreachable :7870).
+        pub-url  (let [session (when raw-url
+                                 (try (.getRawQuery (java.net.URI. (str raw-url)))
+                                      (catch Exception _ nil)))
+                       port    (cond
+                                 (and portal-port (pos? (long portal-port)))
+                                 (long portal-port)
+                                 raw-url
+                                 (try (let [p (.getPort (java.net.URI. (str raw-url)))]
+                                        (when (pos? p) p))
+                                      (catch Exception _ nil)))]
+                   (when (or port session)
+                     (str "http://" adv-host
+                          (when port (str ":" port))
+                          (when session (str "?" session)))))]
     {:portal   p
      :url      pub-url
      :viz-atom viz-atom}))

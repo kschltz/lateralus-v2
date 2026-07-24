@@ -191,18 +191,21 @@
                                   (catch Exception _ nil))]
              {:lateralus/workbench
               (cond-> {:enabled? true
-                       ;; Docker: LATERALUS_WORKBENCH_HOST=0.0.0.0 (bind)
-                       ;;         LATERALUS_WORKBENCH_PUBLIC_HOST=localhost (UI links)
+                       ;; Docker / Tailscale: LATERALUS_WORKBENCH_HOST=0.0.0.0 (bind
+                       ;; CHAT + Portal). Iframe host follows the browser Host
+                       ;; header at request time; PUBLIC_HOST only seeds startup links.
                        :host (or (not-empty (System/getenv "LATERALUS_WORKBENCH_HOST"))
                                  "127.0.0.1")
+                       ;; Keep Portal on the same bind interface as CHAT so a
+                       ;; remote/MagicDNS CHAT viewer can also reach :portal-port.
+                       :portal-host (or (not-empty (System/getenv "LATERALUS_WORKBENCH_HOST"))
+                                        "127.0.0.1")
                        :port 7860
                        :portal? true
                        :open-browser? false
                        :app false
                        :window-title "lateralus"}
-                portal-port (assoc :portal-port portal-port
-                                   :portal-host (or (not-empty (System/getenv "LATERALUS_WORKBENCH_HOST"))
-                                                    "0.0.0.0")))
+                portal-port (assoc :portal-port portal-port))
               :lateralus/workbench-plugin {:workbench (ig/ref :lateralus/workbench)}
               :lateralus/workbench-tools  {:workbench (ig/ref :lateralus/workbench)}})))))
 

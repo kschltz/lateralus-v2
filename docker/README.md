@@ -24,7 +24,12 @@ Fallback (no host daemon): compose starts an isolated `ollama` volume and pulls
 `LATERALUS_MODEL` (default `llama3.2`). Force that path with
 `LATERALUS_FORCE_DOCKER_OLLAMA=1`.
 
-Open **http://localhost:7860** for CHAT | Portal (Portal iframe on **:7870**).
+Open **http://localhost:7860** for CHAT | Portal.
+
+Portal is mounted on the same origin/port as CHAT (`/rpc`, `/main.js`,
+`/?<session>`), so remote viewers (Tailscale MagicDNS, LAN) only need
+**7860**. Set `LATERALUS_WORKBENCH_HOST=0.0.0.0` and open the MagicDNS
+name — the iframe no longer depends on a published **7870**.
 
 ## Useful knobs
 
@@ -34,6 +39,9 @@ Open **http://localhost:7860** for CHAT | Portal (Portal iframe on **:7870**).
 | `LATERALUS_DOCKER_OLLAMA_URL` | host or `http://ollama:11434/v1` | Rewrite target for localhost:11434 inside Docker |
 | `LATERALUS_FORCE_DOCKER_OLLAMA` | `0` | `1` = always use compose Ollama |
 | `LATERALUS_LIST_CLOUD` | `0` | `1` = merge Ollama Cloud ids into local `?` in Docker |
+| `LATERALUS_WORKBENCH_HOST` | `0.0.0.0` (Docker) | Bind address for CHAT (and Portal's private server) |
+| `LATERALUS_WORKBENCH_PUBLIC_HOST` | `localhost` (Docker) | Startup advertise host only; iframe uses CHAT origin |
+| `LATERALUS_PORTAL_PORT` | `7870` (Docker) | Private Portal server port (optional; iframe uses :7860) |
 | `OLLAMA_API_KEY` | _(empty)_ | Required for Ollama Cloud profiles |
 | `LATERALUS_CONFIG_HOME` | `/data/config` | Profile store inside the container |
 
