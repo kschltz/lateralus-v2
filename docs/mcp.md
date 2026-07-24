@@ -84,9 +84,11 @@ Demo configs:
 # stdio demo session
 clojure -M:dev -m demo-mcp-session
 
-# remote fake HTTP (terminal 1)
-clojure -M:dev -m fake-mcp-http-server   # prints http://127.0.0.1:<port>/mcp
+# remote Streamable HTTP demo (starts in-process fake Jetty + agent exchange)
+clojure -M:dev -m demo-mcp-http-session
 
+# or stand-alone fake HTTP server for manual config:
+clojure -M:dev -m fake-mcp-http-server   # prints http://127.0.0.1:<port>/mcp
 # then point :url at that URL with :allow-http? true :allow-loopback? true
 ```
 

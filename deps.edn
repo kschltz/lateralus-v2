@@ -54,6 +54,10 @@
                   {:mvn/version "0.10.13"}}
            :ns-default build}
   :dev {:extra-paths ["dev"]
+        ;; Ring/Jetty for fake Streamable HTTP MCP demos
+        ;; (`fake-mcp-http-server`, `demo-mcp-http-session`).
+        :extra-deps {ring/ring-core {:mvn/version "1.13.0"}
+                     ring/ring-jetty-adapter {:mvn/version "1.13.0"}}
         ;; Dev scripts may exercise Proximum / LangChain4j, so keep
         ;; the incubator module flags available.
         :jvm-opts ["--add-modules=jdk.incubator.vector"
