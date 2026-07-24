@@ -1,78 +1,56 @@
 # lateralus Docker
 
-Ships the JVM uberjar (workbench included) next to a local Ollama.
+Ships the JVM uberjar (workbench included). By default it **references host
+Ollama over the network** — no copying or mounting `~/.ollama`.
 
 ## Quick start
 
-One-liner (macOS / Linux / WSL / Git Bash):
-
 ```bash
+# Host: Ollama Desktop (or `ollama serve`) with your models pulled
 ./scripts/start-workbench
 ```
 
-Windows PowerShell:
+Windows PowerShell: `.\scripts\start-workbench.ps1`
 
-```powershell
-.\scripts\start-workbench.ps1
-```
+`start-workbench` will:
 
-Manual steps:
+1. Stop compose `ollama` if it was stealing `:11434`
+2. Point the lateralus container at `http://host.docker.internal:11434/v1`
+3. Run with `--no-deps` (no in-Docker model store)
 
-```bash
-# 1) Start Ollama
-docker compose up -d ollama
+Your Desktop pulls (`laguna-s-2.1`, `ornith:35b`, …) appear in Model `?`.
 
-# 2) Pull the default model (once)
-docker compose --profile setup run --rm pull-model
-
-# 3) Interactive lateralus (profile gate + REPL); workbench on :7860
-docker compose run --rm --service-ports lateralus
-```
+Fallback (no host daemon): compose starts an isolated `ollama` volume and pulls
+`LATERALUS_MODEL` (default `llama3.2`). Force that path with
+`LATERALUS_FORCE_DOCKER_OLLAMA=1`.
 
 Open **http://localhost:7860** for CHAT | Portal (Portal iframe on **:7870**).
-
-At the profile gate, Enter keeps the seeded `docker` profile
-(local Ollama at `http://ollama:11434/v1`, workbench on). Use `?` / `/term`
-on the Model prompt to search catalogs.
 
 ## Useful knobs
 
 | Env | Default | Purpose |
 |-----|---------|---------|
-| `LATERALUS_MODEL` | `llama3.2` (seed only) | Used when seeding a fresh config volume / by `pull-model` |
-| `LATERALUS_BASE_URL` | _(unset at runtime)_ | Optional fill-in when a profile has no `:base-url`; **do not** set this to local Ollama if you want Cloud |
-| `OLLAMA_API_KEY` | _(empty)_ | Required for Ollama Cloud |
-| `LATERALUS_WORKBENCH_HOST` | `0.0.0.0` | Bind address inside the container |
-| `LATERALUS_WORKBENCH_PUBLIC_HOST` | `localhost` | Host printed in UI links |
-| `LATERALUS_PORTAL_PORT` | `7870` | Portal server port (published to the host) |
+| `LATERALUS_MODEL` | `llama3.2` | Host ensure-pull / compose `pull-model` |
+| `LATERALUS_DOCKER_OLLAMA_URL` | host or `http://ollama:11434/v1` | Rewrite target for localhost:11434 inside Docker |
+| `LATERALUS_FORCE_DOCKER_OLLAMA` | `0` | `1` = always use compose Ollama |
+| `LATERALUS_LIST_CLOUD` | `0` | `1` = merge Ollama Cloud ids into local `?` in Docker |
+| `OLLAMA_API_KEY` | _(empty)_ | Required for Ollama Cloud profiles |
 | `LATERALUS_CONFIG_HOME` | `/data/config` | Profile store inside the container |
-
-```bash
-LATERALUS_MODEL=qwen2.5:7b docker compose --profile setup run --rm pull-model
-LATERALUS_MODEL=qwen2.5:7b docker compose run --rm --service-ports lateralus
-```
 
 ## Ollama Cloud inside Docker
 
-Export a key and pick the **ollama-cloud** starter (or edit the profile) in the gate.
-Profile settings win over compose env, so a cloud profile is not forced back onto
-the local Ollama URL.
-
 ```bash
 OLLAMA_API_KEY=… ./scripts/start-workbench
-# profile gate → starter 3 (ollama-cloud) → Model: /deepseek → pick id
+# profile gate → ollama-cloud → Model: /deepseek → pick id
 ```
 
-Do **not** set `LATERALUS_BASE_URL=http://ollama:11434/v1` when using Cloud — that
-sends “cloud” model ids to the local container, which often dies with
-`llama-server … signal: killed` (OOM).
+Huge local weights can OOM inside Docker Desktop’s memory limit; host Ollama
++ Metal is the intended path for 35B+ models.
 
 ## Build only
 
 ```bash
 docker compose build lateralus
-# or
-docker build -t lateralus:local .
 ```
 
-Profiles persist in the `lateralus-config` volume (`/data/config` in the container).
+Profiles persist in the `lateralus-config` volume.

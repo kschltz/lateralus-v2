@@ -250,6 +250,18 @@
         (first (remove #(re-find #"(?i)embed" %) xs))
         (first xs))))
 
+(defn- merge-cloud-into-local?
+  "Cloud catalog merge is for host CLI convenience. Inside Docker it
+   drowns the pulled-local list (and OLLAMA_API_KEY is often set for
+   unrelated cloud profiles). Opt in with LATERALUS_LIST_CLOUD=1."
+  [base-url api-key]
+  (let [key (resolve-ollama-api-key api-key)
+        in-docker? (= "1" (System/getenv "LATERALUS_IN_DOCKER"))
+        force? (= "1" (System/getenv "LATERALUS_LIST_CLOUD"))]
+    (and (local-ollama-base? base-url)
+         (not (str/blank? key))
+         (or force? (not in-docker?)))))
+
 (defn list-models-thorough
   "Like `list-models`, but when `base-url` is a local Ollama gateway and an
    Ollama Cloud API key is available (`api-key` or env `OLLAMA_API_KEY`),
@@ -257,15 +269,17 @@
 
    Local `/v1/models` only returns pulled models (often a handful). Cloud
    `/v1/models` returns the whole hosted catalog — this makes the CLI
-   picker useful for Ollama Cloud without forcing `--base-url https://ollama.com/v1`."
+   picker useful for Ollama Cloud without forcing `--base-url https://ollama.com/v1`.
+
+   Skipped automatically when `LATERALUS_IN_DOCKER=1` unless
+   `LATERALUS_LIST_CLOUD=1`."
   ([base-url] (list-models-thorough base-url nil))
   ([base-url api-key]
    (let [base    (resolve-base-url base-url)
          primary (list-models base api-key)
          key     (resolve-ollama-api-key api-key)]
      (if (or (ollama-cloud-base? base)
-             (not (local-ollama-base? base))
-             (str/blank? key))
+             (not (merge-cloud-into-local? base api-key)))
        (->> primary (sort-by model-menu-key) vec)
        (let [cloud (try (list-models ollama-cloud-base-url key)
                         (catch Throwable _ []))]
