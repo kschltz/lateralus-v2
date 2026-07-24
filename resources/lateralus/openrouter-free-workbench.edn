@@ -1,0 +1,89 @@
+;; OpenRouter "free" models + CHAT workbench, served on 0.0.0.0:8080.
+;;
+;; Designed to run behind a basic-auth reverse proxy (scripts/sprite-auth-proxy.js)
+;; on a Sprite service. The proxy binds 0.0.0.0:8080 (the Sprite-proxied port)
+;; with HTTP Basic Auth; the workbench binds 127.0.0.1:8081 (loopback only) and is
+;; unreachable directly. The Sprite URL is set to `public` so friends can reach
+;; the basic-auth gate without a Fly.io login.
+;;
+;;   browser -> Sprite proxy (TLS) -> auth-proxy :8080 (basic auth) -> workbench :127.0.0.1:8081
+;;
+;; :portal? true — Portal is served SAME-ORIGIN on the CHAT server (its /main.js,
+;; /rpc, /vendor, /?<session-uuid> routes are delegated to Portal's in-process
+;; handler), and the iframe URL is rewritten from the browser Host header, so
+;; Portal works through the single proxied port. The auth proxy forwards the
+;; original Host + x-forwarded-proto so the rewrite is correct.
+;;
+;; Run the workbench (loopback):
+;;   OLLAMA_API_KEY=... \
+;;     clojure -M:workbench:run -i --config resources/lateralus/openrouter-free-workbench.edn
+;;
+;; Run the auth proxy (foreground, for testing):
+;;   AUTH_USER=lateralus AUTH_PASS=... node scripts/sprite-auth-proxy.js
+;;
+;; Sprite services (persistent, auto-start on request):
+;;   sprite-env services create lateralus-workbench \
+;;     --cmd /usr/local/bin/clojure \
+;;     --args "-M:workbench:run,-i,--config,resources/lateralus/openrouter-free-workbench.edn" \
+;;     --dir /home/sprite/lateralus-v2 \
+;;     --env "OLLAMA_API_KEY=..."
+;;   sprite-env services create lateralus-auth-proxy \
+;;     --cmd /usr/bin/node --args scripts/sprite-auth-proxy.js \
+;;     --dir /home/sprite/lateralus-v2 \
+;;     --env "AUTH_USER=lateralus,AUTH_PASS=..." \
+;;     --needs lateralus-workbench --http-port 8080
+;;
+;; Model id is OpenRouter's `provider/model` form (no `openrouter/` prefix).
+;; See openrouter-free.edn for the verified tool-capable :free model list.
+
+{:lateralus/llm-client     {:impl    :http
+                            :base-url "https://openrouter.ai/api/v1"
+                            :model    "nvidia/nemotron-3-super-120b-a12b:free"}
+ :lateralus/llm-config     {:base-url "https://openrouter.ai/api/v1"
+                            :model    "nvidia/nemotron-3-super-120b-a12b:free"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/file-tools           {}
+ :lateralus/self-awareness-tools {}
+ :lateralus/clojure-tools        {}
+ :lateralus/logging             {}
+ :lateralus/web-tools      {:provider :none}
+ :lateralus/runtime-tools        {:enabled? true :network? true}
+ :lateralus/cli-ui              {:enabled? :auto :theme :default}
+ :lateralus/thinking            {:mode :preview}
+ :lateralus/workbench           {:enabled?      true
+                                 :host          "127.0.0.1"
+                                 :port          8081
+                                 :portal?       true
+                                 :open-browser? false
+                                 :app           false
+                                 :window-title  "lateralus"}
+ :lateralus/workbench-plugin    {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/loop-opts            {:max-tool-calls-per-turn 100
+                                  :max-tool-calls-per-exchange 20
+                                  :tool-content-caps {"clojure_eval" 12000
+                                                      "clojure_add_lib" 12000}}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/runtime-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/workbench-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :logging        #ig/ref :lateralus/logging
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :workbench      #ig/ref :lateralus/workbench
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}
