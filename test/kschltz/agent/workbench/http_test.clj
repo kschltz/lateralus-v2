@@ -11,6 +11,28 @@
     true
     (catch Throwable _ false)))
 
+(deftest request-hostname-strips-port
+  (is (= "machine.tailnet.ts.net"
+         (http/request-hostname
+          {:headers {"host" "machine.tailnet.ts.net:7860"}})))
+  (is (= "127.0.0.1"
+         (http/request-hostname {:headers {"Host" "127.0.0.1:7860"}})))
+  (is (= "::1"
+         (http/request-hostname {:headers {"host" "[::1]:7860"}})))
+  (is (= "localhost"
+         (http/request-hostname {:headers {"host" "localhost"}})))
+  (is (nil? (http/request-hostname {:headers {}}))))
+
+(deftest rewrite-url-host-keeps-portal-port
+  (is (= "http://machine.tailnet.ts.net:7870/"
+         (http/rewrite-url-host "http://127.0.0.1:7870/"
+                                "machine.tailnet.ts.net")))
+  (is (= "http://machine.tailnet.ts.net:7870/ui?x=1"
+         (http/rewrite-url-host "http://localhost:7870/ui?x=1"
+                                "machine.tailnet.ts.net")))
+  (is (= "http://127.0.0.1:7870"
+         (http/rewrite-url-host "http://127.0.0.1:7870" ""))))
+
 (deftest handler-message-and-state
   (let [h (hub/create-hub {:session-id "http-test"})
         attached (atom nil)
@@ -35,6 +57,17 @@
     (is (= "hello" (:text (hub/await-human! h {:timeout-ms 500}))))
     (is (= 200 (:status attach)))
     (is (string? (:id @attached)))))
+
+(deftest api-state-rewrites-portal-url-to-request-host
+  (let [h (hub/create-hub {:session-id "tailscale-test"})
+        _ (hub/set-portal-url! h "http://127.0.0.1:7870/")
+        handler (http/make-handler h {})
+        res (handler {:request-method :get
+                      :uri "/api/state"
+                      :headers {"host" "box.tailnet.ts.net:7860"}})
+        body (json/parse-string (:body res) true)]
+    (is (= 200 (:status res)))
+    (is (= "http://box.tailnet.ts.net:7870/" (:portal-url body)))))
 
 (deftest ^:workbench start-server-serves-index
   (when (available?)

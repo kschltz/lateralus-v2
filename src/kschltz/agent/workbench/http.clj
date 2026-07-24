@@ -60,13 +60,68 @@
                 :let [[k v] (str/split pair #"=" 2)]]
             [(keyword k) (or v "")]))))
 
+(defn request-hostname
+  "Hostname from the Ring/http-kit Host header (port stripped).
+   Supports `host:port` and `[ipv6]:port` forms."
+  [req]
+  (let [host-hdr (or (get-in req [:headers "host"])
+                     (get-in req [:headers "Host"]))]
+    (when-let [h (not-empty (str/trim (str host-hdr)))]
+      (cond
+        (str/starts-with? h "[")
+        (or (second (re-find #"^\[([^\]]+)\]" h)) h)
+
+        ;; Keep IPv4 / names; strip trailing :port when present.
+        (re-find #":\d+$" h)
+        (second (re-find #"^(.*):\d+$" h))
+
+        :else h))))
+
+(defn rewrite-url-host
+  "Replace the host in `url` with `hostname`, keeping scheme/port/path/query.
+   Used so the Portal iframe tracks the host the browser used for CHAT
+   (localhost vs Tailscale MagicDNS vs LAN IP)."
+  [url hostname]
+  (if (or (str/blank? (str url)) (str/blank? (str hostname)))
+    url
+    (try
+      (let [uri    (java.net.URI. (str url))
+            scheme (or (.getScheme uri) "http")
+            port   (.getPort uri)
+            path   (let [p (.getRawPath uri)]
+                     (if (str/blank? p) "" p))
+            query  (.getRawQuery uri)
+            frag   (.getRawFragment uri)]
+        (str scheme "://" hostname
+             (when (pos? port) (str ":" port))
+             path
+             (when query (str "?" query))
+             (when frag (str "#" frag))))
+      (catch Exception _
+        url))))
+
+(defn portal-url-for-request
+  "Rewrite a stored Portal URL so its host matches the CHAT request Host."
+  [portal-url req]
+  (if-let [host (request-hostname req)]
+    (rewrite-url-host portal-url host)
+    portal-url))
+
+(defn- client-snapshot
+  "Hub snapshot with portal-url rewritten for the calling browser."
+  [hub req]
+  (let [snap (hub/snapshot hub)]
+    (if-let [purl (:portal-url snap)]
+      (assoc snap :portal-url (portal-url-for-request purl req))
+      snap)))
+
 (defn- sse-loop!
-  [hub channel send! run? since]
+  [hub channel send! run? since req]
   (try
     (loop [last-rev since]
       (if-not @run?
         nil
-        (let [snap     (hub/snapshot hub)
+        (let [snap     (client-snapshot hub req)
               rev      (long (:rev snap 0))
               next-rev (if (> rev last-rev)
                          (do
@@ -100,7 +155,7 @@
                           "Connection"                  "keep-alive"
                           "Access-Control-Allow-Origin" "*"}}
                false)
-        (future (sse-loop! hub channel send! run? since))))))
+        (future (sse-loop! hub channel send! run? since req))))))
 
 (defn make-handler
   "Build a Ring-ish handler closed over `hub` and attach/submit callbacks.
@@ -132,7 +187,7 @@
           (static-file "app.css")
 
           [:get "/api/state"]
-          (json-response (hub/snapshot hub))
+          (json-response (client-snapshot hub req))
 
           [:get "/api/events"]
           (handle-sse hub req)

@@ -79,17 +79,35 @@
     return `${url}${sep}_wb=${Date.now()}`;
   }
 
+  // Portal often advertises localhost/127.0.0.1 at process start. When CHAT is
+  // opened via Tailscale MagicDNS / LAN IP, rewrite the iframe host to match
+  // the page host so the browser does not aim the iframe at the viewer's own
+  // loopback. Port/path/query from the server URL are preserved.
+  function browserPortalUrl(url) {
+    if (!url) return url;
+    try {
+      const u = new URL(url, window.location.origin);
+      if (u.hostname !== window.location.hostname) {
+        u.hostname = window.location.hostname;
+      }
+      return u.toString();
+    } catch (_) {
+      return url;
+    }
+  }
+
   function setPortalUrl(url, { forceReload = false } = {}) {
     if (!url) {
       lastPortalUrl = null;
       portalFallback.classList.remove("hidden");
       return;
     }
-    portalLink.href = url;
+    const resolved = browserPortalUrl(url);
+    portalLink.href = resolved;
     portalFallback.classList.add("hidden");
-    if (forceReload || lastPortalUrl !== url || !portalFrame.src) {
-      portalFrame.src = bustPortalUrl(url);
-      lastPortalUrl = url;
+    if (forceReload || lastPortalUrl !== resolved || !portalFrame.src) {
+      portalFrame.src = bustPortalUrl(resolved);
+      lastPortalUrl = resolved;
     }
   }
 
