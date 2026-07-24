@@ -23,12 +23,32 @@
           {:github {:command "npx"
                     :args ["-y" "@modelcontextprotocol/server-github"]}}}))))
 
+(deftest http-stanza-validates
+  (testing "Streamable HTTP stanzas validate"
+    (is (schemas/valid-config?
+         {:servers
+          {"acme"
+           {:transport :http
+            :url "https://mcp.example.com/mcp"
+            :bearer-token-env "ACME_TOKEN"
+            :headers {"X-Tenant" "1"}}}}))
+    (is (schemas/valid-config?
+         {:servers
+          {"local"
+           {:url "http://127.0.0.1:8080/mcp"
+            :allow-http? true
+            :allow-loopback? true}}}))
+    (is (= :http (schemas/server-transport {:url "https://x/mcp"})))
+    (is (= :stdio (schemas/server-transport {:command "npx"})))))
+
 (deftest invalid-config-rejected
-  (testing "missing command and bad types fail"
+  (testing "missing command/url and bad types fail"
     (is (not (schemas/valid-config? {:servers {"x" {}}})))
     (is (not (schemas/valid-config? {:servers {"x" {:command 1}}})))
     (is (not (schemas/valid-config?
-              {:servers {"x" {:command "npx" :env {"A" 1}}}})))))
+              {:servers {"x" {:command "npx" :env {"A" 1}}}})))
+    (is (not (schemas/valid-config?
+              {:servers {"x" {:transport :http}}})))))
 
 (deftest tool-descriptor-schema
   (is (m/validate schemas/ToolDescriptor

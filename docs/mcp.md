@@ -1,50 +1,75 @@
 # MCP client tools (`tools.mcp`)
 
-Lateralus can act as an **MCP client** and attach widely available stdio MCP
-servers (the same `command` / `args` / `env` shape used by Claude Desktop /
-Cursor). Discovered tools are adapted into the normal `:lateralus/tool-registry`
-and invoked through the existing tool loop.
+Lateralus can act as an **MCP client** and attach MCP servers as first-class
+agent tools. Supported transports:
 
-v1 scope: **stdio transport**, **tools/list + tools/call** only. Resources,
-prompts, and HTTP/SSE/Streamable-HTTP are follow-ups.
+| Transport | Config | Use |
+|-----------|--------|-----|
+| **stdio** | `:command` / `:args` / `:env` | Local Claude Desktop / Cursor-style servers |
+| **Streamable HTTP** | `:url` (+ optional auth headers) | Remote MCP endpoints |
+
+Discovered tools are adapted into `:lateralus/tool-registry` and invoked
+through the normal tool loop. Scope today: **tools/list + tools/call**.
+Resources, prompts, and OAuth interactive login are follow-ups.
 
 ## Design constraints
 
-- **Air-gapped default.** `:lateralus/mcp-tools {:servers {}}` spawns nothing.
-- **Protocol + Malli.** Process/JSON-RPC I/O goes through `McpTransport` /
+- **Air-gapped default.** `:lateralus/mcp-tools {:servers {}}` connects nothing.
+- **Protocol + Malli.** Process/HTTP/JSON-RPC I/O goes through `McpTransport` /
   `McpClient`; impl functions are Malli-instrumented.
 - **Integrant-only registration.** No `add-mcp-tool!`.
 - **Portable tool names.** MCP names are remapped (`-` → `_`) and **always
   prefixed** with the sanitized server id (`filesystem_read_file`).
-- **JVM-only for live servers.** Native-image keeps empty servers; enabling
-  servers under native raises a typed error.
+- **JVM-only for live servers.** Native-image keeps empty servers.
 - **Untrusted results.** Tool output is size-capped and scanned for injection /
   self-activation markers (same marker vocabulary as `tools.web`).
+- **Remote URL guards.** HTTPS-only and block private/loopback by default
+  (reuse web SSRF checks). Opt in to `:allow-http?` / `:allow-loopback?` for
+  local fake servers.
 
 ## Configuration
 
+### Stdio (local)
+
 ```clojure
 {:lateralus/mcp-tools
- {:enabled? true
-  :servers
+ {:servers
   {"filesystem"
-   {:command "npx"
+   {:transport :stdio          ;; optional; inferred from :command
+    :command "npx"
     :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/mcp-sandbox"]
     :env {}
-    ;; optional:
-    :cwd nil
-    :tool-name-prefix nil   ;; default "<server-id>_"; "" disables prefix
+    :tool-name-prefix nil
     :startup-timeout-ms 30000
     :request-timeout-ms 30000
     :max-result-bytes 65536}}}
-
  :lateralus/tool-registry [... #ig/ref :lateralus/mcp-tools]}
 ```
 
-`ig/init` validates config, spawns each server, runs the MCP handshake
+### Streamable HTTP (remote)
+
+```clojure
+{:lateralus/mcp-tools
+ {:servers
+  {"acme"
+   {:transport :http           ;; optional; inferred from :url
+    :url "https://mcp.example.com/mcp"
+    ;; Auth v1 — pick one or combine:
+    :bearer-token-env "ACME_MCP_TOKEN"   ;; preferred (no secrets in EDN)
+    ;; :bearer-token "…"                 ;; avoid committing
+    :headers {"X-Tenant" "prod"}
+    :request-timeout-ms 30000
+    :max-result-bytes 65536
+    ;; Local fake / http://127.0.0.1 only:
+    ;; :allow-http? true
+    ;; :allow-loopback? true
+    }}}}
+```
+
+`ig/init` validates config, connects each server, runs the MCP handshake
 (`initialize` → `notifications/initialized` → `tools/list`), and builds Tool
 records. If any server fails, init fails (no silent half-registry).
-`ig/halt!` closes stdin and SIGTERM/SIGKILL-reaps children.
+`ig/halt!` closes transports (and SIGTERM/SIGKILL-reaps stdio children).
 
 Demo configs:
 
@@ -52,48 +77,58 @@ Demo configs:
 |------|------|
 | `resources/lateralus/config.edn` | empty `:servers` (default) |
 | `resources/lateralus/native.edn` | empty `:servers` |
-| `resources/lateralus/demo-mcp.edn` | fake stdio server via `clojure -M:dev -m fake-mcp-server` |
+| `resources/lateralus/demo-mcp.edn` | fake stdio server |
+| `dev/fake_mcp_http_server.clj` | fake Streamable HTTP server for tests/demos |
 
 ```bash
-clojure -M:dev:run --config resources/lateralus/demo-mcp.edn "use fake_echo"
+# stdio demo session
+clojure -M:dev -m demo-mcp-session
+
+# remote fake HTTP (terminal 1)
+clojure -M:dev -m fake-mcp-http-server   # prints http://127.0.0.1:<port>/mcp
+
+# then point :url at that URL with :allow-http? true :allow-loopback? true
 ```
 
 ## Security
 
-Configuring an MCP server is equivalent to giving the agent whatever that
-server can do (filesystem, network, credentials in `:env`). Prefer a **sandbox
-directory**, never `$HOME`, in committed demos. Keep secrets out of EDN.
+- Configuring an MCP server grants the agent whatever that server can do.
+- Prefer sandbox directories for filesystem servers; never `$HOME` in demos.
+- Keep secrets in env vars (`:bearer-token-env`), not committed EDN.
+- Remote URLs are SSRF-checked; do not set `:allow-loopback?` / `:allow-http?`
+  in production configs.
+
+## Auth (current vs deferred)
+
+| Mode | Status |
+|------|--------|
+| Static Bearer / custom headers | **Supported** |
+| OAuth 2.1 + discovery + refresh | Deferred |
+| Dynamic client registration / browser login | Deferred |
 
 ## Tests
 
-Fast suite (loopback fake server, no subprocess):
-
 ```bash
+# Fast suite (includes HTTP fake Jetty + SSRF guards)
+clojure -M:test -n kschltz.agent.tools.mcp.http-test
+clojure -M:test -n kschltz.agent.tools.mcp.url-test
 clojure -M:test -n kschltz.agent.tools.mcp.schemas-test
-clojure -M:test -n kschltz.agent.tools.mcp.tools-test
-```
 
-Offline e2e (real stdio subprocess of `fake-mcp-server`):
-
-```bash
+# Offline e2e: stdio subprocess + in-process HTTP fake
 LATERALUS_E2E_FAKE=true clojure -M:e2e -n kschltz.agent.tools.mcp.mcp-e2e-test
-```
 
-Live e2e (opt-in, needs `npx` + network):
-
-```bash
+# Live stdio filesystem server (opt-in)
 LATERALUS_E2E_MCP=live clojure -M:e2e -n kschltz.agent.tools.mcp.mcp-e2e-test
 ```
-
-Live tests use `@modelcontextprotocol/server-filesystem` against a temp
-sandbox and skip cleanly when `npx` is missing.
 
 ## Layout
 
 ```
 src/kschltz/agent/tools/mcp/
-  schemas.clj protocol.clj transport.clj client.clj
-  names.clj json_schema.clj guards.clj adapt.clj tools.clj
+  schemas.clj protocol.clj transport.clj http.clj url.clj
+  client.clj names.clj json_schema.clj guards.clj adapt.clj tools.clj
 dev/fake_mcp_server.clj
+dev/fake_mcp_http_server.clj
+dev/demo_mcp_session.clj
 docs/mcp.md
 ```

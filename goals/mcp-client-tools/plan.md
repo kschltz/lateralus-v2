@@ -510,11 +510,12 @@ server id (`filesystem_read_file`), optional `:tool-name-prefix` override
 
 ## Out of scope follow-ups
 
-1. HTTP / Streamable-HTTP transport for remote MCP hosts
+1. ~~HTTP / Streamable-HTTP transport for remote MCP hosts~~ → shipped (bearer/headers; OAuth deferred)
 2. Claude Desktop JSON importer (`mcpServers` → EDN)
 3. Resources + prompts via `mcp-plugin` `:enrich`
 4. Dynamic re-list on `tools/list_changed`
 5. Native-image subprocess story
+6. OAuth 2.1 + Protected Resource Metadata + token refresh for remote MCP
 
 ---
 

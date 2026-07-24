@@ -5,7 +5,9 @@
    version `2024-11-05`. Server notifications (no `:id`) are skipped while
    waiting for a matching response. `tools/list_changed` is ignored in v1
    (discovery is snapshotted at init)."
-  (:require [kschltz.agent.tools.mcp.protocol :as proto]
+  (:require [kschltz.agent.tools.mcp.http :as http]
+            [kschltz.agent.tools.mcp.protocol :as proto]
+            [kschltz.agent.tools.mcp.schemas :as schemas]
             [kschltz.agent.tools.mcp.transport :as transport]
             [malli.core :as m]
             [malli.instrument :as mi])
@@ -140,27 +142,46 @@
                   :closed? (boolean (:closed? @state))})
           (catch Throwable _ {:initialized? false}))))))
 
+(defn- client-opts
+  [server-cfg]
+  {:server-id (:server-id server-cfg)
+   :startup-timeout-ms (or (:startup-timeout-ms server-cfg) 30000)
+   :request-timeout-ms (or (:request-timeout-ms server-cfg) 30000)})
+
+(defn- initialize-or-close!
+  [client]
+  (try
+    (proto/-initialize! client)
+    client
+    (catch Throwable t
+      (try (proto/-close-client! client) (catch Throwable _))
+      (throw t))))
+
 (defn connect-stdio!
   "Spawn a stdio server and return an initialized `McpClient`.
 
    `server-cfg` is a `ServerConfig` map plus `:server-id`.
    Raises `:spawn` / `:handshake` on failure; caller should close on error."
   [server-cfg]
-  (let [server-id (:server-id server-cfg)
-        transport (transport/spawn-stdio!
+  (let [transport (transport/spawn-stdio!
                    (select-keys server-cfg [:command :args :env :cwd]))
-        client (make-client transport
-                            {:server-id server-id
-                             :startup-timeout-ms
-                             (or (:startup-timeout-ms server-cfg) 30000)
-                             :request-timeout-ms
-                             (or (:request-timeout-ms server-cfg) 30000)})]
-    (try
-      (proto/-initialize! client)
-      client
-      (catch Throwable t
-        (try (proto/-close-client! client) (catch Throwable _))
-        (throw t)))))
+        client (make-client transport (client-opts server-cfg))]
+    (initialize-or-close! client)))
+
+(defn connect-http!
+  "Connect to a Streamable HTTP MCP server and return an initialized
+   `McpClient`. Raises `:ssrf` / `:http` / `:auth` / `:handshake`."
+  [server-cfg]
+  (let [transport (http/connect-http! server-cfg)
+        client (make-client transport (client-opts server-cfg))]
+    (initialize-or-close! client)))
+
+(defn connect!
+  "Connect using `:transport` (or inferred from `:command` / `:url`)."
+  [server-cfg]
+  (case (schemas/server-transport server-cfg)
+    :http (connect-http! server-cfg)
+    :stdio (connect-stdio! server-cfg)))
 
 (m/=> make-client
       [:=> [:cat :any [:map
@@ -170,16 +191,12 @@
        :any])
 
 (m/=> connect-stdio!
-      [:=>
-       [:cat
-        [:map
-         [:command :string]
-         [:server-id {:optional true} :string]
-         [:args {:optional true} [:vector :string]]
-         [:env {:optional true} [:map-of :string :string]]
-         [:cwd {:optional true} [:maybe :string]]
-         [:startup-timeout-ms {:optional true} :int]
-         [:request-timeout-ms {:optional true} :int]]]
-       :any])
+      [:=> [:cat :map] :any])
+
+(m/=> connect-http!
+      [:=> [:cat :map] :any])
+
+(m/=> connect!
+      [:=> [:cat :map] :any])
 
 (mi/instrument! {:filters [(mi/-filter-ns 'kschltz.agent.tools.mcp.client)]})

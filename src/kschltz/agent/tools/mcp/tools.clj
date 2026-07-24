@@ -1,9 +1,10 @@
 (ns kschltz.agent.tools.mcp.tools
   "Build a Lateralus tool registry from `:lateralus/mcp-tools` config.
 
-   Starts configured stdio MCP servers, discovers tools, adapts them,
-   and returns a name→Tool map. Clients are stored in metadata under
-   `:mcp/clients` so Integrant `halt-key!` can reap child processes.
+   Starts configured MCP servers (stdio or Streamable HTTP), discovers
+   tools, adapts them, and returns a name→Tool map. Clients are stored
+   in metadata under `:mcp/clients` so Integrant `halt-key!` can close
+   them (and reap stdio children).
 
    Fail-fast: if any configured server fails handshake/list, the whole
    registry build throws (no silent half-registry)."
@@ -49,9 +50,9 @@
      :server-id server-id
      :names (set (keys registry))}))
 
-(defn- start-stdio-server!
+(defn- start-server!
   [server-id server-cfg]
-  (let [client (client/connect-stdio!
+  (let [client (client/connect!
                 (assoc server-cfg :server-id server-id))]
     (try
       (list-and-adapt client server-id server-cfg #{})
@@ -119,7 +120,7 @@
                          piece
                          (if-let [c (:__client server-cfg)]
                            (start-injected-client! sid c server-cfg)
-                           (start-stdio-server! sid server-cfg))
+                           (start-server! sid server-cfg))
                          overlap (filter @claimed (:names piece))]
                      (when (seq overlap)
                        (raise :protocol
