@@ -139,6 +139,27 @@ but block runtime dependency loading. See [`docs/runtime-eval.md`](docs/runtime-
 :lateralus/runtime-tools {:enabled? true :network? true}
 ```
 
+## MCP client tools
+
+Lateralus can attach **stdio** MCP servers (Claude Desktop / Cursor
+`command` / `args` / `env`) and **remote Streamable HTTP** MCP endpoints
+(`:url` + optional Bearer/headers). Default config is air-gapped
+(`:servers {}`). Opt in via `:lateralus/mcp-tools`; tools are discovered at
+Integrant init, remapped to portable prefixed ids (`filesystem_read_file`),
+and closed on halt. Remote URLs are SSRF-checked (https-only; loopback
+blocked unless opted in). See [`docs/mcp.md`](docs/mcp.md).
+
+```clojure
+:lateralus/mcp-tools
+{:servers
+ {"filesystem"
+  {:command "npx"
+   :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}
+  "acme"
+  {:url "https://mcp.example.com/mcp"
+   :bearer-token-env "ACME_MCP_TOKEN"}}}
+```
+
 ## Memory backend
 
 The runtime Integrant config (`resources/lateralus/config.edn`) now wires a **Proximum** HNSW memory backend and a **LangChain4j** in-process ONNX embedder (`all-MiniLM-L6-v2`, 384 dimensions) by default. Session memory (recent + semantic recall) works out of the box in one-shot mode.
@@ -288,6 +309,7 @@ Notes and limitations:
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
 | [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
 | [`docs/runtime-eval.md`](docs/runtime-eval.md) | Runtime-eval tool suite: `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` |
+| [`docs/mcp.md`](docs/mcp.md) | MCP client tools: stdio servers, naming, guards, offline/live e2e |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |

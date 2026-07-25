@@ -29,7 +29,8 @@
    in the runtime config.
 
    Halt policy: only keys with real resources to release define
-   `halt-key!` (currently just `:lateralus/memory-backend`).
+   `halt-key!` (currently `:lateralus/memory-backend` and
+   `:lateralus/mcp-tools`, plus optional portal/workbench).
    Integrant skips keys with no `halt-key!` defined, which is the
    correct behavior — defining a no-op halt is misleading."
   (:require [integrant.core :as ig]
@@ -46,6 +47,8 @@
             [kschltz.agent.tools.runtime.schemas :as runtime.schemas]
             [kschltz.agent.tools.web.web :as tools.web]
             [kschltz.agent.tools.web.schemas :as web.schemas]
+            [kschltz.agent.tools.mcp.tools :as tools.mcp]
+            [kschltz.agent.tools.mcp.schemas :as mcp.schemas]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.cli.ui :as ui]
             [kschltz.agent.cli.thinking :as thinking]
@@ -150,6 +153,13 @@
 (defmethod ig/assert-key :lateralus/web-tools [_ config]
   (assert-malli! :lateralus/web-tools WebToolsConfig config))
 
+(def ^:private McpToolsConfig
+  "Malli schema for :lateralus/mcp-tools."
+  mcp.schemas/McpToolsConfig)
+
+(defmethod ig/assert-key :lateralus/mcp-tools [_ config]
+  (assert-malli! :lateralus/mcp-tools McpToolsConfig (or config {})))
+
 (def ^:private LoggingConfig
   "Malli schema for :lateralus/logging."
   [:map
@@ -218,6 +228,15 @@
    provider is :none, so the registry is always present but performs no
    network I/O unless the operator opts into :mojeek."
   (tools.web/web-registry opts))
+
+(defmethod ig/init-key :lateralus/mcp-tools [_ opts]
+  "Build the MCP tool registry from configured stdio servers. Default
+   is empty/disabled (air-gapped). Non-empty servers spawn child
+   processes; `halt-key!` reaps them."
+  (tools.mcp/mcp-registry (or opts {})))
+
+(defmethod ig/halt-key! :lateralus/mcp-tools [_ registry]
+  (tools.mcp/halt-registry! registry))
 
 (defmethod ig/init-key :lateralus/logging [_ opts]
   "Resolve the logging config. Defaults are applied at sink-build time
@@ -434,10 +453,12 @@
    :lateralus/self-awareness-tools {}
    :lateralus/runtime-tools        {}
    :lateralus/web-tools            {:provider :none}
+   :lateralus/mcp-tools            {:servers {}}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)
                                     (ig/ref :lateralus/runtime-tools)
-                                    (ig/ref :lateralus/web-tools)]
+                                    (ig/ref :lateralus/web-tools)
+                                    (ig/ref :lateralus/mcp-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)]

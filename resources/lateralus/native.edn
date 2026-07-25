@@ -26,6 +26,8 @@
  :lateralus/clojure-tools        {}
  ;; Native-image never includes Hickory, so web tools must stay :none.
  :lateralus/web-tools      {:provider :none}
+ ;; MCP stdio servers are JVM-only; keep empty under native-image.
+ :lateralus/mcp-tools            {:servers {}}
  :lateralus/runtime-tools        {:enabled? true :network? false}  ;; native: eval works; add-lib disabled (tools.deps not on native classpath)
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
@@ -34,7 +36,8 @@
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/web-tools
-                                  #ig/ref :lateralus/runtime-tools]
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/mcp-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]

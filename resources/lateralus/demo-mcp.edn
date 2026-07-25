@@ -1,11 +1,11 @@
-;; Interactive local Ollama + optional Portal sticky-composer UI.
-;; Requires the :portal deps alias:
-;;   clojure -J--add-modules=jdk.incubator.vector -J--enable-native-access=ALL-UNNAMED \
-;;     -M:portal:run -i --config resources/lateralus/demo-portal.edn \
-;;     --base-url http://localhost:11434/v1 --model laguna-s-2.1:latest
-{:lateralus/llm-client     {:impl :http
-                            :base-url "http://localhost:11434/v1"}
- :lateralus/llm-config     {:base-url "http://localhost:11434/v1"}
+;; Demo: stub LLM + fake stdio MCP server tools.
+;;
+;; Requires the :dev alias so `fake-mcp-server` is on the classpath:
+;;   clojure -M:dev:run --config resources/lateralus/demo-mcp.edn "echo hi via mcp"
+;;
+;; The fake server exposes echo / add / fail as fake_echo, fake_add, fake_fail.
+{:lateralus/llm-client     {:impl :stub}
+ :lateralus/llm-config     {}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :kg-bm25
                             :store {:backend :memory}}
@@ -16,25 +16,22 @@
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
- :lateralus/logging             {}
+ :lateralus/web-tools            {:provider :none}
+ :lateralus/runtime-tools        {:enabled? false}
+ :lateralus/mcp-tools
+ {:servers
+  {"fake"
+   {:command "clojure"
+    :args ["-M:dev" "-m" "fake-mcp-server"]
+    :startup-timeout-ms 120000
+    :request-timeout-ms 30000
+    :max-result-bytes 65536}}}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
- :lateralus/portal              {:enabled? true
-                                 :window-title "lateralus"
-                                 ;; false = default browser tab (avoids Chrome-app discovery hangs)
-                                 :app false}
- :lateralus/web-tools      {:provider :ddg}
- :lateralus/runtime-tools        {:enabled? true :network? true}
  :lateralus/loop-opts            {:max-tool-calls-per-turn 100
-                                  :max-tool-calls-per-exchange 20
-                                  :tool-content-caps {"clojure_eval" 12000
-                                                      "clojure_add_lib" 12000}}
- :lateralus/mcp-tools            {:servers {}}
+                                  :max-tool-calls-per-exchange 20}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
-                                  #ig/ref :lateralus/clojure-tools
-                                  #ig/ref :lateralus/web-tools
-                                  #ig/ref :lateralus/runtime-tools
                                   #ig/ref :lateralus/mcp-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
@@ -44,8 +41,6 @@
                                   :llm-config     #ig/ref :lateralus/llm-config
                                   :embedder       #ig/ref :lateralus/embedder
                                   :memory-backend #ig/ref :lateralus/memory-backend
-                                  :logging        #ig/ref :lateralus/logging
                                   :cli-ui         #ig/ref :lateralus/cli-ui
                                   :thinking       #ig/ref :lateralus/thinking
-                                  :portal         #ig/ref :lateralus/portal
                                   :loop-opts      #ig/ref :lateralus/loop-opts}}
