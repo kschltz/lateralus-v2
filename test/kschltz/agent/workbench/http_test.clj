@@ -1,5 +1,6 @@
 (ns kschltz.agent.workbench.http-test
   (:require [cheshire.core :as json]
+            [clojure.string :as string]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.http :as http]))
@@ -123,3 +124,49 @@
                 "JS remaps Portal iframe onto the CHAT origin"))
           (finally
             (http/stop-server! server)))))))
+
+(deftest ^:workbench sse-events-stream-snapshot-after-rev-bump
+  ;; Regression: /api/events used to 500 with
+  ;; `Wrong number of args (2) passed to: org.httpkit.server/with-channel`
+  ;; because handle-sse `requiring-resolve`d the `with-channel` macro and
+  ;; called it as a function. Verify SSE now opens, streams a `data:` event
+  ;; carrying a snapshot, and the snapshot reflects a published turn.
+  (when (available?)
+    (let [h       (hub/create-hub {:session-id "sse-test"})
+          handler (http/make-handler h {})
+          {:keys [server url]} (http/start-server!
+                                {:host "127.0.0.1" :port 0 :handler handler})]
+      (try
+        (let [port   (Long/parseLong (re-find #"\d+$" url))
+              events (str "http://127.0.0.1:" port "/api/events?since=0")
+              conn   (doto (-> (java.net.URL. events) (.openConnection))
+                       (.setConnectTimeout 2000)
+                       (.setReadTimeout    2000)
+                       (.setRequestProperty "Accept" "text/event-stream"))
+              status (.getResponseCode ^java.net.HttpURLConnection conn)
+              ctype  (.getHeaderField ^java.net.HttpURLConnection conn "Content-Type")]
+          (is (= 200 status) "SSE endpoint must return 200 (not 500)")
+          (is (re-find #"text/event-stream" (or ctype ""))
+              "SSE must advertise text/event-stream")
+          ;; The sse-loop emits a snapshot whenever hub :rev advances. Bump
+          ;; rev by publishing a turn, then read the first `data:` line.
+          (hub/publish-turn! h {:role :system :text "hello sse"})
+          (with-open [rdr (java.io.BufferedReader.
+                           (java.io.InputStreamReader.
+                            (.getInputStream ^java.net.HttpURLConnection conn)))]
+            (let [line (loop [n 0]
+                         (let [l (.readLine rdr)]
+                           (cond
+                             (nil? l)                   nil
+                             (string/starts-with? l "data:") l
+                             (< n 4000)                 (recur (inc n))
+                             :else                      nil)))]
+              (is (some? line) "expected at least one `data:` event before read timeout")
+              (when line
+                (let [payload (json/parse-string (subs line 6) true)]
+                  (is (= "sse-test" (:session-id payload))
+                      "SSE snapshot carries the hub session-id")
+                  (is (pos? (long (:rev payload 0)))
+                      "snapshot rev advances after a publish"))))))
+        (finally
+          (http/stop-server! server))))))

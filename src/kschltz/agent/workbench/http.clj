@@ -9,7 +9,13 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kschltz.agent.workbench.hub :as hub]
-            [kschltz.agent.workbench.schemas :as schemas]))
+            [kschltz.agent.workbench.schemas :as schemas]
+            [org.httpkit.server :as http-kit]))
+  ;; http-kit is on the classpath only via the :workbench / :portal alias, which
+  ;; is also the only path that loads this namespace (system.clj requires it
+  ;; lazily via `requiring-resolve`). `with-channel` is a MACRO and cannot be
+  ;; `requiring-resolve`d + called as a function — it must be required at
+  ;; compile time and invoked as a macro, so we require http-kit here.
 
 (defn- json-response
   ([body] (json-response 200 body))
@@ -187,27 +193,28 @@
     (catch Throwable _)))
 
 (defn- handle-sse
-  "Long-poll SSE: emit snapshot whenever hub :rev advances past `since`."
+  "Long-poll SSE: emit snapshot whenever hub :rev advances past `since`.
+
+  `with-channel` is http-kit's async-channel macro; it MUST be called as a
+  macro (required at compile time), not `requiring-resolve`d + invoked as a
+  function — that never expands and throws
+  `Wrong number of args (2) passed to: org.httpkit.server/with-channel`."
   [hub req]
-  (let [run?         (atom true)
-        query        (parse-query (:uri req))
-        since        (try (Long/parseLong (or (:since query) "0"))
-                          (catch Exception _ 0))
-        with-channel (requiring-resolve 'org.httpkit.server/with-channel)
-        send!        (requiring-resolve 'org.httpkit.server/send!)
-        on-close     (requiring-resolve 'org.httpkit.server/on-close)]
-    (with-channel
-      req
-      (fn [channel]
-        (on-close channel (fn [_] (reset! run? false)))
-        (send! channel
-               {:status  200
-                :headers {"Content-Type"                "text/event-stream; charset=utf-8"
-                          "Cache-Control"               "no-cache"
-                          "Connection"                  "keep-alive"
-                          "Access-Control-Allow-Origin" "*"}}
-               false)
-        (future (sse-loop! hub channel send! run? since req))))))
+  (let [run?  (atom true)
+        query (parse-query (:uri req))
+        since (try (Long/parseLong (or (:since query) "0"))
+                   (catch Exception _ 0))]
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (http-kit/with-channel req channel
+      (http-kit/on-close channel (fn [_] (reset! run? false)))
+      (http-kit/send! channel
+                      {:status  200
+                       :headers {"Content-Type"                "text/event-stream; charset=utf-8"
+                                 "Cache-Control"               "no-cache"
+                                 "Connection"                  "keep-alive"
+                                 "Access-Control-Allow-Origin" "*"}}
+                      false)
+      (future (sse-loop! hub channel http-kit/send! run? since req)))))
 
 (def ^:private portal-asset-paths
   "Paths owned by djblue/portal's HTTP handler (mounted on the CHAT server)."
