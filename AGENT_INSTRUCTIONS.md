@@ -8,6 +8,7 @@
 - **Architecture overview:** `docs/architecture.md`
 - **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
 - **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek`/`:ddg` opt-in, `:lateralus/web-tools` Integrant key)
+- **Session config / transitions:** `docs/transitions.md` (`transitions`, `set_llm_config` + `list_llm_models`, `ModelCatalog`, `:lateralus/config-tools`)
 - **Runtime-eval tool:** `docs/runtime-eval.md` (`tools.runtime`, `clojure_eval` + `clojure_add_lib` + `clojure_loaded_libs`, `ClojureRuntime` protocol, `:lateralus/runtime-tools` Integrant key)
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)

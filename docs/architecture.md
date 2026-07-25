@@ -28,6 +28,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/memory-plugin ──▶  memory recall + persist slots    │
 │  :lateralus/file-tools       ──▶  convenience filesystem tool registry│
 │  :lateralus/self-awareness-tools ──▶  self_status tool registry      │
+│  :lateralus/config-tools     ──▶  set_llm_config + list_llm_models (ModelCatalog)│
 │  :lateralus/clojure-tools    ──▶  clojure structured-edit tool registry│
 │  :lateralus/runtime-tools    ──▶  ClojureRuntime tool registry (clojure_eval, add_lib, loaded_libs)│
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web_search, web_fetch, web_extract)│
@@ -62,7 +63,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :enrich   → memory recall (when memory plugin present)          │
 │  :compose  → compose-context, inject-tools                       │
 │  :llm      → llm-call-with-self-heal, llm-call, parse-response    │
-│  :tools    → dispatch-tools-interceptor, compose-tool-results-interceptor │
+│  :tools    → dispatch-tools, harvest-transitions, compose-tool-results, apply-transitions │
 │  :finalize → tool-loop-interceptor                                │
 │  :history-summarize → summarize-history (compacts long histories) │
 │  :history  → store-exchange                                      │
@@ -95,7 +96,7 @@ leaves after it, so its `:leave` sees the freshly-written
 | `:compose` | enter | build `:llm/request` from state + recall + user text | base plugin (`compose-context`) |
 | `:llm` | enter | call the LLM, parse response | base plugin (`llm-call-with-self-heal`, `llm-call`, `parse-response`) |
 | `:dispatch` | enter | reserved slot (no interceptor wired) | — |
-| `:tools` | enter | dispatch and run registered tools | base plugin (`dispatch-tools-interceptor`, `compose-tool-results-interceptor`) |
+| `:tools` | enter | dispatch tools; harvest/apply staged state transitions; compose tool results | base plugin (`dispatch-tools`, `harvest-transitions`, `compose-tool-results`, `apply-transitions`) |
 | `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop-interceptor`) |
 | `:history-summarize` | leave | compact long `:agent/history` into one summary + protected window | base plugin (`summarize-history`); optional `summarizer-plugin` overrides the LlmClient |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |
@@ -135,10 +136,12 @@ The `Ctx` Malli schema in `kschltz.agent.interceptors.schema` is intentionally o
 
 Only the outer runtime loop holds a mutable reference — an atom seeded with `:initial-state` from the agent-map. Interceptors never mutate shared refs; instead they emit `:agent/state-delta`. The runtime merges this delta into the atom using `kschltz.agent.runtime/merge-state`, which performs a deep merge for known nested keys (e.g. `:agent/state`) and last-write-wins for top-level keys.
 
+Tools may propose allowlisted **transitions** (JSON envelope key `:transition`) that are harvested onto `:agent/transitions` and applied in the `:tools` slot before the next LLM call — including mid-ReAct follow-ups. See [`docs/transitions.md`](transitions.md).
+
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
-- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Tool names use conservative snake_case (`^[A-Za-z][A-Za-z0-9_]{0,63}$`) so the same definitions work across OpenAI-compatible, Cerebras, Anthropic, Gemini, and Bedrock APIs; `tool-definition` rejects non-portable names before network I/O. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), clojure structured-editing tools (`:lateralus/clojure-tools`), clojure runtime-eval tools (`:lateralus/runtime-tools` — `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs`, behind the `ClojureRuntime` protocol), web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`), and MCP client tools (`:lateralus/mcp-tools` — stdio MCP servers adapted into `Tool`s behind `McpClient` / `McpTransport`; see [`docs/mcp.md`](mcp.md)).
+- **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Tool names use conservative snake_case (`^[A-Za-z][A-Za-z0-9_]{0,63}$`) so the same definitions work across OpenAI-compatible, Cerebras, Anthropic, Gemini, and Bedrock APIs; `tool-definition` rejects non-portable names before network I/O. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), session-config tools (`:lateralus/config-tools` — `set_llm_config`, `list_llm_models`, behind `ModelCatalog`; see [`docs/transitions.md`](transitions.md)), clojure structured-editing tools (`:lateralus/clojure-tools`), clojure runtime-eval tools (`:lateralus/runtime-tools` — `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs`, behind the `ClojureRuntime` protocol), web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`), and MCP client tools (`:lateralus/mcp-tools` — stdio MCP servers adapted into `Tool`s behind `McpClient` / `McpTransport`; see [`docs/mcp.md`](mcp.md)).
 - **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
 - **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).
 - **New plugin:** build a map `{:plugin/name ... :plugin/slots ...}` and add it to `:lateralus/plugins` in the Integrant config, or register a new plugin key and reference it from `:lateralus/plugins`.

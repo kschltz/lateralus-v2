@@ -10,7 +10,8 @@
      :guard             — error-boundary
      :compose           — compose-context, inject-tools
      :llm               — llm-call-with-self-heal, llm-call, parse-response
-     :tools             — dispatch-tools, compose-tool-results
+     :tools             — dispatch-tools, harvest-transitions,
+                          compose-tool-results, apply-transitions
      :finalize          — tool-loop, ensure-text-response
      :history-summarize — summarize-history-interceptor (long-context compaction)
      :history           — store-exchange
@@ -20,7 +21,8 @@
    The tool-calling interceptors are always present but are no-ops when
    no `:agent/tool-registry` has been seeded on the context. This makes
    the default chain tool-aware without requiring a complete
-   replacement plugin.
+   replacement plugin. Transition harvest/apply are similarly inert
+   when no tool enqueued a `:transition` envelope.
 
    This plugin is the single source of truth for the default exchange
    chain. Callers and tests can build the same chain with
@@ -28,7 +30,8 @@
   (:require [kschltz.agent.interceptors :as ix]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
-            [kschltz.agent.plugin :as plugin]))
+            [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.transitions.interceptors :as tr.ix]))
 
 (defn base-plugin
   "Return the default base plugin vector. With no additional plugins,
@@ -48,7 +51,9 @@
        (assoc ix/llm-call :slot :llm)
        (assoc ix/parse-response :slot :llm)
        (assoc (loop/dispatch-tools-interceptor) :slot :tools)
+       (assoc (tr.ix/harvest-transitions-interceptor) :slot :tools)
        (assoc (loop/compose-tool-results-interceptor) :slot :tools)
+       (assoc (tr.ix/apply-transitions-interceptor) :slot :tools)
        (assoc (loop/tool-loop-interceptor react-loop) :slot :finalize)
        (assoc (loop/ensure-text-response-interceptor react-loop) :slot :finalize)
        (assoc ix/store-exchange :slot :history)

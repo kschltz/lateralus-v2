@@ -95,6 +95,20 @@ Lateralus v2 is built on three ideas:
 
 For details, see [`docs/architecture.md`](docs/architecture.md).
 
+## Session config tools
+
+The agent can change its own LLM session knobs mid-run via staged
+**transitions** (not by mutating the runtime atom from a tool):
+
+- `set_llm_config` — update `:model`, `:base-url`, and/or `:api-key` for the
+  rest of the session; applies before the next LLM call (including ReAct
+  follow-ups in the same exchange).
+- `list_llm_models` — list models at the current (or overridden) endpoint
+  behind the `ModelCatalog` protocol.
+
+Wired via `:lateralus/config-tools` (`:catalog :http` or `:stub`). See
+[`docs/transitions.md`](docs/transitions.md).
+
 ## Web tool
 
 The agent now ships `web_search`, `web_fetch`, and `web_extract` tools. The
@@ -308,6 +322,7 @@ Notes and limitations:
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
 | [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
+| [`docs/transitions.md`](docs/transitions.md) | Staged state transitions + `set_llm_config` / `list_llm_models` |
 | [`docs/runtime-eval.md`](docs/runtime-eval.md) | Runtime-eval tool suite: `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` |
 | [`docs/mcp.md`](docs/mcp.md) | MCP client tools: stdio servers, naming, guards, offline/live e2e |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
@@ -322,6 +337,10 @@ Notes and limitations:
 | [`src/kschltz/agent/plugins/tools.clj`](src/kschltz/agent/plugins/tools.clj) | Tool plugin: seeds `:agent/tool-registry` |
 | [`src/kschltz/agent/loop.clj`](src/kschltz/agent/loop.clj) | Tool-calling loop interceptors |
 | [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
+| [`src/kschltz/agent/transitions.clj`](src/kschltz/agent/transitions.clj) | Allowlisted state-transition algebra |
+| [`src/kschltz/agent/transitions/interceptors.clj`](src/kschltz/agent/transitions/interceptors.clj) | Harvest/apply transition interceptors |
+| [`src/kschltz/agent/tools/config.clj`](src/kschltz/agent/tools/config.clj) | `set_llm_config` + `list_llm_models` tools |
+| [`src/kschltz/agent/tools/config/catalog.clj`](src/kschltz/agent/tools/config/catalog.clj) | `ModelCatalog` protocol (HTTP / stub) |
 | [`src/kschltz/agent/tools/filesystem.clj`](src/kschltz/agent/tools/filesystem.clj) | Read-only filesystem `Tool` implementations |
 | [`src/kschltz/agent/tools/runtime/protocol.clj`](src/kschltz/agent/tools/runtime/protocol.clj) | `ClojureRuntime` protocol (runtime-eval boundary) |
 | [`src/kschltz/agent/tools/runtime/schemas.clj`](src/kschltz/agent/tools/runtime/schemas.clj) | Runtime-eval Malli schemas + config |

@@ -42,6 +42,8 @@
             [kschltz.agent.plugins.workbench :as plugins.workbench]
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
+            [kschltz.agent.tools.config :as tools.config]
+            [kschltz.agent.tools.config.catalog :as config.catalog]
             [kschltz.agent.tools.clojure :as tools.clojure]
             [kschltz.agent.tools.runtime.tools :as tools.runtime]
             [kschltz.agent.tools.runtime.schemas :as runtime.schemas]
@@ -365,6 +367,20 @@
    init time like any other tool."
   (tools.self/self-awareness-registry workspace-root))
 
+(defmethod ig/init-key :lateralus/config-tools
+  [_ {:keys [catalog] :or {catalog :http}}]
+  "Returns the LLM session-config tool registry (`set_llm_config`,
+   `list_llm_models`). `:catalog` selects the ModelCatalog impl:
+   `:http` (default) lists models over the network; `:stub` returns a
+   fixed offline list (tests / air-gapped)."
+  (let [cat (case catalog
+              :stub (config.catalog/stub-catalog)
+              :http (config.catalog/http-catalog)
+              (if (config.catalog/model-catalog? catalog)
+                catalog
+                (config.catalog/http-catalog)))]
+    (tools.config/config-registry {:catalog cat})))
+
 (defmethod ig/init-key :lateralus/clojure-tools [_ opts]
  "Returns the Clojure structured-editing tool registry (clojure_query,
   clojure_add_require, clojure_remove_def, clojure_rename_symbol,
@@ -451,11 +467,13 @@
    :lateralus/loop-opts            {}
    :lateralus/file-tools           {}
    :lateralus/self-awareness-tools {}
+   :lateralus/config-tools         {:catalog :stub}
    :lateralus/runtime-tools        {}
    :lateralus/web-tools            {:provider :none}
    :lateralus/mcp-tools            {:servers {}}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)
+                                    (ig/ref :lateralus/config-tools)
                                     (ig/ref :lateralus/runtime-tools)
                                     (ig/ref :lateralus/web-tools)
                                     (ig/ref :lateralus/mcp-tools)]
