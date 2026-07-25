@@ -82,6 +82,21 @@ dispatch-tools
 The ReAct follow-up chain in `kschltz.agent.loop` mirrors the same order so a
 mid-loop `set_llm_config` affects the next LLM call of the same exchange.
 
+## Demo: Ollama Cloud mid-session switch
+
+Real interactive session against `https://ollama.com/v1` (needs
+`OLLAMA_API_KEY`):
+
+```bash
+./scripts/demo-ollama-cloud-config-switch.sh
+# or PTY-driven (visible typing, good for screen recordings):
+python3 scripts/demo-ollama-cloud-config-switch-pty.py
+```
+
+Config: `resources/lateralus/demo-ollama-cloud-config.edn` — starts on
+`deepseek-v4-flash`, then the agent calls `set_llm_config` to move to
+`gpt-oss:20b` and confirms with `self_status`.
+
 ## Adding a new transition op
 
 1. Extend `Transition` / `SetLlmOp`-style schemas in `transitions.clj`.
