@@ -48,7 +48,17 @@
  ;; Opt in with Claude Desktop-like server stanzas, e.g.
  ;;   {:servers {"filesystem" {:command "npx"
  ;;                            :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}}}
- :lateralus/mcp-tools            {:servers {}}
+ ;; Open Design MCP tools (stdio proxy to local daemon).
+ ;; Start the daemon first; override defaults via OD_DAEMON_URL/OD_BIN/OD_NODE.
+ :lateralus/mcp-tools
+ {:servers
+  {"open-design"
+   {:transport :stdio
+    :command "/Users/schltzk/projects/lateralus-v2/scripts/open-design-mcp-server.sh"
+    :args []
+    :startup-timeout-ms 30000
+    :request-timeout-ms 30000
+    :max-result-bytes 2097152}}}
  :lateralus/logging             {}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}

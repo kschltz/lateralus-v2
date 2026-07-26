@@ -55,11 +55,23 @@
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
  :lateralus/loop-opts            {:max-tool-calls-per-turn 100 :max-tool-calls-per-exchange 20 :tool-content-caps {"clojure_eval" 12000 "clojure_add_lib" 12000}}
+ ;; Open Design MCP tools (local stdio proxy to the OD daemon).
+ ;; Start the daemon first; set OD_DAEMON_URL/OD_BIN/OD_NODE env vars to override defaults.
+ :lateralus/mcp-tools
+ {:servers
+  {"open-design"
+   {:transport :stdio
+    :command "/Users/schltzk/projects/lateralus-v2/scripts/open-design-mcp-server.sh"
+    :args []
+    :startup-timeout-ms 30000
+    :request-timeout-ms 30000
+    :max-result-bytes 2097152}}}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/web-tools
-                                  #ig/ref :lateralus/runtime-tools]
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/mcp-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
