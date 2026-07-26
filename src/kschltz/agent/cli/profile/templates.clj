@@ -32,6 +32,10 @@
     :label "self"
    :description "self_status awareness"
     :ref :lateralus/self-awareness-tools}
+   {:id :config
+    :label "config"
+    :description "set_llm_config + list_llm_models"
+    :ref :lateralus/config-tools}
    {:id :clojure
     :label "clojure"
     :description "structured Clojure editing"
@@ -59,6 +63,7 @@
   [workbench?]
   {:files true
    :self true
+   :config true
    :clojure true
    :web true
    :runtime true
@@ -170,6 +175,7 @@
                                          :last-n   5}
               :lateralus/file-tools           {}
               :lateralus/self-awareness-tools {}
+              :lateralus/config-tools         {:catalog :http}
               :lateralus/clojure-tools        {}
               :lateralus/logging              {}
               :lateralus/cli-ui               {:enabled? :auto :theme :default}

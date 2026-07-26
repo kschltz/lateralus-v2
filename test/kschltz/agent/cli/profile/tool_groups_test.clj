@@ -4,7 +4,7 @@
             [kschltz.agent.cli.profile.templates :as t]
             [kschltz.agent.cli.profile.tool-groups :as tg]))
 
-(def ids [:files :self :clojure :web :runtime])
+(def ids [:files :self :config :clojure :web :runtime])
 
 (deftest space-toggles-cursor-row
   (let [g (t/default-tool-groups false)
@@ -17,9 +17,9 @@
 
 (deftest number-toggles-and-moves-cursor
   (let [g (t/default-tool-groups false)
-        r (tg/apply-command {:groups g :ids ids :cursor 0} "3")]
+        r (tg/apply-command {:groups g :ids ids :cursor 0} "4")]
     (is (false? (get-in r [:groups :clojure])))
-    (is (= 2 (:cursor r)))))
+    (is (= 3 (:cursor r)))))
 
 (deftest all-and-none
   (let [g (t/default-tool-groups false)
@@ -31,11 +31,12 @@
 (deftest prompt-disables-runtime
   (let [out (java.io.StringWriter.)
         pw (java.io.PrintWriter. out true)
-        lines (atom ["5" ""])
+        lines (atom ["6" ""])
         read #(let [l (first @lines)] (swap! lines rest) l)
         groups (tg/prompt! pw read (t/default-tool-groups false) false)]
     (is (false? (:runtime groups)))
     (is (true? (:files groups)))
+    (is (true? (:config groups)))
     (is (str/includes? (str out) "Tool groups"))))
 
 (deftest build-omits-disabled-groups

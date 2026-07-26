@@ -13,7 +13,8 @@
             [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
-            [kschltz.agent.plugins.base :as base]))
+            [kschltz.agent.plugins.base :as base]
+            [kschltz.agent.transitions.interceptors :as tr.ix]))
 
 (defn- by-slot [plugin slot]
   (filterv #(= slot (:slot %)) plugin))
@@ -28,7 +29,10 @@
              (mapv :name (by-slot p :compose))))
       (is (= [::loop/llm-call-with-self-heal ::ix/llm-call ::ix/parse-response]
              (mapv :name (by-slot p :llm))))
-      (is (= [::loop/dispatch-tools ::loop/compose-tool-results]
+      (is (= [::loop/dispatch-tools
+              ::tr.ix/harvest-transitions
+              ::loop/compose-tool-results
+              ::tr.ix/apply-transitions]
              (mapv :name (by-slot p :tools))))
       (is (= [::loop/tool-loop ::loop/ensure-text-response]
              (mapv :name (by-slot p :finalize))))
@@ -50,7 +54,9 @@
               ::ix/llm-call
               ::ix/parse-response
               ::loop/dispatch-tools
+              ::tr.ix/harvest-transitions
               ::loop/compose-tool-results
+              ::tr.ix/apply-transitions
               ::loop/tool-loop
               ::loop/ensure-text-response
               ::ix/summarize-history

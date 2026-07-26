@@ -16,6 +16,7 @@
                             :last-n   5}
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
+ :lateralus/config-tools         {:catalog :http}
  :lateralus/clojure-tools        {}
  :lateralus/logging             {}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
@@ -28,6 +29,7 @@
  :lateralus/mcp-tools            {:servers {}}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/web-tools
                                   #ig/ref :lateralus/runtime-tools

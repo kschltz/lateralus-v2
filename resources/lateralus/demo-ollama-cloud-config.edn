@@ -1,0 +1,46 @@
+;; Ollama Cloud demo for mid-session LLM config transitions.
+;; Requires OLLAMA_API_KEY in the environment.
+;;
+;;   clojure -M:run -i \
+;;     --config resources/lateralus/demo-ollama-cloud-config.edn \
+;;     --base-url https://ollama.com/v1 \
+;;     --model deepseek-v4-flash
+;;
+;; Tools: self_status, set_llm_config, list_llm_models (HTTP catalog).
+{:lateralus/llm-client     {:impl :http
+                            :base-url "https://ollama.com/v1"
+                            :model    "deepseek-v4-flash"}
+ :lateralus/llm-config     {:base-url "https://ollama.com/v1"
+                            :model    "deepseek-v4-flash"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/self-awareness-tools {}
+ :lateralus/config-tools         {:catalog :http}
+ :lateralus/file-tools           {}
+ :lateralus/clojure-tools        {}
+ :lateralus/web-tools            {:provider :none}
+ :lateralus/runtime-tools        {:enabled? false}
+ :lateralus/mcp-tools            {:servers {}}
+ :lateralus/logging              {}
+ :lateralus/cli-ui               {:enabled? true :theme :default}
+ :lateralus/thinking             {:mode :preview}
+ :lateralus/loop-opts            {:max-tool-calls-per-turn 20
+                                  :max-tool-calls-per-exchange 20}
+ :lateralus/tool-registry        [#ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}

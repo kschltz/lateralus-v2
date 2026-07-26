@@ -17,6 +17,7 @@
   [:map
    [:files {:optional true} :boolean]
    [:self {:optional true} :boolean]
+   [:config {:optional true} :boolean]
    [:clojure {:optional true} :boolean]
    [:web {:optional true} :boolean]
    [:runtime {:optional true} :boolean]
