@@ -80,16 +80,32 @@
   "Server ids may be strings or keywords in EDN."
   [:or [:string {:min 1}] :keyword])
 
+(def DynamicPolicy
+  "Agent-driven upsert/remove gate. Default off (air-gapped)."
+  [:map
+   [:enabled? {:optional true} :boolean]])
+
 (def McpToolsConfig
   "Integrant config for `:lateralus/mcp-tools`. Default is air-gapped:
-   empty `:servers` (or `:enabled? false`) spawns/connects nothing."
+   empty `:servers` (or `:enabled? false`) spawns/connects nothing.
+   `:dynamic {:enabled? true}` opts into mid-session upsert/remove."
   [:map
    [:enabled? {:optional true} :boolean]
    [:servers {:optional true} [:map-of ServerId ServerConfig]]
+   [:dynamic {:optional true} DynamicPolicy]
    ;; Test seam: inject pre-built clients keyed by server id.
    [:clients {:optional true} [:map-of ServerId :any]]
    ;; Test / native seam: when true, refuse non-empty servers.
    [:native-image? {:optional true} :boolean]])
+
+(defn valid-server-config?
+  "True when `cfg` conforms to `ServerConfig`."
+  [cfg]
+  (m/validate ServerConfig (or cfg {})))
+
+(defn explain-server-config
+  [cfg]
+  (m/explain ServerConfig (or cfg {})))
 
 (def JsonRpcId
   [:or :int :string])

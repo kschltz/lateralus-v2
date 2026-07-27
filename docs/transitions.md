@@ -24,18 +24,28 @@ before the next ReAct LLM call.
 
 ## Ops
 
-Currently one op:
-
 ```clojure
 {:op :set-llm
  :model "…"      ; optional
  :base-url "…"   ; optional
  :api-key "…"}   ; optional — at least one key required
+
+{:op :mcp-upsert-server
+ :server-id "…"
+ :config {…}}    ; redacted server stanza
+
+{:op :mcp-remove-server
+ :server-id "…"}
+
+{:op :mcp-refresh-server
+ :server-id "…"}
 ```
 
-Unknown keys are rejected by the closed Malli schema. Integrant client class
-(`:stub` vs `:http`), memory, embedder, and tool registries are **not**
-swappable this way.
+Unknown keys are rejected by the closed Malli schema. Integrant client
+class (`:stub` vs `:http`), memory, and embedder are **not** swappable
+this way. MCP servers **are** swappable when
+`:lateralus/mcp-tools {:dynamic {:enabled? true}}` — see
+[`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
 
 ## Tool surface
 
@@ -97,9 +107,25 @@ Config: `resources/lateralus/demo-ollama-cloud-config.edn` — starts on
 `deepseek-v4-flash`, then the agent calls `set_llm_config` to move to
 `gpt-oss:20b` and confirms with `self_status`.
 
+## Demo: Ollama Cloud + dynamic MCP upsert
+
+```bash
+python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
+```
+
+Starts a local fake Streamable HTTP MCP server, runs against Ollama
+Cloud with empty `:servers` and `:dynamic {:enabled? true}`, then the
+agent lists → upserts → calls `demo_echo` → lists again.
+Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
+
 ## Adding a new transition op
 
 1. Extend `Transition` / `SetLlmOp`-style schemas in `transitions.clj`.
 2. Handle the op in `apply-transition`.
 3. Emit it from a tool result under `:transition`.
 4. Keep allowlists tight — prefer new ops over open maps.
+
+## Future: dynamic tool setup (MCP)
+
+Implemented. See [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md)
+and the `mcp_*` control tools under `:lateralus/mcp-session-tools`.

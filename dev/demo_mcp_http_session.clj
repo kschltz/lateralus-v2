@@ -14,7 +14,8 @@
             [kschltz.agent.llm.client :as llm]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.system :as system]
-            [kschltz.agent.tool :as tool])
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.mcp.protocol :as mcp.proto])
   (:import [java.util.concurrent.atomic AtomicInteger]))
 
 (defn- banner [s]
@@ -88,7 +89,9 @@
                   (flush))
             sys (ig/init cfg)]
         (try
-          (let [registry (:lateralus/tool-registry sys)
+          (let [session (:lateralus/mcp-tools sys)
+                registry (merge (:lateralus/tool-registry sys)
+                                (mcp.proto/-registry session))
                 mcp-tools (vec (sort (filter #(str/starts-with? (str %) "remote_")
                                              (map str (keys registry)))))]
             (println)

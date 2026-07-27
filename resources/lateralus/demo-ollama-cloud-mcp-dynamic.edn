@@ -1,12 +1,12 @@
-;; Ollama Cloud demo for mid-session LLM config transitions.
-;; Requires OLLAMA_API_KEY in the environment.
+;; Ollama Cloud demo: mid-session MCP upsert via transitions.
+;; Requires OLLAMA_API_KEY. Starts with empty MCP servers and
+;; :dynamic {:enabled? true} so the agent can call mcp_upsert_server.
 ;;
-;;   clojure -M:run -i \
-;;     --config resources/lateralus/demo-ollama-cloud-config.edn \
-;;     --base-url https://ollama.com/v1 \
-;;     --model deepseek-v4-flash
+;; Prefer the PTY driver (visible typing for recordings):
+;;   python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
 ;;
-;; Tools: self_status, set_llm_config, list_llm_models (HTTP catalog).
+;; Or:
+;;   ./scripts/demo-ollama-cloud-mcp-dynamic.sh
 {:lateralus/llm-client     {:impl :http
                             :base-url "https://ollama.com/v1"
                             :model    "deepseek-v4-flash"}
@@ -25,17 +25,22 @@
  :lateralus/clojure-tools        {}
  :lateralus/web-tools            {:provider :none}
  :lateralus/runtime-tools        {:enabled? false}
- :lateralus/mcp-tools            {:servers {}}
+ ;; Empty boot seed; agent may upsert when :dynamic enabled.
+ :lateralus/mcp-tools
+ {:servers {}
+  :dynamic {:enabled? true}}
  :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/logging              {}
  :lateralus/cli-ui               {:enabled? true :theme :default}
  :lateralus/thinking             {:mode :preview}
  :lateralus/loop-opts            {:max-tool-calls-per-turn 20
-                                  :max-tool-calls-per-exchange 20}
+                                  :max-tool-calls-per-exchange 30
+                                  :max-loop-depth 8}
  :lateralus/tool-registry        [#ig/ref :lateralus/self-awareness-tools
-                                  #ig/ref :lateralus/config-tools]
+                                  #ig/ref :lateralus/config-tools
+                                  #ig/ref :lateralus/mcp-session-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
-                                    :mcp-session #ig/ref :lateralus/mcp-tools}
+                                  :mcp-session #ig/ref :lateralus/mcp-tools}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins

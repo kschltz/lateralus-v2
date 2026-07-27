@@ -16,8 +16,12 @@ Resources, prompts, and OAuth interactive login are follow-ups.
 
 - **Air-gapped default.** `:lateralus/mcp-tools {:servers {}}` connects nothing.
 - **Protocol + Malli.** Process/HTTP/JSON-RPC I/O goes through `McpTransport` /
-  `McpClient`; impl functions are Malli-instrumented.
-- **Integrant-only registration.** No `add-mcp-tool!`.
+  `McpClient` / `McpSession`; impl functions are Malli-instrumented.
+- **No `add-mcp-tool!`.** Mid-session changes go through control tools +
+  closed transitions (`mcp_upsert_server`, …). See
+  [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
+- **Dynamic policy opt-in.** `:dynamic {:enabled? true}` required for
+  upsert/remove. List/refresh work for already-connected servers.
 - **Portable tool names.** MCP names are remapped (`-` → `_`) and **always
   prefixed** with the sanitized server id (`filesystem_read_file`).
 - **JVM-only for live servers.** Native-image keeps empty servers.
@@ -66,10 +70,37 @@ Resources, prompts, and OAuth interactive login are follow-ups.
     }}}}
 ```
 
-`ig/init` validates config, connects each server, runs the MCP handshake
-(`initialize` → `notifications/initialized` → `tools/list`), and builds Tool
-records. If any server fails, init fails (no silent half-registry).
-`ig/halt!` closes transports (and SIGTERM/SIGKILL-reaps stdio children).
+`ig/init` validates config, builds an `McpSession`, connects each boot
+server, runs the MCP handshake (`initialize` → `notifications/initialized`
+→ `tools/list`), and adapts Tool records onto the session registry.
+Control tools live under `:lateralus/mcp-session-tools`; the tools plugin
+merges `session.registry` live on every seed. If any boot server fails,
+init fails (no silent half-registry). `ig/halt!` closes transports (and
+SIGTERM/SIGKILL-reaps stdio children).
+
+### Mid-session (dynamic)
+
+```clojure
+{:lateralus/mcp-tools
+ {:servers {}
+  :dynamic {:enabled? true}}}
+```
+
+Then the agent can call `mcp_upsert_server` / `mcp_remove_server` /
+`mcp_refresh_server` / `mcp_list_servers`. Upserts replace same server-id
+after closing the prior client. New tools are visible on the next LLM
+call of the same exchange.
+
+Ollama Cloud demo (requires `OLLAMA_API_KEY`; starts a local fake HTTP
+MCP server, then upserts it mid-session):
+
+```bash
+python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
+# or:
+./scripts/demo-ollama-cloud-mcp-dynamic.sh
+```
+
+Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
 
 Demo configs:
 

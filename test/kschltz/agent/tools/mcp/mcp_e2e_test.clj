@@ -89,7 +89,9 @@
                               :startup-timeout-ms 180000}}}))
             sys (ig/init cfg)]
         (try
-          (let [reg (:lateralus/tool-registry sys)]
+          (let [session (:lateralus/mcp-tools sys)
+                reg (merge (:lateralus/tool-registry sys)
+                           (proto/-registry session))]
             (is (contains? reg "fake_echo"))
             (is (contains? reg "file_read"))
             (is (re-find #"system-e2e"
@@ -113,7 +115,9 @@
                                   :allow-loopback? true}}}))
                 sys (ig/init cfg)]
             (try
-              (let [reg (:lateralus/tool-registry sys)]
+              (let [session (:lateralus/mcp-tools sys)
+                    reg (merge (:lateralus/tool-registry sys)
+                               (proto/-registry session))]
                 (is (contains? reg "remote_echo"))
                 (is (re-find #"http-e2e"
                              (tool/-invoke (get reg "remote_echo")

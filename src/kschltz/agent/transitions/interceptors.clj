@@ -14,15 +14,18 @@
    `compose-tool-results` (harvest) and *after* compose (apply), and
    mirror that order in the ReAct follow-up chain so mid-loop config
    changes take effect on the next LLM call of the same exchange."
-  (:require [kschltz.agent.transitions :as tr]))
+  (:require [kschltz.agent.plugins.tools :as tools.plugin]
+            [kschltz.agent.transitions :as tr]))
 
 (defn- normalize-transition
   "Coerce a JSON-round-tripped transition map into the schema shape
-   (`:op` as keyword). Returns nil when `raw` is not a map."
+   (`:op` as keyword, `:server-id` as string). Returns nil when `raw`
+   is not a map."
   [raw]
   (when (map? raw)
     (cond-> raw
-      (string? (:op raw)) (update :op keyword))))
+      (string? (:op raw)) (update :op keyword)
+      (keyword? (:server-id raw)) (update :server-id name))))
 
 (defn- harvest-one
   "Process a single `{:call :result}` entry. Returns
@@ -57,27 +60,25 @@
      :transitions (into [] (keep :transition) harvested)}))
 
 (defn apply-queued-transitions
-  "Pure helper: apply `:agent/transitions` on `ctx`. Returns updated ctx."
+  "Pure helper: apply `:agent/transitions` on `ctx`. Returns updated ctx.
+   Always refreshes the MCP tool overlay when a session is present so
+   mid-exchange upserts are visible on the next LLM call."
   [ctx]
-  (let [ops (or (:agent/transitions ctx) [])]
-    (if (empty? ops)
-      ctx
-      (let [base-state (or (:agent/state ctx) {})
-            {:keys [state applied]} (tr/apply-transitions base-state ops)
-            ;; Durable delta carries the real secrets; the atom merge is
-            ;; the single writer. Logging redacts `:api-key` from views.
-            durable (apply merge {}
-                           (map (fn [op]
-                                  (select-keys op tr/llm-config-keys))
-                                applied))]
-        (-> ctx
-            (assoc :agent/state state
-                   :agent/transitions []
-                   :agent/transitions-applied
-                   (mapv tr/redact-transition applied))
-            (update :agent/state-delta
-                    (fn [d] (merge (or d {}) durable)))
-            (update :llm/request tr/patch-llm-request state))))))
+  (let [ops (or (:agent/transitions ctx) [])
+        ctx (if (empty? ops)
+              ctx
+              (let [base-state (or (:agent/state ctx) {})
+                    {:keys [state applied]} (tr/apply-transitions base-state ops)
+                    durable (tr/durable-delta base-state state applied)]
+                (-> ctx
+                    (assoc :agent/state state
+                           :agent/transitions []
+                           :agent/transitions-applied
+                           (mapv tr/redact-transition applied))
+                    (update :agent/state-delta
+                            (fn [d] (merge (or d {}) durable)))
+                    (update :llm/request tr/patch-llm-request state))))]
+    (tools.plugin/refresh-mcp-tools ctx)))
 
 (defn- replace-turn-results
   "Replace the trailing `n` entries of `all` (this turn's results, already

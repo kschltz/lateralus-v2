@@ -50,7 +50,8 @@
     (is (not (schemas/valid-config?
               {:servers {"x" {:transport :http}}})))))
 
-(deftest tool-descriptor-schema
-  (is (m/validate schemas/ToolDescriptor
-                  {:name "echo" :description "d" :inputSchema {:type "object"}}))
-  (is (not (m/validate schemas/ToolDescriptor {:description "no name"}))))
+(deftest dynamic-policy-validates
+  (is (schemas/valid-config? {:servers {} :dynamic {:enabled? true}}))
+  (is (schemas/valid-config? {:servers {} :dynamic {:enabled? false}}))
+  (is (not (schemas/valid-config? {:dynamic {:enabled? "yes"}}))))
+

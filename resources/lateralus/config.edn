@@ -48,17 +48,11 @@
  ;; Opt in with Claude Desktop-like server stanzas, e.g.
  ;;   {:servers {"filesystem" {:command "npx"
  ;;                            :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}}}
- ;; Open Design MCP tools (stdio proxy to local daemon).
- ;; Start the daemon first; override defaults via OD_DAEMON_URL/OD_BIN/OD_NODE.
+ ;; Open Design: see resources/lateralus/open-design-mcp.edn
  :lateralus/mcp-tools
- {:servers
-  {"open-design"
-   {:transport :stdio
-    :command "/Users/schltzk/projects/lateralus-v2/scripts/open-design-mcp-server.sh"
-    :args []
-    :startup-timeout-ms 30000
-    :request-timeout-ms 30000
-    :max-result-bytes 2097152}}}
+ {:servers {}
+  :dynamic {:enabled? false}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/logging             {}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
@@ -69,8 +63,9 @@
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/runtime-tools
                                   #ig/ref :lateralus/web-tools
-                                  #ig/ref :lateralus/mcp-tools]
- :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+                                  #ig/ref :lateralus/mcp-session-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                  :mcp-session #ig/ref :lateralus/mcp-tools}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
