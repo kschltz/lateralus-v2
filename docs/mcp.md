@@ -17,7 +17,10 @@ Resources, prompts, and OAuth interactive login are follow-ups.
 - **Air-gapped default.** `:lateralus/mcp-tools {:servers {}}` connects nothing.
 - **Protocol + Malli.** Process/HTTP/JSON-RPC I/O goes through `McpTransport` /
   `McpClient`; impl functions are Malli-instrumented.
-- **Integrant-only registration.** No `add-mcp-tool!`.
+- **Integrant-only registration (today).** No `add-mcp-tool!`. Session-
+  dynamic MCP setup via transitions is explored in
+  [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md) — not
+  implemented yet.
 - **Portable tool names.** MCP names are remapped (`-` → `_`) and **always
   prefixed** with the sanitized server id (`filesystem_read_file`).
 - **JVM-only for live servers.** Native-image keeps empty servers.

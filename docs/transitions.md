@@ -103,3 +103,11 @@ Config: `resources/lateralus/demo-ollama-cloud-config.edn` — starts on
 2. Handle the op in `apply-transition`.
 3. Emit it from a tool result under `:transition`.
 4. Keep allowlists tight — prefer new ops over open maps.
+
+## Future: dynamic tool setup (MCP)
+
+Tool registries (including MCP) are **not** swappable via transitions
+today. An exploration of extending this pipeline so MCP servers can be
+upserted/removed/refreshed mid-session — without `add-mcp-tool!` — lives
+in [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md)
+(`goals/dynamic-mcp-tool-setup/`).
