@@ -30,4 +30,5 @@ See [`docs/dynamic-mcp-tool-setup.md`](../../docs/dynamic-mcp-tool-setup.md).
 
 - [x] Docs updated (`transitions`, `mcp`, design doc)
 - [x] Unit tests for session + transitions
-- [ ] Optional: dedicated mid-session upsert demo script (follow-up)
+- [x] Ollama Cloud mid-session upsert demo
+  (`scripts/demo-ollama-cloud-mcp-dynamic-pty.py`)
