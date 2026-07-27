@@ -46,8 +46,9 @@
                    :lateralus/mcp-tools {:servers {}})
         sys (ig/init cfg)]
     (try
-      (is (map? (:lateralus/mcp-tools sys)))
-      (is (empty? (:lateralus/mcp-tools sys)))
+      (is (proto/mcp-session? (:lateralus/mcp-tools sys)))
+      (is (empty? (proto/-registry (:lateralus/mcp-tools sys))))
+      (is (contains? (:lateralus/tool-registry sys) "mcp_list_servers"))
       (finally
         (ig/halt! sys)))))
 
@@ -59,10 +60,13 @@
                         :clients {"fake" c}}))
         sys (ig/init cfg)]
     (try
-      (let [reg (:lateralus/tool-registry sys)]
+      (let [session (:lateralus/mcp-tools sys)
+            reg (merge (:lateralus/tool-registry sys)
+                       (proto/-registry session))]
         (is (contains? reg "fake_echo"))
         (is (contains? reg "file_read")
-            "non-MCP tools still present when MCP is wired"))
+            "non-MCP tools still present when MCP is wired")
+        (is (contains? reg "mcp_list_servers")))
       (finally
         (ig/halt! sys)
         (is (true? (:closed? (proto/-server-info c))))))))

@@ -26,6 +26,7 @@
  :lateralus/web-tools            {:provider :none}
  :lateralus/runtime-tools        {:enabled? false}
  :lateralus/mcp-tools            {:servers {}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/logging              {}
  :lateralus/cli-ui               {:enabled? true :theme :default}
  :lateralus/thinking             {:mode :preview}
@@ -33,7 +34,8 @@
                                   :max-tool-calls-per-exchange 20}
  :lateralus/tool-registry        [#ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/config-tools]
- :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                    :mcp-session #ig/ref :lateralus/mcp-tools}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins

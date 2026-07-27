@@ -30,12 +30,14 @@
     :startup-timeout-ms 30000
     :request-timeout-ms 30000
     :max-result-bytes 2097152}}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/runtime-tools
-                                  #ig/ref :lateralus/mcp-tools]
- :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+                                  #ig/ref :lateralus/mcp-session-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                    :mcp-session #ig/ref :lateralus/mcp-tools}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins

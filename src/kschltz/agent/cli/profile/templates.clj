@@ -189,9 +189,11 @@
                                                :max-tool-calls-per-exchange 20
                                                :tool-content-caps {"clojure_eval" 12000
                                                                    "clojure_add_lib" 12000}}
+              :lateralus/mcp-session-tools    {:session (ig/ref :lateralus/mcp-tools)}
               :lateralus/tool-registry        (conj (tool-registry groups)
-                                                    (ig/ref :lateralus/mcp-tools))
-              :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
+                                                    (ig/ref :lateralus/mcp-session-tools))
+              :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)
+                                    :mcp-session (ig/ref :lateralus/mcp-tools)}
               :lateralus/plugins              (plugins wb?)
               :lateralus/agent                (agent-map wb?)})
       wb? (merge

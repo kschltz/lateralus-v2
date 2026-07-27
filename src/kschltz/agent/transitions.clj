@@ -19,6 +19,11 @@
   "Session LLM knobs that may be rewritten mid-exchange."
   #{:model :base-url :api-key})
 
+(def durable-state-keys
+  "Keys written into `:agent/state-delta` from applied transitions.
+   `:mcp/servers` is replaced wholesale on merge (see runtime)."
+  (into llm-config-keys #{:mcp/servers}))
+
 (def SetLlmOp
   "Transition that updates allowlisted LLM session config keys.
    At least one of `:model`, `:base-url`, or `:api-key` must be present."
@@ -32,10 +37,34 @@
     (fn [op]
       (boolean (some #(contains? op %) [:model :base-url :api-key])))]])
 
+(def McpServerConfigView
+  "Redacted / durable MCP server config carried on transitions.
+   Open map: control tools already validated the live connect config."
+  [:map])
+
+(def McpUpsertServerOp
+  [:map {:closed true}
+   [:op [:= :mcp-upsert-server]]
+   [:server-id [:string {:min 1}]]
+   [:config McpServerConfigView]])
+
+(def McpRemoveServerOp
+  [:map {:closed true}
+   [:op [:= :mcp-remove-server]]
+   [:server-id [:string {:min 1}]]])
+
+(def McpRefreshServerOp
+  [:map {:closed true}
+   [:op [:= :mcp-refresh-server]]
+   [:server-id [:string {:min 1}]]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
-   [:set-llm SetLlmOp]])
+   [:set-llm SetLlmOp]
+   [:mcp-upsert-server McpUpsertServerOp]
+   [:mcp-remove-server McpRemoveServerOp]
+   [:mcp-refresh-server McpRefreshServerOp]])
 
 (def Transitions
   [:vector Transition])
@@ -55,12 +84,31 @@
   [op]
   (select-keys op [:model :base-url :api-key]))
 
+(defn- redact-mcp-config
+  [cfg]
+  (cond-> (dissoc (or cfg {}) :bearer-token :env :http-fn :__client)
+    (contains? cfg :bearer-token) (assoc :bearer-token-set true)
+    (contains? cfg :env) (assoc :env-set true
+                                :env-keys (vec (sort (map str (keys (:env cfg))))))))
+
 (defn apply-transition
   "Apply one validated `op` to `state`. Returns updated state.
    Unknown ops are ignored (caller should validate first)."
   [state op]
   (case (:op op)
     :set-llm (merge (or state {}) (set-llm-patch op))
+    :mcp-upsert-server
+    (update (or state {}) :mcp/servers
+            (fn [servers]
+              (assoc (or servers {})
+                     (:server-id op)
+                     (redact-mcp-config (:config op)))))
+    :mcp-remove-server
+    (update (or state {}) :mcp/servers
+            (fn [servers]
+              (dissoc (or servers {}) (:server-id op))))
+    :mcp-refresh-server
+    (or state {})
     state))
 
 (defn apply-transitions
@@ -85,12 +133,36 @@
     req
     (merge req (select-keys (or state {}) llm-config-keys))))
 
+(defn durable-delta
+  "Project applied transitions + resulting `state` into a state-delta
+   patch. `:mcp/servers` is taken from the full post-apply state so
+   removals replace the map wholesale."
+  [_before after applied]
+  (let [llm-patch (apply merge {}
+                         (map (fn [op]
+                                (when (= :set-llm (:op op))
+                                  (select-keys op llm-config-keys)))
+                              applied))
+        mcp-touched? (some (fn [op]
+                             (contains? #{:mcp-upsert-server
+                                          :mcp-remove-server}
+                                        (:op op)))
+                           applied)]
+    (cond-> llm-patch
+      mcp-touched?
+      (assoc :mcp/servers (or (:mcp/servers after) {})))))
+
 (defn redact-transition
-  "Return a logging/model-safe copy of `op` with `:api-key` replaced
-   by a boolean marker when present."
+  "Return a logging/model-safe copy of `op` with secrets replaced by
+   boolean markers when present."
   [op]
-  (cond-> (dissoc op :api-key)
-    (contains? op :api-key) (assoc :api-key-set true)))
+  (case (:op op)
+    :set-llm
+    (cond-> (dissoc op :api-key)
+      (contains? op :api-key) (assoc :api-key-set true))
+    :mcp-upsert-server
+    (update op :config redact-mcp-config)
+    op))
 
 (defn transition-envelope?
   "True when a parsed tool-result map carries a `:transition` key."
@@ -114,8 +186,8 @@
       (when (valid-transition? op) op))))
 
 (defn model-visible-result
-  "Rewrite a tool-result envelope so `:transition` never echoes the
-   raw `:api-key`. Used by harvest after enqueueing the real op."
+  "Rewrite a tool-result envelope so `:transition` never echoes
+   secrets. Used by harvest after enqueueing the real op."
   [parsed]
   (if-not (transition-envelope? parsed)
     parsed
@@ -134,6 +206,7 @@
                           [:applied [:vector :map]]]])
 (m/=> patch-llm-request [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :map]])
 (m/=> extract-transition [:=> [:cat [:maybe :map]] [:maybe :map]])
+(m/=> durable-delta [:=> [:cat [:maybe :map] [:maybe :map] [:maybe [:sequential :any]]] :map])
 
 (defn instrument!
   "Instrument this namespace's public fns with Malli."

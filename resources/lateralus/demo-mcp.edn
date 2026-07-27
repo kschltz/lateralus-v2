@@ -30,10 +30,12 @@
  :lateralus/thinking            {:mode :preview}
  :lateralus/loop-opts            {:max-tool-calls-per-turn 100
                                   :max-tool-calls-per-exchange 20}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
-                                  #ig/ref :lateralus/mcp-tools]
- :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+                                  #ig/ref :lateralus/mcp-session-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                    :mcp-session #ig/ref :lateralus/mcp-tools}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins

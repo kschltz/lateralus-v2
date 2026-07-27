@@ -13,7 +13,8 @@
             [kschltz.agent.llm.client :as llm]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.system :as system]
-            [kschltz.agent.tool :as tool])
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.mcp.protocol :as mcp.proto])
   (:import [java.util.concurrent.atomic AtomicInteger]))
 
 (defn- banner [s]
@@ -75,7 +76,9 @@
   (println)
   (let [sys (ig/init (demo-config))]
     (try
-      (let [registry (:lateralus/tool-registry sys)
+      (let [session (:lateralus/mcp-tools sys)
+            registry (merge (:lateralus/tool-registry sys)
+                            (mcp.proto/-registry session))
             mcp-tools (sort (filter #(str/starts-with? % "fake_") (keys registry)))]
         (println "MCP tools discovered:")
         (doseq [t mcp-tools]

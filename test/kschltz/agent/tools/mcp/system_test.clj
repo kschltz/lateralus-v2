@@ -3,6 +3,7 @@
             [integrant.core :as ig]
             [kschltz.agent.system :as system]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.mcp.protocol :as proto]
             [kschltz.agent.tools.mcp.test-util :as tu]
             [kschltz.agent.tools.mcp.tools :as tools]))
 
@@ -13,12 +14,14 @@
                                {:servers {"x" {}}})))))
 
 (deftest default-config-includes-empty-mcp
-  (is (= {:servers {}} (:lateralus/mcp-tools system/default-config)))
+  (is (= {:servers {} :dynamic {:enabled? false}}
+         (:lateralus/mcp-tools system/default-config)))
   (let [sys (ig/init system/default-config)]
     (try
-      (is (empty? (:lateralus/mcp-tools sys)))
+      (is (proto/mcp-session? (:lateralus/mcp-tools sys)))
+      (is (empty? (proto/-registry (:lateralus/mcp-tools sys))))
       (let [reg (:lateralus/tool-registry sys)
-            baseline-keys ["file_read" "self_status" "web_search"]]
+            baseline-keys ["file_read" "self_status" "web_search" "mcp_list_servers"]]
         (doseq [k baseline-keys]
           (is (contains? reg k)
               (str "baseline tool missing: " k))))

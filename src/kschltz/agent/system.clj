@@ -51,6 +51,8 @@
             [kschltz.agent.tools.web.schemas :as web.schemas]
             [kschltz.agent.tools.mcp.tools :as tools.mcp]
             [kschltz.agent.tools.mcp.schemas :as mcp.schemas]
+            [kschltz.agent.tools.mcp.session-tools :as mcp.session-tools]
+            [kschltz.agent.tools.mcp.protocol :as mcp-proto]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.cli.ui :as ui]
             [kschltz.agent.cli.thinking :as thinking]
@@ -232,13 +234,20 @@
   (tools.web/web-registry opts))
 
 (defmethod ig/init-key :lateralus/mcp-tools [_ opts]
-  "Build the MCP tool registry from configured stdio servers. Default
-   is empty/disabled (air-gapped). Non-empty servers spawn child
-   processes; `halt-key!` reaps them."
-  (tools.mcp/mcp-registry (or opts {})))
+  "Build an `McpSession` from configured servers. Default is
+   empty/disabled (air-gapped). Non-empty servers spawn/connect at
+   init; `halt-key!` closes them. Set `:dynamic {:enabled? true}` to
+   allow mid-session upsert/remove via control tools."
+  (tools.mcp/mcp-session (or opts {})))
 
-(defmethod ig/halt-key! :lateralus/mcp-tools [_ registry]
-  (tools.mcp/halt-registry! registry))
+(defmethod ig/halt-key! :lateralus/mcp-tools [_ session]
+  (when (mcp-proto/mcp-session? session)
+    (mcp-proto/halt-session! session)))
+
+(defmethod ig/init-key :lateralus/mcp-session-tools [_ {:keys [session]}]
+  "Control tools for mid-session MCP setup (`mcp_list_servers`,
+   `mcp_upsert_server`, `mcp_remove_server`, `mcp_refresh_server`)."
+  (mcp.session-tools/session-tools-registry session))
 
 (defmethod ig/init-key :lateralus/logging [_ opts]
   "Resolve the logging config. Defaults are applied at sink-build time
@@ -395,8 +404,8 @@
    compile arbitrary forms at runtime)."
   (tools.runtime/runtime-registry opts))
 
-(defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry]}]
-  (plugins.tools/tools-plugin registry))
+(defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session]}]
+  (plugins.tools/tools-plugin registry {:mcp-session mcp-session}))
 
 (defmethod ig/init-key :lateralus/agent
   [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts cli-ui thinking portal workbench]}]
@@ -470,14 +479,17 @@
    :lateralus/config-tools         {:catalog :stub}
    :lateralus/runtime-tools        {}
    :lateralus/web-tools            {:provider :none}
-   :lateralus/mcp-tools            {:servers {}}
+   :lateralus/mcp-tools            {:servers {}
+                                    :dynamic {:enabled? false}}
+   :lateralus/mcp-session-tools    {:session (ig/ref :lateralus/mcp-tools)}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)
                                     (ig/ref :lateralus/config-tools)
                                     (ig/ref :lateralus/runtime-tools)
                                     (ig/ref :lateralus/web-tools)
-                                    (ig/ref :lateralus/mcp-tools)]
-   :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)}
+                                    (ig/ref :lateralus/mcp-session-tools)]
+   :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)
+                                    :mcp-session (ig/ref :lateralus/mcp-tools)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)]
    :lateralus/agent                {:plugins        (ig/ref :lateralus/plugins)

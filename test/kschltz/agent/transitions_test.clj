@@ -34,9 +34,40 @@
     (is (= [{:role "user" :content "hi"}] (:messages patched)))
     (is (= [] (:tools patched)))))
 
-(deftest redact-transition-hides-api-key
-  (is (= {:op :set-llm :model "m" :api-key-set true}
-         (tr/redact-transition {:op :set-llm :model "m" :api-key "secret"}))))
+(deftest mcp-transition-ops
+  (testing "upsert/remove fold :mcp/servers"
+    (let [{:keys [state applied]}
+          (tr/apply-transitions {}
+                                [{:op :mcp-upsert-server
+                                  :server-id "fs"
+                                  :config {:command "npx" :bearer-token "secret"}}
+                                 {:op :mcp-refresh-server :server-id "fs"}
+                                 {:op :mcp-remove-server :server-id "fs"}])]
+      (is (= 3 (count applied)))
+      (is (= {} (:mcp/servers state)))))
+  (testing "redact hides bearer token"
+    (is (= {:op :mcp-upsert-server
+            :server-id "fs"
+            :config {:command "npx" :bearer-token-set true}}
+           (tr/redact-transition
+            {:op :mcp-upsert-server
+             :server-id "fs"
+             :config {:command "npx" :bearer-token "secret"}})))))
+
+(deftest durable-delta-replaces-mcp-servers
+  (let [before {}
+        after {:mcp/servers {"a" {:command "x"}}}
+        delta (tr/durable-delta before after
+                                [{:op :mcp-upsert-server
+                                  :server-id "a"
+                                  :config {:command "x"}}])]
+    (is (= {"a" {:command "x"}} (:mcp/servers delta))))
+  (let [before {:mcp/servers {"a" {:command "x"}}}
+        after {:mcp/servers {}}
+        delta (tr/durable-delta before after
+                                [{:op :mcp-remove-server :server-id "a"}])]
+    (is (= {} (:mcp/servers delta)))))
+
 
 (deftest harvest-enqueues-and-redacts
   (let [envelope (tr/encode-result

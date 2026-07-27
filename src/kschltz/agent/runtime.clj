@@ -11,6 +11,11 @@
 (def ^:private default-exchange-chain
   (plugin/assemble-chain [(plugins.base/base-plugin)]))
 
+(def ^:private replace-map-keys
+  "Keys whose map values are replaced wholesale on state merge (not
+   deep-merged). Needed so `:mcp/servers` removals actually drop keys."
+  #{:mcp/servers})
+
 (defn- deep-merge [a b]
   (cond
     (and (map? a) (map? b)) (merge-with deep-merge a b)
@@ -20,7 +25,13 @@
     :else b))
 
 (defn- merge-state [base-state delta]
-  (deep-merge base-state (or delta {})))
+  (reduce-kv
+   (fn [acc k v]
+     (if (contains? replace-map-keys k)
+       (assoc acc k v)
+       (assoc acc k (deep-merge (get acc k) v))))
+   (or base-state {})
+   (or delta {})))
 
 (defn- usage-delta [base-state response]
   (let [usage   (get response :usage)

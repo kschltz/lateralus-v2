@@ -24,18 +24,28 @@ before the next ReAct LLM call.
 
 ## Ops
 
-Currently one op:
-
 ```clojure
 {:op :set-llm
  :model "…"      ; optional
  :base-url "…"   ; optional
  :api-key "…"}   ; optional — at least one key required
+
+{:op :mcp-upsert-server
+ :server-id "…"
+ :config {…}}    ; redacted server stanza
+
+{:op :mcp-remove-server
+ :server-id "…"}
+
+{:op :mcp-refresh-server
+ :server-id "…"}
 ```
 
-Unknown keys are rejected by the closed Malli schema. Integrant client class
-(`:stub` vs `:http`), memory, embedder, and tool registries are **not**
-swappable this way.
+Unknown keys are rejected by the closed Malli schema. Integrant client
+class (`:stub` vs `:http`), memory, and embedder are **not** swappable
+this way. MCP servers **are** swappable when
+`:lateralus/mcp-tools {:dynamic {:enabled? true}}` — see
+[`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
 
 ## Tool surface
 
@@ -106,8 +116,5 @@ Config: `resources/lateralus/demo-ollama-cloud-config.edn` — starts on
 
 ## Future: dynamic tool setup (MCP)
 
-Tool registries (including MCP) are **not** swappable via transitions
-today. An exploration of extending this pipeline so MCP servers can be
-upserted/removed/refreshed mid-session — without `add-mcp-tool!` — lives
-in [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md)
-(`goals/dynamic-mcp-tool-setup/`).
+Implemented. See [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md)
+and the `mcp_*` control tools under `:lateralus/mcp-session-tools`.

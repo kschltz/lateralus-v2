@@ -35,10 +35,46 @@
   (-server-info [client]
     "Negotiated serverInfo / capabilities map. MUST NOT raise."))
 
+(defprotocol McpSession
+  "Process/session boundary for the set of live MCP servers.
+
+   Integrant owns one `McpSession` per system. Control tools call the
+   mutating methods during `-invoke`; `transitions.clj` stays pure and
+   only records durable `:mcp/servers` intent. `-registry` is read on
+   every tools-plugin seed so ReAct follow-ups see upserts same-exchange."
+  (-upsert-server! [session server-id server-cfg opts]
+    "Connect (or replace) one server, discover tools, adapt them.
+     `opts` may include `:reserved-names` (set of non-MCP tool names
+     that must not collide). Returns a status map. Raises `ex-info`
+     with `:phase` on failure; leaves prior servers intact.")
+  (-remove-server! [session server-id]
+    "Close and drop one server. Idempotent when unknown. Returns status.")
+  (-refresh-server! [session server-id]
+    "Re-run `tools/list` for an existing server and rebuild its tools.
+     Raises when the server id is unknown.")
+  (-registry [session]
+    "Current name→Tool map for all connected servers.")
+  (-status [session]
+    "Serializable inventory (server ids, tool names, dynamic policy).")
+  (-dynamic-enabled? [session]
+    "True when agent-driven upsert/remove is allowed.")
+  (-halt-session! [session]
+    "Close every client. Idempotent."))
+
 (defn close!
   "Close an MCP client (preferred public entry)."
   [client]
   (-close-client! client))
+
+(defn halt-session!
+  "Halt an MCP session (preferred public entry)."
+  [session]
+  (-halt-session! session))
+
+(defn mcp-session?
+  "True when `x` satisfies `McpSession`."
+  [x]
+  (satisfies? McpSession x))
 
 (def ServerInfo
   [:map

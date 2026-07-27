@@ -32,9 +32,10 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/clojure-tools    ──▶  clojure structured-edit tool registry│
 │  :lateralus/runtime-tools    ──▶  ClojureRuntime tool registry (clojure_eval, add_lib, loaded_libs)│
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web_search, web_fetch, web_extract)│
-│  :lateralus/mcp-tools        ──▶  MCP client Tool registry (stdio + Streamable HTTP → Tools)│
+│  :lateralus/mcp-tools        ──▶  McpSession (boot seed + live overlay)   │
+│  :lateralus/mcp-session-tools──▶  mcp_* control tools                     │
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
-│  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry`        │
+│  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry` (+ live MCP) │
 │  :lateralus/cli-ui            ──▶  optional CliRenderer (prompt/response colors; not a chain plugin) │
 │  :lateralus/plugins       ──▶  assembled plugin maps (base plugin auto-prepended) │
 │  :lateralus/agent         ──▶  agent-map + exchange-chain + pre-wired deps │
