@@ -107,6 +107,17 @@ Config: `resources/lateralus/demo-ollama-cloud-config.edn` — starts on
 `deepseek-v4-flash`, then the agent calls `set_llm_config` to move to
 `gpt-oss:20b` and confirms with `self_status`.
 
+## Demo: Ollama Cloud + dynamic MCP upsert
+
+```bash
+python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
+```
+
+Starts a local fake Streamable HTTP MCP server, runs against Ollama
+Cloud with empty `:servers` and `:dynamic {:enabled? true}`, then the
+agent lists → upserts → calls `demo_echo` → lists again.
+Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
+
 ## Adding a new transition op
 
 1. Extend `Transition` / `SetLlmOp`-style schemas in `transitions.clj`.

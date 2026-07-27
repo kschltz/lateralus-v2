@@ -91,6 +91,17 @@ Then the agent can call `mcp_upsert_server` / `mcp_remove_server` /
 after closing the prior client. New tools are visible on the next LLM
 call of the same exchange.
 
+Ollama Cloud demo (requires `OLLAMA_API_KEY`; starts a local fake HTTP
+MCP server, then upserts it mid-session):
+
+```bash
+python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
+# or:
+./scripts/demo-ollama-cloud-mcp-dynamic.sh
+```
+
+Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
+
 Demo configs:
 
 | File | Role |
