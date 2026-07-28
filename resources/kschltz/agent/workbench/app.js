@@ -44,10 +44,23 @@
     return status === "queued" || status === "running";
   }
 
+  function focusComposer() {
+    // Disabled controls reject focus; readOnly keeps the caret so Send can
+    // restore focus immediately and the next keystroke lands after the turn.
+    if (inputEl.disabled) return;
+    try {
+      inputEl.focus({ preventScroll: true });
+    } catch (_) {
+      inputEl.focus();
+    }
+  }
+
   function setComposerEnabled(enabled) {
     sendBtn.disabled = !enabled;
-    inputEl.disabled = !enabled;
     attachBtn.disabled = !enabled;
+    // Prefer readOnly over disabled so focus survives the busy window.
+    inputEl.readOnly = !enabled;
+    inputEl.disabled = false;
   }
 
   function renderStatus(status, detail) {
@@ -192,6 +205,10 @@
     if (busy) ensureBusyPoller();
     else stopBusyPollerIfIdle();
 
+    // When a turn completes, put the caret back in chat so the next message
+    // does not require a click.
+    if (wasBusy && !busy) focusComposer();
+
     const portalUrl = state["portal-url"];
     // After a turn finishes, force-reload iframe — recovers dead Portal websockets.
     const forceReload = wasBusy && !busy && !!portalUrl;
@@ -273,7 +290,9 @@
       setComposerEnabled(true);
       stopBusyPollerIfIdle();
     } finally {
-      inputEl.focus();
+      // Keep caret in the composer after Send (works because we use readOnly
+      // while busy, not disabled).
+      focusComposer();
     }
   }
 

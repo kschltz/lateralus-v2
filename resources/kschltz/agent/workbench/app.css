@@ -305,7 +305,10 @@ button {
   font: 600 13px/1 inherit;
   cursor: pointer;
 }
-button:disabled { opacity: 0.5; cursor: default; }
+textarea:read-only {
+  opacity: 0.72;
+  cursor: default;
+}
 #attach { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 #attach .label-short { display: none; }
 #mobile-tabs { display: none; }

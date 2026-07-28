@@ -121,7 +121,11 @@
             (is (re-find #"mobilePane|mobile-pane|setMobilePane" js)
                 "JS drives the mobile pane switcher")
             (is (re-find #"browserPortalUrl" js)
-                "JS remaps Portal iframe onto the CHAT origin"))
+                "JS remaps Portal iframe onto the CHAT origin")
+            (is (re-find #"focusComposer" js)
+                "JS restores chat caret after send / turn complete")
+            (is (re-find #"inputEl\.readOnly" js)
+                "composer uses readOnly while busy so focus can stick"))
           (finally
             (http/stop-server! server)))))))
 
