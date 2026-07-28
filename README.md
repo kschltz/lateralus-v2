@@ -6,6 +6,24 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 **Main ns:** `kschltz.lateralus`  
 **License:** [Eclipse Public License 2.0](LICENSE)
 
+## Demo
+
+Live CHAT | Portal session on **Ollama Cloud** (`kimi-k2.7-code`): ask for a black-angora pet-shop landing page, watch it land in Portal, then float / resize / dock the pane.
+
+<video src="docs/assets/workbench-demo.mp4" controls playsinline poster="docs/assets/workbench-demo-poster.jpg" width="720">
+Your browser does not support video. <a href="docs/assets/workbench-demo.mp4">Download the workbench demo (mp4)</a>
+</video>
+
+Reproduce locally (needs `OLLAMA_API_KEY`):
+
+```bash
+clojure -M:workbench:run -i \
+  --config resources/lateralus/demo-workbench-cloud.edn \
+  --base-url https://ollama.com/v1 \
+  --model kimi-k2.7-code
+# open http://localhost:7860
+```
+
 ## Quick start
 
 **Docker (recommended for a full workbench):** Java/Ollama packaged; interactive profile gate + CHAT | Portal UI.
@@ -15,7 +33,7 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 # .\scripts\start-workbench.ps1            # Windows PowerShell
 ```
 
-Open **http://localhost:7860** (Portal iframe on **:7870**). Details: [`docker/README.md`](docker/README.md).
+Open **http://localhost:7860** (Portal is served on the same origin/port). Details: [`docker/README.md`](docker/README.md).
 
 **Local Clojure** (Java 22+; JVM flags are baked into `:run` / `:workbench`):
 
