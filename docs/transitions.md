@@ -118,7 +118,8 @@ python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
 
 Starts a local fake Streamable HTTP MCP server, runs against Ollama
 Cloud with empty `:servers` and `:dynamic {:enabled? true}`, then the
-agent lists → upserts → calls `demo_echo` → lists again.
+agent lists → ADD (`mcp_upsert_server`) → calls `demo_echo` →
+EDIT/replace → REMOVE → lists (count 0).
 Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
 
 ## Adding a new transition op

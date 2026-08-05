@@ -97,7 +97,7 @@ call of the same exchange. Set `:dynamic {:enabled? false}` to refuse
 upsert/remove.
 
 Ollama Cloud demo (requires `OLLAMA_API_KEY`; starts a local fake HTTP
-MCP server, then upserts it mid-session):
+MCP server, then ADD → use → EDIT → REMOVE mid-session):
 
 ```bash
 python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
