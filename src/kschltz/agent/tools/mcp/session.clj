@@ -3,7 +3,7 @@
 
    Owns connected clients and the derived name→Tool registry. Boot seed
    comes from `:lateralus/mcp-tools` config; control tools may upsert /
-   remove / refresh when `:dynamic {:enabled? true}` (upsert/remove only;
+   remove / refresh when dynamic policy is enabled (upsert/remove only;
    refresh/list always allowed for connected servers).
 
    Network/process I/O stays behind `McpClient` / `McpTransport`. This

@@ -14,7 +14,7 @@
                                {:servers {"x" {}}})))))
 
 (deftest default-config-includes-empty-mcp
-  (is (= {:servers {} :dynamic {:enabled? false}}
+  (is (= {:servers {} :dynamic {:enabled? true}}
          (:lateralus/mcp-tools system/default-config)))
   (let [sys (ig/init system/default-config)]
     (try

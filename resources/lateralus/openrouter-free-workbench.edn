@@ -80,7 +80,9 @@
     :args []
     :startup-timeout-ms 30000
     :request-timeout-ms 30000
-    :max-result-bytes 2097152}}}
+    :max-result-bytes 2097152}}
+ :dynamic {:enabled? true}
+}
  :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools

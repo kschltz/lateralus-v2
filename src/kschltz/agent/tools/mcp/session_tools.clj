@@ -57,9 +57,10 @@
   (-name [_] "mcp_upsert_server")
   (-description [_]
     "Connect (or replace) an MCP server for this session and discover
-     its tools. Requires :lateralus/mcp-tools :dynamic {:enabled? true}.
-     Changes apply before the next LLM call in this exchange. Provide
-     server-id and a stdio (:command) or HTTP (:url) config map.")
+     its tools. Requires dynamic MCP setup (on by default; lock with
+     :dynamic {:enabled? false}). Changes apply before the next LLM
+     call in this exchange. Provide server-id and a stdio (:command)
+     or HTTP (:url) config map.")
   (-input-schema [_] UpsertInput)
   (-output-schema [_] :string)
   (-invoke [_ args ctx]

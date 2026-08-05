@@ -16,15 +16,16 @@ transitions, without `add-mcp-tool!`:
    `:mcp-refresh-server` record durable `:mcp/servers` intent.
 4. **`tools-plugin`** — seeds `static ∪ session.registry` every stage so
    ReAct follow-ups see new tools same-exchange.
-5. **Policy** — `:dynamic {:enabled? false}` by default; upsert/remove
-   refuse until opted in. List/refresh always allowed for connected servers.
+5. **Policy** — `:dynamic {:enabled? true}` by default in JVM runtime
+   configs; set false to lock upsert/remove. List/refresh always allowed
+   for connected servers. Native-image configs keep dynamic off.
 
 ## Config shape
 
 ```clojure
 :lateralus/mcp-tools
 {:servers {}                          ;; boot seed (air-gapped default)
- :dynamic {:enabled? true}}           ;; opt-in for agent upsert/remove
+ :dynamic {:enabled? true}}           ;; default on; set false to lock
 
 :lateralus/mcp-session-tools
 {:session #ig/ref :lateralus/mcp-tools}
@@ -56,7 +57,7 @@ in model-visible envelopes.
 
 | Question | Default |
 |----------|---------|
-| Policy | Dynamic **disabled** until `:dynamic {:enabled? true}` |
+| Policy | Dynamic **enabled** by default; `:dynamic {:enabled? false}` locks |
 | Config shape | Reuse existing server schemas; redact secrets |
 | Same id as boot | **Replace** (upsert) after closing old client |
 | Visibility | **Same-exchange** via live registry merge |

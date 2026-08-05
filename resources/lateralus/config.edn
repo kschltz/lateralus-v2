@@ -44,14 +44,17 @@
  :lateralus/runtime-tools        {:enabled? true :network? true}
  ;; Web tools: :none by default (air-gapped). Switch to :mojeek for live search.
  :lateralus/web-tools      {:provider :none}
- ;; MCP client tools: empty by default (air-gapped, no child processes).
- ;; Opt in with Claude Desktop-like server stanzas, e.g.
+ ;; MCP client tools: empty servers by default (air-gapped boot — no child
+ ;; processes). Dynamic setup is on so the agent can upsert/remove servers
+ ;; mid-session via mcp_upsert_server / mcp_remove_server. Lock with
+ ;;   :dynamic {:enabled? false}
+ ;; Boot-seed example:
  ;;   {:servers {"filesystem" {:command "npx"
  ;;                            :args ["-y" "@modelcontextprotocol/server-filesystem" "/tmp/sandbox"]}}}
  ;; Open Design: see resources/lateralus/open-design-mcp.edn
  :lateralus/mcp-tools
  {:servers {}
-  :dynamic {:enabled? false}}
+  :dynamic {:enabled? true}}
  :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/logging             {}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}

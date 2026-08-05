@@ -43,8 +43,9 @@ before the next ReAct LLM call.
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
 class (`:stub` vs `:http`), memory, and embedder are **not** swappable
-this way. MCP servers **are** swappable when
-`:lateralus/mcp-tools {:dynamic {:enabled? true}}` — see
+this way. MCP servers **are** swappable by default
+(`:lateralus/mcp-tools {:dynamic {:enabled? true}}`); set
+`:dynamic {:enabled? false}` to lock — see
 [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
 
 ## Tool surface

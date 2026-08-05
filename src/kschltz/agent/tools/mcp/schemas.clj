@@ -88,7 +88,8 @@
 (def McpToolsConfig
   "Integrant config for `:lateralus/mcp-tools`. Default is air-gapped:
    empty `:servers` (or `:enabled? false`) spawns/connects nothing.
-   `:dynamic {:enabled? true}` opts into mid-session upsert/remove."
+   `:dynamic {:enabled? true}` (default in runtime configs) allows
+   mid-session upsert/remove; set false to lock."
   [:map
    [:enabled? {:optional true} :boolean]
    [:servers {:optional true} [:map-of ServerId ServerConfig]]

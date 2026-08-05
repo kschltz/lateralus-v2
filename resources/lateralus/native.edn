@@ -28,7 +28,7 @@
  ;; Native-image never includes Hickory, so web tools must stay :none.
  :lateralus/web-tools      {:provider :none}
  ;; MCP stdio servers are JVM-only; keep empty under native-image.
- :lateralus/mcp-tools            {:servers {}}
+ :lateralus/mcp-tools            {:servers {} :dynamic {:enabled? false}}
  :lateralus/runtime-tools        {:enabled? true :network? false}  ;; native: eval works; add-lib disabled (tools.deps not on native classpath)
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
