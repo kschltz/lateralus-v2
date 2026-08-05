@@ -25,7 +25,7 @@
  :lateralus/clojure-tools        {}
  :lateralus/web-tools            {:provider :none}
  :lateralus/runtime-tools        {:enabled? false}
- :lateralus/mcp-tools            {:servers {}}
+ :lateralus/mcp-tools            {:servers {} :dynamic {:enabled? true}}
  :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/logging              {}
  :lateralus/cli-ui               {:enabled? true :theme :default}

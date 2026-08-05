@@ -1,4 +1,4 @@
-;; Ollama Cloud demo: mid-session MCP upsert via transitions.
+;; Ollama Cloud demo: mid-session MCP ADD/EDIT/REMOVE via transitions.
 ;; Requires OLLAMA_API_KEY. Starts with empty MCP servers and
 ;; :dynamic {:enabled? true} so the agent can call mcp_upsert_server.
 ;;

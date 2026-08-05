@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ollama Cloud + dynamic MCP upsert demo (stdin feeder).
+# Ollama Cloud + dynamic MCP lifecycle demo (stdin feeder): list→ADD→use→EDIT→REMOVE.
 # Prefer the PTY driver for screen recordings:
 #   python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
 set -euo pipefail
@@ -48,11 +48,13 @@ if [[ -z "$URL" ]]; then
   exit 1
 fi
 
-UPSERT_JSON="{\"server-id\":\"${SERVER_ID}\",\"config\":{\"transport\":\"http\",\"url\":\"${URL}\",\"allow-http?\":true,\"allow-loopback?\":true}}"
+UPSERT_JSON="{\"server-id\":\"${SERVER_ID}\",\"config\":{\"transport\":\"http\",\"url\":\"${URL}\",\"allow-http?\":true,\"allow-loopback?\":true,\"request-timeout-ms\":15000}}"
+EDIT_JSON="{\"server-id\":\"${SERVER_ID}\",\"config\":{\"transport\":\"http\",\"url\":\"${URL}\",\"allow-http?\":true,\"allow-loopback?\":true,\"request-timeout-ms\":30000,\"max-result-bytes\":32768}}"
 
 echo
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  lateralus — Ollama Cloud + dynamic MCP upsert demo          ║"
+echo "║  lateralus — Ollama Cloud + dynamic MCP lifecycle demo       ║"
+echo "║  flow: list → ADD → use → EDIT → REMOVE → list               ║"
 echo "║  model: ${START_MODEL}"
 echo "║  endpoint: ${BASE_URL}"
 echo "║  fake MCP: ${URL}"
@@ -64,9 +66,10 @@ trap 'rm -f "$PROMPTS_FILE"; cleanup' EXIT
 
 cat >"$PROMPTS_FILE" <<EOF
 Call mcp_list_servers. In your final answer, report dynamic-enabled? and the server count only.
-Use mcp_upsert_server exactly once with these arguments (JSON): ${UPSERT_JSON} Then call mcp_list_servers. Final answer: the server-id and the tool names that were discovered.
+ADD: Use mcp_upsert_server exactly once with these arguments (JSON): ${UPSERT_JSON} Then call mcp_list_servers. Final answer: the server-id and the tool names that were discovered.
 Call the MCP tool ${SERVER_ID}_echo with message "ollama-cloud-mcp-demo". Final answer: quote the echoed content only.
-Call mcp_list_servers once more. Final answer: one short sentence confirming the demo server is still connected and naming one of its tools.
+EDIT/REPLACE: Use mcp_upsert_server exactly once with these arguments (JSON): ${EDIT_JSON} This replaces the same server-id with updated timeouts. Then call mcp_list_servers. Final answer: confirm the server is still connected and name one tool.
+REMOVE: Use mcp_remove_server with server-id "${SERVER_ID}". Then call mcp_list_servers. Final answer: report the server count only (should be 0).
 EOF
 
 type_line() {

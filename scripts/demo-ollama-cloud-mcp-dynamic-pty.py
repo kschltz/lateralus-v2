@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Drive an interactive lateralus session: Ollama Cloud + dynamic MCP upsert.
+"""Drive an interactive lateralus session: Ollama Cloud + dynamic MCP lifecycle.
 
 Starts a local fake Streamable HTTP MCP server, then runs lateralus against
-Ollama Cloud. The agent lists MCP servers (empty), upserts the fake server,
-calls an MCP tool, and confirms the new tools are live — all mid-session.
+Ollama Cloud. The agent:
+
+  1. lists MCP servers (empty boot seed)
+  2. upserts (ADD) the fake HTTP server
+  3. calls a discovered MCP tool
+  4. upserts the same server-id again (EDIT / replace) with a tweaked config
+  5. removes the server
+  6. lists again (empty)
 
 Requires OLLAMA_API_KEY. Prefer this PTY driver for screen recordings.
 """
@@ -56,10 +62,17 @@ def start_fake_mcp() -> tuple[subprocess.Popen, str]:
 
 
 def prompts_for(url: str) -> list[str]:
-    upsert_args = (
+    add_args = (
         f'{{"server-id":"{SERVER_ID}",'
         f'"config":{{"transport":"http","url":"{url}",'
-        f'"allow-http?":true,"allow-loopback?":true}}}}'
+        f'"allow-http?":true,"allow-loopback?":true,'
+        f'"request-timeout-ms":15000}}}}'
+    )
+    edit_args = (
+        f'{{"server-id":"{SERVER_ID}",'
+        f'"config":{{"transport":"http","url":"{url}",'
+        f'"allow-http?":true,"allow-loopback?":true,'
+        f'"request-timeout-ms":30000,"max-result-bytes":32768}}}}'
     )
     return [
         (
@@ -67,8 +80,8 @@ def prompts_for(url: str) -> list[str]:
             "dynamic-enabled? and the server count only."
         ),
         (
-            "Use mcp_upsert_server exactly once with these arguments "
-            f"(JSON): {upsert_args} "
+            "ADD: Use mcp_upsert_server exactly once with these arguments "
+            f"(JSON): {add_args} "
             "Then call mcp_list_servers. Final answer: the server-id and "
             "the tool names that were discovered."
         ),
@@ -78,9 +91,16 @@ def prompts_for(url: str) -> list[str]:
             "content only."
         ),
         (
-            "Call mcp_list_servers once more. Final answer: one short "
-            "sentence confirming the demo server is still connected and "
-            "naming one of its tools."
+            "EDIT/REPLACE: Use mcp_upsert_server exactly once with these "
+            f"arguments (JSON): {edit_args} "
+            "This replaces the same server-id with updated timeouts. "
+            "Then call mcp_list_servers. Final answer: confirm the server "
+            "is still connected and name one tool."
+        ),
+        (
+            f"REMOVE: Use mcp_remove_server with server-id "
+            f'"{SERVER_ID}". Then call mcp_list_servers. Final answer: '
+            "report the server count only (should be 0)."
         ),
     ]
 
@@ -88,7 +108,8 @@ def prompts_for(url: str) -> list[str]:
 def banner(url: str) -> None:
     print()
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║  lateralus — Ollama Cloud + dynamic MCP upsert demo          ║")
+    print("║  lateralus — Ollama Cloud + dynamic MCP lifecycle demo       ║")
+    print("║  flow: list → ADD → use → EDIT → REMOVE → list               ║")
     print(f"║  model: {START_MODEL}")
     print(f"║  endpoint: {BASE_URL}")
     print(f"║  fake MCP: {url}")

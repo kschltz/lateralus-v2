@@ -64,7 +64,7 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :enrich   → memory recall (when memory plugin present)          │
 │  :compose  → compose-context, inject-tools                       │
 │  :llm      → llm-call-with-self-heal, llm-call, parse-response    │
-│  :tools    → dispatch-tools, harvest-transitions, compose-tool-results, apply-transitions │
+│  :tools    → dispatch-tools, harvest-transitions, apply-transitions, compose-tool-results │
 │  :finalize → tool-loop-interceptor                                │
 │  :history-summarize → summarize-history (compacts long histories) │
 │  :history  → store-exchange                                      │
@@ -97,7 +97,7 @@ leaves after it, so its `:leave` sees the freshly-written
 | `:compose` | enter | build `:llm/request` from state + recall + user text | base plugin (`compose-context`) |
 | `:llm` | enter | call the LLM, parse response | base plugin (`llm-call-with-self-heal`, `llm-call`, `parse-response`) |
 | `:dispatch` | enter | reserved slot (no interceptor wired) | — |
-| `:tools` | enter | dispatch tools; harvest/apply staged state transitions; compose tool results | base plugin (`dispatch-tools`, `harvest-transitions`, `compose-tool-results`, `apply-transitions`) |
+| `:tools` | enter | dispatch tools; harvest/apply staged state transitions (incl. MCP reconcile); compose tool results | base plugin (`dispatch-tools`, `harvest-transitions`, `apply-transitions`, `compose-tool-results`) |
 | `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop-interceptor`) |
 | `:history-summarize` | leave | compact long `:agent/history` into one summary + protected window | base plugin (`summarize-history`); optional `summarizer-plugin` overrides the LlmClient |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |

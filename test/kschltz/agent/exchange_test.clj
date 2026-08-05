@@ -59,8 +59,8 @@
             ::ix/parse-response
             ::loop/dispatch-tools
             :kschltz.agent.transitions.interceptors/harvest-transitions
-            ::loop/compose-tool-results
             :kschltz.agent.transitions.interceptors/apply-transitions
+            ::loop/compose-tool-results
             ::loop/tool-loop
             ::loop/ensure-text-response
             ::ix/summarize-history

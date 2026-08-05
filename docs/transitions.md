@@ -43,8 +43,9 @@ before the next ReAct LLM call.
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
 class (`:stub` vs `:http`), memory, and embedder are **not** swappable
-this way. MCP servers **are** swappable when
-`:lateralus/mcp-tools {:dynamic {:enabled? true}}` — see
+this way. MCP servers **are** swappable by default
+(`:lateralus/mcp-tools {:dynamic {:enabled? true}}`); set
+`:dynamic {:enabled? false}` to lock — see
 [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
 
 ## Tool surface
@@ -83,14 +84,16 @@ Integrant:
 
 ```
 dispatch-tools
-  → harvest-transitions   ; enqueue ops, redact tool results
-  → compose-tool-results  ; append assistant+tool msgs
-  → apply-transitions     ; merge state + patch :llm/request
+  → harvest-transitions   ; enqueue ops, redact secrets in tool results
+  → apply-transitions     ; merge state, reconcile MCP I/O, patch :llm/request
+  → compose-tool-results  ; append assistant+tool msgs (post-reconcile)
   → tool-loop / finalize
 ```
 
 The ReAct follow-up chain in `kschltz.agent.loop` mirrors the same order so a
-mid-loop `set_llm_config` affects the next LLM call of the same exchange.
+mid-loop `set_llm_config` / `mcp_*` call affects the next LLM call of the same
+exchange. MCP connect/close/refresh runs in apply (not in tool `-invoke`),
+matching the monadic propose-then-commit pattern of LLM config updates.
 
 ## Demo: Ollama Cloud mid-session switch
 
@@ -115,7 +118,8 @@ python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py
 
 Starts a local fake Streamable HTTP MCP server, runs against Ollama
 Cloud with empty `:servers` and `:dynamic {:enabled? true}`, then the
-agent lists → upserts → calls `demo_echo` → lists again.
+agent lists → ADD (`mcp_upsert_server`) → calls `demo_echo` →
+EDIT/replace → REMOVE → lists (count 0).
 Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
 
 ## Adding a new transition op

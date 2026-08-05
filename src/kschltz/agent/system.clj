@@ -236,8 +236,8 @@
 (defmethod ig/init-key :lateralus/mcp-tools [_ opts]
   "Build an `McpSession` from configured servers. Default is
    empty/disabled (air-gapped). Non-empty servers spawn/connect at
-   init; `halt-key!` closes them. Set `:dynamic {:enabled? true}` to
-   allow mid-session upsert/remove via control tools."
+   init; `halt-key!` closes them. Mid-session upsert/remove via control
+   tools is on by default; set `:dynamic {:enabled? false}` to lock."
   (tools.mcp/mcp-session (or opts {})))
 
 (defmethod ig/halt-key! :lateralus/mcp-tools [_ session]
@@ -480,7 +480,7 @@
    :lateralus/runtime-tools        {}
    :lateralus/web-tools            {:provider :none}
    :lateralus/mcp-tools            {:servers {}
-                                    :dynamic {:enabled? false}}
+                                    :dynamic {:enabled? true}}
    :lateralus/mcp-session-tools    {:session (ig/ref :lateralus/mcp-tools)}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)

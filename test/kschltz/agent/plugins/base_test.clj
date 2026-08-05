@@ -31,8 +31,8 @@
              (mapv :name (by-slot p :llm))))
       (is (= [::loop/dispatch-tools
               ::tr.ix/harvest-transitions
-              ::loop/compose-tool-results
-              ::tr.ix/apply-transitions]
+              ::tr.ix/apply-transitions
+              ::loop/compose-tool-results]
              (mapv :name (by-slot p :tools))))
       (is (= [::loop/tool-loop ::loop/ensure-text-response]
              (mapv :name (by-slot p :finalize))))
@@ -55,8 +55,8 @@
               ::ix/parse-response
               ::loop/dispatch-tools
               ::tr.ix/harvest-transitions
-              ::loop/compose-tool-results
               ::tr.ix/apply-transitions
+              ::loop/compose-tool-results
               ::loop/tool-loop
               ::loop/ensure-text-response
               ::ix/summarize-history

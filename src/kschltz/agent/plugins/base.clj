@@ -11,7 +11,7 @@
      :compose           — compose-context, inject-tools
      :llm               — llm-call-with-self-heal, llm-call, parse-response
      :tools             — dispatch-tools, harvest-transitions,
-                          compose-tool-results, apply-transitions
+                          apply-transitions, compose-tool-results
      :finalize          — tool-loop, ensure-text-response
      :history-summarize — summarize-history-interceptor (long-context compaction)
      :history           — store-exchange
@@ -52,8 +52,8 @@
        (assoc ix/parse-response :slot :llm)
        (assoc (loop/dispatch-tools-interceptor) :slot :tools)
        (assoc (tr.ix/harvest-transitions-interceptor) :slot :tools)
-       (assoc (loop/compose-tool-results-interceptor) :slot :tools)
        (assoc (tr.ix/apply-transitions-interceptor) :slot :tools)
+       (assoc (loop/compose-tool-results-interceptor) :slot :tools)
        (assoc (loop/tool-loop-interceptor react-loop) :slot :finalize)
        (assoc (loop/ensure-text-response-interceptor react-loop) :slot :finalize)
        (assoc ix/store-exchange :slot :history)

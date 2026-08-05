@@ -183,8 +183,9 @@
               :lateralus/web-tools            {:provider web-prov}
               :lateralus/runtime-tools        {:enabled? (boolean (:runtime groups))
                                                :network? true}
-              ;; MCP client: always present, empty by default (air-gapped).
-              :lateralus/mcp-tools            {:servers {}}
+              ;; MCP client: empty boot seed; dynamic upsert/remove on.
+              :lateralus/mcp-tools            {:servers {}
+                                               :dynamic {:enabled? true}}
               :lateralus/loop-opts            {:max-tool-calls-per-turn 100
                                                :max-tool-calls-per-exchange 20
                                                :tool-content-caps {"clojure_eval" 12000

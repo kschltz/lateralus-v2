@@ -11,20 +11,24 @@ transitions, without `add-mcp-tool!`:
 1. **`McpSession`** (`kschltz.agent.tools.mcp.session`) — Integrant-owned;
    connect / close / refresh / live registry.
 2. **Control tools** (`mcp_list_servers`, `mcp_upsert_server`,
-   `mcp_remove_server`, `mcp_refresh_server`) — side effects in `-invoke`.
-3. **Pure transitions** — `:mcp-upsert-server` / `:mcp-remove-server` /
-   `:mcp-refresh-server` record durable `:mcp/servers` intent.
+   `mcp_remove_server`, `mcp_refresh_server`) — mutating tools are **pure
+   proposers** (same monadic pattern as `set_llm_config`); they emit
+   transition envelopes only. `mcp_list_servers` is read-only.
+3. **Apply/reconcile** — harvest enqueues ops; apply reconciles live
+   `McpSession` I/O, records durable `:mcp/servers` intent, and rewrites
+   tool results with discovered tools or errors (before compose).
 4. **`tools-plugin`** — seeds `static ∪ session.registry` every stage so
    ReAct follow-ups see new tools same-exchange.
-5. **Policy** — `:dynamic {:enabled? false}` by default; upsert/remove
-   refuse until opted in. List/refresh always allowed for connected servers.
+5. **Policy** — `:dynamic {:enabled? true}` by default in JVM runtime
+   configs; set false to lock upsert/remove. List/refresh always allowed
+   for connected servers. Native-image configs keep dynamic off.
 
 ## Config shape
 
 ```clojure
 :lateralus/mcp-tools
 {:servers {}                          ;; boot seed (air-gapped default)
- :dynamic {:enabled? true}}           ;; opt-in for agent upsert/remove
+ :dynamic {:enabled? true}}           ;; default on; set false to lock
 
 :lateralus/mcp-session-tools
 {:session #ig/ref :lateralus/mcp-tools}
@@ -56,7 +60,7 @@ in model-visible envelopes.
 
 | Question | Default |
 |----------|---------|
-| Policy | Dynamic **disabled** until `:dynamic {:enabled? true}` |
+| Policy | Dynamic **enabled** by default; `:dynamic {:enabled? false}` locks |
 | Config shape | Reuse existing server schemas; redact secrets |
 | Same id as boot | **Replace** (upsert) after closing old client |
 | Visibility | **Same-exchange** via live registry merge |

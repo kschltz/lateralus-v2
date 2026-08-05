@@ -20,7 +20,7 @@ See [`docs/dynamic-mcp-tool-setup.md`](../../docs/dynamic-mcp-tool-setup.md).
 
 ## Phase 3 — upsert / remove
 
-- [x] `:dynamic` policy gate (default off)
+- [x] `:dynamic` policy gate (default on in JVM configs; native off)
 - [x] Control tools + closed transition ops
 - [x] `tools-plugin` merges `static ∪ session.registry` each seed
 - [x] Same-exchange visibility in ReAct follow-ups

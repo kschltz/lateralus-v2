@@ -17,11 +17,13 @@ Resources, prompts, and OAuth interactive login are follow-ups.
 - **Air-gapped default.** `:lateralus/mcp-tools {:servers {}}` connects nothing.
 - **Protocol + Malli.** Process/HTTP/JSON-RPC I/O goes through `McpTransport` /
   `McpClient` / `McpSession`; impl functions are Malli-instrumented.
-- **No `add-mcp-tool!`.** Mid-session changes go through control tools +
-  closed transitions (`mcp_upsert_server`, …). See
-  [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
-- **Dynamic policy opt-in.** `:dynamic {:enabled? true}` required for
-  upsert/remove. List/refresh work for already-connected servers.
+- **No `add-mcp-tool!`.** Mid-session changes go through control tools that
+  propose closed transitions (`mcp_upsert_server`, …); live connect/close
+  runs in the transitions apply stage — same monadic pattern as
+  `set_llm_config`. See [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
+- **Dynamic policy on by default.** JVM configs enable mid-session
+  upsert/remove; set `:dynamic {:enabled? false}` to lock. List/refresh
+  work for already-connected servers. Native-image configs keep dynamic off.
 - **Portable tool names.** MCP names are remapped (`-` → `_`) and **always
   prefixed** with the sanitized server id (`filesystem_read_file`).
 - **JVM-only for live servers.** Native-image keeps empty servers.
@@ -80,19 +82,22 @@ SIGTERM/SIGKILL-reaps stdio children).
 
 ### Mid-session (dynamic)
 
+Default JVM configs already enable this:
+
 ```clojure
 {:lateralus/mcp-tools
  {:servers {}
   :dynamic {:enabled? true}}}
 ```
 
-Then the agent can call `mcp_upsert_server` / `mcp_remove_server` /
+The agent can call `mcp_upsert_server` / `mcp_remove_server` /
 `mcp_refresh_server` / `mcp_list_servers`. Upserts replace same server-id
 after closing the prior client. New tools are visible on the next LLM
-call of the same exchange.
+call of the same exchange. Set `:dynamic {:enabled? false}` to refuse
+upsert/remove.
 
 Ollama Cloud demo (requires `OLLAMA_API_KEY`; starts a local fake HTTP
-MCP server, then upserts it mid-session):
+MCP server, then ADD → use → EDIT → REMOVE mid-session):
 
 ```bash
 python3 scripts/demo-ollama-cloud-mcp-dynamic-pty.py

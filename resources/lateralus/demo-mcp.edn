@@ -25,7 +25,9 @@
     :args ["-M:dev" "-m" "fake-mcp-server"]
     :startup-timeout-ms 120000
     :request-timeout-ms 30000
-    :max-result-bytes 65536}}}
+    :max-result-bytes 65536}}
+ :dynamic {:enabled? true}
+}
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
  :lateralus/loop-opts            {:max-tool-calls-per-turn 100

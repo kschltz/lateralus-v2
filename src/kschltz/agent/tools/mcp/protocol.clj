@@ -38,10 +38,12 @@
 (defprotocol McpSession
   "Process/session boundary for the set of live MCP servers.
 
-   Integrant owns one `McpSession` per system. Control tools call the
-   mutating methods during `-invoke`; `transitions.clj` stays pure and
-   only records durable `:mcp/servers` intent. `-registry` is read on
-   every tools-plugin seed so ReAct follow-ups see upserts same-exchange."
+   Integrant owns one `McpSession` per system. Control tools propose
+   closed transitions (like `set_llm_config`); the transitions apply
+   interceptor calls mutating methods to reconcile live clients, while
+   `transitions.clj` records durable `:mcp/servers` intent. `-registry`
+   is read on every tools-plugin seed so ReAct follow-ups see upserts
+   same-exchange."
   (-upsert-server! [session server-id server-cfg opts]
     "Connect (or replace) one server, discover tools, adapt them.
      `opts` may include `:reserved-names` (set of non-MCP tool names
