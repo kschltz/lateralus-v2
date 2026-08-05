@@ -69,7 +69,7 @@
 
   (-follow-up-chain [this _registry]
     ;; Order mirrors the base chain's :llm -> :tools(dispatch,
-    ;; harvest-transitions, compose, apply-transitions) -> :finalize
+    ;; harvest-transitions, apply-transitions, compose) -> :finalize
     ;; slots. compose-tool-results MUST run AFTER dispatch-tools so it
     ;; appends THIS turn's freshly-produced :tool/results (not the
     ;; previous turn's stale ones). The previous turn's results are
@@ -80,16 +80,17 @@
     ;; the [assistant(tool_calls), tool*] block and growing messages
     ;; ~2x per turn — the "hands off before complete" root cause.)
     ;; Transition harvest/apply must mirror the base :tools slot so a
-    ;; set_llm_config call mid-ReAct patches :llm/request before the
-    ;; next follow-up llm-call.
+    ;; set_llm_config / mcp_* call mid-ReAct patches :llm/request (and
+    ;; reconciles MCP) before the next follow-up llm-call. Apply runs
+    ;; before compose so MCP reconcile outcomes land in tool messages.
     [(bump-loop-depth-interceptor)
      (llm-call-with-self-heal)
      ix/llm-call
      ix/parse-response
      (dispatch-tools-interceptor)
      (tr.ix/harvest-transitions-interceptor)
-     (compose-tool-results-interceptor)
      (tr.ix/apply-transitions-interceptor)
+     (compose-tool-results-interceptor)
      (tool-loop-interceptor this)
      (ensure-text-response-interceptor this)]))
 

@@ -24,7 +24,7 @@
   "Local stdio MCP server (Claude Desktop `command`/`args`/`env` shape).
    `:transport` defaults to `:stdio` when `:command` is present."
   [:map
-   [:transport {:optional true} [:enum :stdio]]
+   [:transport {:optional true} [:enum :stdio "stdio"]]
    [:command :string]
    [:args {:optional true} [:vector :string]]
    [:env {:optional true} [:map-of :string :string]]
@@ -44,7 +44,7 @@
    URL guards default to https-only + block private/loopback; flip
    `:allow-http?` / `:allow-loopback?` for local fake servers."
   [:map
-   [:transport {:optional true} [:enum :http]]
+   [:transport {:optional true} [:enum :http "http"]]
    [:url :string]
    [:headers {:optional true} [:map-of :string :string]]
    [:bearer-token {:optional true} :string]
@@ -62,13 +62,25 @@
 
 (defn- dispatch-server
   "Infer transport when `:transport` is omitted: `:command` → stdio,
-   `:url` → http."
+   `:url` → http. String transports from JSON tool args are accepted."
   [m]
-  (or (:transport m)
-      (cond
-        (contains? m :url) :http
-        (contains? m :command) :stdio
-        :else :stdio)))
+  (let [t (:transport m)
+        t (cond
+            (keyword? t) t
+            (string? t) (keyword t)
+            :else nil)]
+    (or t
+        (cond
+          (contains? m :url) :http
+          (contains? m :command) :stdio
+          :else :stdio))))
+
+(defn normalize-server-config
+  "Coerce JSON-round-tripped server config into schema-native keywords."
+  [cfg]
+  (let [cfg (or cfg {})]
+    (cond-> cfg
+      (string? (:transport cfg)) (update :transport keyword))))
 
 (def ServerConfig
   "One MCP server stanza — stdio or Streamable HTTP."
@@ -81,7 +93,8 @@
   [:or [:string {:min 1}] :keyword])
 
 (def DynamicPolicy
-  "Agent-driven upsert/remove gate. Default off (air-gapped)."
+  "Agent-driven upsert/remove gate. Runtime JVM configs default on;
+   native-image configs keep it off."
   [:map
    [:enabled? {:optional true} :boolean]])
 
@@ -102,11 +115,11 @@
 (defn valid-server-config?
   "True when `cfg` conforms to `ServerConfig`."
   [cfg]
-  (m/validate ServerConfig (or cfg {})))
+  (m/validate ServerConfig (normalize-server-config cfg)))
 
 (defn explain-server-config
   [cfg]
-  (m/explain ServerConfig (or cfg {})))
+  (m/explain ServerConfig (normalize-server-config cfg)))
 
 (def JsonRpcId
   [:or :int :string])

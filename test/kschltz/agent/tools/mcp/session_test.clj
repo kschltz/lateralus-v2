@@ -3,6 +3,7 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [fake-mcp-http-server :as fake-http]
             [kschltz.agent.llm.client :as llm-client]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
@@ -135,7 +136,16 @@
     (try
       (let [raw (tool/-invoke (get tools "mcp_refresh_server")
                               {:server-id "fake"} {})
-            parsed (json/parse-string raw true)]
+            harvested (tr.ix/harvest-transitions
+                       [{:call {:id "1" :function {:name "mcp_refresh_server"}}
+                         :result raw}])
+            out (tr.ix/apply-queued-transitions
+                 {:agent/mcp-session s
+                  :agent/transitions (:transitions harvested)
+                  :tool/results (:results harvested)
+                  :agent/state {}
+                  :agent/tool-registry (proto/-registry s)})
+            parsed (json/parse-string (:result (first (:tool/results out))) true)]
         (is (true? (:ok parsed)))
         (is (= "mcp-refresh-server" (name (keyword (:op (:transition parsed))))))
         (is (contains? (set (:tools parsed)) "fake_echo")))
@@ -144,31 +154,14 @@
 
 (deftest same-exchange-upsert-visible-to-follow-up
   (testing "mid-loop MCP upsert makes new tools visible on next LLM call"
-    (let [c (tu/fake-loopback-client "dyn")
+    (let [{:keys [url stop!]} (fake-http/start! 0)
           s (dynamic-session)
           control (session-tools/session-tools-registry s)
-          upsert-helper
-          (reify tool/Tool
-            (tool/-name [_] "test_upsert_mcp")
-            (tool/-description [_] "test helper that upserts an injected MCP client")
-            (tool/-input-schema [_] [:map])
-            (tool/-output-schema [_] :string)
-            (tool/-invoke [_ _args ctx]
-              (let [all (set (keys (or (:agent/tool-registry ctx) {})))
-                    mcp (set (keys (proto/-registry s)))
-                    reserved (into #{} (remove mcp) all)
-                    status (proto/-upsert-server!
-                            s "dyn"
-                            {:command "unused" :initialized? true :__client c}
-                            {:reserved-names reserved})]
-                (json/generate-string
-                 {:ok true
-                  :tools (:tools status)
-                  :transition {:op :mcp-upsert-server
-                               :server-id "dyn"
-                               :config {:command "unused"}}}
-                 {:pretty true}))))
-          registry (assoc control "test_upsert_mcp" upsert-helper)
+          registry control
+          server-cfg {:transport :http
+                      :url url
+                      :allow-http? true
+                      :allow-loopback? true}
           seen-tool-sets (atom [])
           client (reify llm-client/LlmClient
                    (-call [_ req]
@@ -184,8 +177,11 @@
                              :tool_calls
                              [{:id "c1"
                                :type "function"
-                               :function {:name "test_upsert_mcp"
-                                          :arguments "{}"}}]}}]}
+                               :function {:name "mcp_upsert_server"
+                                          :arguments
+                                          (json/generate-string
+                                           {:server-id "dyn"
+                                            :config server-cfg})}}]}}]}
                          (= 2 step)
                          (if (contains? names "dyn_echo")
                            {:choices
@@ -212,17 +208,17 @@
                      :initial-state {:model "m"
                                      :base-url "http://test"
                                      :agent/system-message "test"}
-                     :agent/loop-opts {:max-loop-depth 5}}
-          rt (runtime/start agent-map "sess-mcp-dyn")
-          result (runtime/send-message rt "wire mcp then echo")
-          stopped (runtime/stop rt)]
+                     :agent/loop-opts {:max-loop-depth 5}}]
       (try
-        (is (str/includes? (str (:exchange/response result)) "done via mcp"))
-        (is (contains? (second @seen-tool-sets) "dyn_echo")
-            "second LLM call should see dyn_echo after upsert")
-        (is (= {:command "unused"}
-               (select-keys (get-in stopped [:mcp/servers "dyn"]) [:command]))
-            "durable :mcp/servers records upsert")
+        (let [rt (runtime/start agent-map "sess-mcp-dyn")
+              result (runtime/send-message rt "wire mcp then echo")
+              stopped (runtime/stop rt)]
+          (is (str/includes? (str (:exchange/response result)) "done via mcp"))
+          (is (contains? (second @seen-tool-sets) "dyn_echo")
+              "second LLM call should see dyn_echo after upsert")
+          (is (= url (get-in stopped [:mcp/servers "dyn" :url]))
+              "durable :mcp/servers records upsert"))
         (finally
-          (proto/halt-session! s))))))
+          (proto/halt-session! s)
+          (stop!))))))
 

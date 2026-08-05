@@ -17,9 +17,10 @@ Resources, prompts, and OAuth interactive login are follow-ups.
 - **Air-gapped default.** `:lateralus/mcp-tools {:servers {}}` connects nothing.
 - **Protocol + Malli.** Process/HTTP/JSON-RPC I/O goes through `McpTransport` /
   `McpClient` / `McpSession`; impl functions are Malli-instrumented.
-- **No `add-mcp-tool!`.** Mid-session changes go through control tools +
-  closed transitions (`mcp_upsert_server`, …). See
-  [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
+- **No `add-mcp-tool!`.** Mid-session changes go through control tools that
+  propose closed transitions (`mcp_upsert_server`, …); live connect/close
+  runs in the transitions apply stage — same monadic pattern as
+  `set_llm_config`. See [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md).
 - **Dynamic policy on by default.** JVM configs enable mid-session
   upsert/remove; set `:dynamic {:enabled? false}` to lock. List/refresh
   work for already-connected servers. Native-image configs keep dynamic off.

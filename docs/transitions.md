@@ -84,14 +84,16 @@ Integrant:
 
 ```
 dispatch-tools
-  → harvest-transitions   ; enqueue ops, redact tool results
-  → compose-tool-results  ; append assistant+tool msgs
-  → apply-transitions     ; merge state + patch :llm/request
+  → harvest-transitions   ; enqueue ops, redact secrets in tool results
+  → apply-transitions     ; merge state, reconcile MCP I/O, patch :llm/request
+  → compose-tool-results  ; append assistant+tool msgs (post-reconcile)
   → tool-loop / finalize
 ```
 
 The ReAct follow-up chain in `kschltz.agent.loop` mirrors the same order so a
-mid-loop `set_llm_config` affects the next LLM call of the same exchange.
+mid-loop `set_llm_config` / `mcp_*` call affects the next LLM call of the same
+exchange. MCP connect/close/refresh runs in apply (not in tool `-invoke`),
+matching the monadic propose-then-commit pattern of LLM config updates.
 
 ## Demo: Ollama Cloud mid-session switch
 
