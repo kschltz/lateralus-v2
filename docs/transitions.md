@@ -52,6 +52,12 @@ before the next ReAct LLM call.
 {:op :set-tool-enabled
  :tool-name "file_write"
  :enabled false}
+
+{:op :set-memory-policy
+ :top-y 8
+ :last-n 12
+ :recall-enabled true
+ :persist-enabled false}
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -116,6 +122,13 @@ in-flight request, so changes affect the next same-exchange LLM call and later
 exchanges. Only tools pre-registered by Integrant or discovered through the
 MCP session can be selected; arbitrary Tool instances cannot be injected.
 `set_tool_enabled` and `runtime_describe` are protected recovery tools.
+
+### `set_memory_policy`
+
+Updates the memory interceptors' session overlay: recall result counts and
+independent recall/persistence switches. The memory plugin reads this policy
+from immutable `:agent/state` on every exchange. Backend and embedder instances
+remain Integrant-managed and are not replaced by this pure-data transition.
 
 ## Pipeline (`:tools` slot)
 

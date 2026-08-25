@@ -24,7 +24,7 @@
    `:mcp/servers` is replaced wholesale on merge (see runtime)."
   (into llm-config-keys
         #{:mcp/servers :agent/system-message :agent/loop-opts
-          :agent/disabled-tools}))
+          :agent/disabled-tools :agent/memory-policy}))
 
 (def LoopOptsPatch
   "Allowlisted per-session loop policy fields."
@@ -98,6 +98,27 @@
    [:tool-name [:string {:min 1}]]
    [:enabled :boolean]])
 
+(def MemoryPolicyPatch
+  [:map {:closed true}
+   [:top-y {:optional true} [:int {:min 1}]]
+   [:last-n {:optional true} [:int {:min 1}]]
+   [:recall-enabled {:optional true} :boolean]
+   [:persist-enabled {:optional true} :boolean]])
+
+(def SetMemoryPolicyOp
+  [:and
+   [:map {:closed true}
+    [:op [:= :set-memory-policy]]
+    [:top-y {:optional true} [:int {:min 1}]]
+    [:last-n {:optional true} [:int {:min 1}]]
+    [:recall-enabled {:optional true} :boolean]
+    [:persist-enabled {:optional true} :boolean]]
+   [:fn {:error/message "set-memory-policy requires at least one policy field"}
+    (fn [op]
+      (boolean
+       (some #(contains? op %)
+             [:top-y :last-n :recall-enabled :persist-enabled])))]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
@@ -107,7 +128,8 @@
    [:mcp-refresh-server McpRefreshServerOp]
    [:set-system-message SetSystemMessageOp]
    [:set-loop-opts SetLoopOptsOp]
-   [:set-tool-enabled SetToolEnabledOp]])
+   [:set-tool-enabled SetToolEnabledOp]
+   [:set-memory-policy SetMemoryPolicyOp]])
 
 (def Transitions
   [:vector Transition])
@@ -171,6 +193,13 @@
                               (disj current (:tool-name op))
                               (conj current (:tool-name op)))]
                 (vec (sort updated)))))
+    :set-memory-policy
+    (update (or state {}) :agent/memory-policy
+            (fn [policy]
+              (merge (or policy {})
+                     (select-keys op
+                                  [:top-y :last-n
+                                   :recall-enabled :persist-enabled]))))
     state))
 
 (defn apply-transitions
@@ -212,7 +241,8 @@
                            applied)
         system-message-touched? (some #(= :set-system-message (:op %)) applied)
         loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)
-        tools-touched? (some #(= :set-tool-enabled (:op %)) applied)]
+        tools-touched? (some #(= :set-tool-enabled (:op %)) applied)
+        memory-touched? (some #(= :set-memory-policy (:op %)) applied)]
     (cond-> llm-patch
       mcp-touched?
       (assoc :mcp/servers (or (:mcp/servers after) {}))
@@ -221,7 +251,9 @@
       loop-opts-touched?
       (assoc :agent/loop-opts (:agent/loop-opts after))
       tools-touched?
-      (assoc :agent/disabled-tools (or (:agent/disabled-tools after) [])))))
+      (assoc :agent/disabled-tools (or (:agent/disabled-tools after) []))
+      memory-touched?
+      (assoc :agent/memory-policy (:agent/memory-policy after)))))
 
 (defn redact-transition
   "Return a logging/model-safe copy of `op` with secrets replaced by

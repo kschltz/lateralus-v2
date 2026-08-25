@@ -21,7 +21,8 @@
 (deftest config-registry-has-session-configuration-tools
   (let [reg (cfg-registry)]
     (is (= #{"set_llm_config" "set_system_message"
-             "set_loop_policy" "set_tool_enabled" "list_llm_models"}
+             "set_loop_policy" "set_tool_enabled" "set_memory_policy"
+             "list_llm_models"}
            (set (keys reg))))
     (is (every? tool/tool? (vals reg)))))
 
@@ -120,6 +121,26 @@
     (is (= "unknown-tool" (:error unknown)))
     (is (= "protected-tool" (:error protected)))
     (is (nil? (:transition protected)))))
+
+(deftest set-memory-policy-emits-closed-transition
+  (let [reg (cfg-registry)
+        t (get reg "set_memory_policy")
+        result (-> (tool/invoke-tool
+                    t
+                    {:top-y 8
+                     :recall-enabled false}
+                    {:agent/state
+                     {:agent/memory-policy {:last-n 3}}})
+                   (json/parse-string true))]
+    (is (true? (:ok result)))
+    (is (= 3 (get-in result [:before :last-n])))
+    (is (= 8 (get-in result [:after :top-y])))
+    (is (false? (get-in result [:after :recall-enabled])))
+    (is (= "set-memory-policy"
+           (name (keyword (get-in result [:transition :op])))))
+    (is (str/includes?
+         (tool/invoke-tool t {} {})
+         "input validation failed"))))
 
 (deftest list-llm-models-uses-catalog
   (let [t (get (cfg-registry) "list_llm_models")

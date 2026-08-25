@@ -63,6 +63,23 @@
     (is (= [] (:agent/disabled-tools enabled)))
     (is (= ["file_write"] (:agent/disabled-tools delta)))))
 
+(deftest memory-policy-transition-is-merged-and-durable
+  (let [op {:op :set-memory-policy
+            :top-y 7
+            :recall-enabled false}
+        before {:agent/memory-policy {:last-n 4
+                                      :persist-enabled true}}
+        after (tr/apply-transition before op)
+        delta (tr/durable-delta before after [op])]
+    (is (tr/valid-transition? op))
+    (is (= {:top-y 7
+            :last-n 4
+            :recall-enabled false
+            :persist-enabled true}
+           (:agent/memory-policy after)))
+    (is (= (:agent/memory-policy after)
+           (:agent/memory-policy delta)))))
+
 (deftest apply-transitions-folds-left-to-right
   (let [{:keys [state applied]}
         (tr/apply-transitions {:model "a" :base-url "http://old"}

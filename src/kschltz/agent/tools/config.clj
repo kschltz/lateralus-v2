@@ -48,6 +48,12 @@
    [:tool-name [:string {:min 1}]]
    [:enabled :boolean]])
 
+(def SetMemoryPolicyInput
+  [:and
+   tr/MemoryPolicyPatch
+   [:fn {:error/message "provide at least one memory policy field"}
+    (fn [m] (boolean (seq m)))]])
+
 (def ^:private protected-runtime-tools
   #{"set_tool_enabled" "runtime_describe"})
 
@@ -166,6 +172,24 @@
                        :tool-name tool-name
                        :enabled enabled}})))))
 
+(defrecord SetMemoryPolicyTool []
+  tool/Tool
+  (-name [_] "set_memory_policy")
+  (-description [_]
+    "Update this session's memory behavior through an allowlisted transition: semantic result count (`top-y`), recent-message count (`last-n`), recall enablement, and persistence enablement. This changes interceptor policy without replacing the Integrant-managed backend or embedder.")
+  (-input-schema [_] SetMemoryPolicyInput)
+  (-output-schema [_] :string)
+  (-invoke [_ args ctx]
+    (let [before (or (get-in ctx [:agent/state :agent/memory-policy]) {})
+          after (merge before args)]
+      (tr/encode-result
+       {:ok true
+        :tool "set_memory_policy"
+        :pending "same-exchange"
+        :before before
+        :after after
+        :transition (assoc args :op :set-memory-policy)}))))
+
 (defrecord ListLlmModelsTool [catalog]
   tool/Tool
   (-name [_] "list_llm_models")
@@ -213,6 +237,7 @@
       "set_system_message" (->SetSystemMessageTool)
       "set_loop_policy"  (->SetLoopPolicyTool)
       "set_tool_enabled"  (->SetToolEnabledTool)
+      "set_memory_policy" (->SetMemoryPolicyTool)
       "list_llm_models"  (->ListLlmModelsTool cat)})))
 
 (m/=> config-registry

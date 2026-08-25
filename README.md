@@ -109,6 +109,8 @@ The agent can change its own LLM session knobs mid-run via staged
   per-tool-content limits for the current and later exchanges.
 - `set_tool_enabled` — enable or disable any pre-registered static or MCP tool
   for the session; recovery/introspection tools remain protected.
+- `set_memory_policy` — tune recall breadth or disable recall/persistence
+  without replacing the Integrant-managed backend or embedder.
 - `list_llm_models` — list models at the current (or overridden) endpoint
   behind the `ModelCatalog` protocol.
 
