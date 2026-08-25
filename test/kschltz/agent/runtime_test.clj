@@ -119,7 +119,10 @@
   (testing "send-message generates session-id, user-msg-id, assistant-msg-id
    on the per-exchange ctx"
     (let [events  (atom [])
-          runtime (runtime/start {:exchange-chain (noop-chain events)})]
+          chain (noop-chain events)
+          agent-map {:exchange-chain chain
+                     :agent/loop-opts {:max-loop-depth 3}}
+          runtime (runtime/start agent-map)]
       (runtime/send-message runtime "hello")
       (let [entered-ctx (-> @events first second)]
         (is (some? (:exchange/session-id entered-ctx))
@@ -131,7 +134,11 @@
         (is (= "hello" (:exchange/user-text entered-ctx))
             "user-text is present on the per-exchange ctx")
         (is (= (runtime/session-id runtime) (:exchange/session-id entered-ctx))
-            "the per-exchange session-id matches the runtime's session-id")))))
+            "the per-exchange session-id matches the runtime's session-id")
+        (is (= agent-map (:agent/agent-map entered-ctx))
+            "runtime descriptor and sub-agent tools can inspect the active agent-map")
+        (is (= chain (:agent/exchange-chain entered-ctx))
+            "runtime descriptor sees the exact ordered chain being executed")))))
 
 (deftest send-message-runs-chain-synchronously
   (testing "send-message runs the chain on the caller thread (MVP simplification).

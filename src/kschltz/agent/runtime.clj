@@ -58,17 +58,19 @@
     (let [user-msg-id      (str (random-uuid))
           assistant-msg-id (str (random-uuid))
           base-state       @(:state this)
+          chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
           ctx              {:exchange/session-id       session-id
                             :exchange/user-msg-id      user-msg-id
                             :exchange/assistant-msg-id assistant-msg-id
                             :exchange/user-text        user-text
                             :agent/state               base-state
+                            :agent/agent-map           agent-map
+                            :agent/exchange-chain      chain-to-run
                             :llm/client               (:agent/llm-client agent-map)
                             :memory/backend           (:memory-backend agent-map)
                             :embedder                 (:embedder agent-map)
                             :agent/log-sink           log-sink
                             :agent/loop-opts          (:agent/loop-opts agent-map)}
-          chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
           merged           (merge-state base-state

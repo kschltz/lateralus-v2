@@ -371,9 +371,9 @@
   (tools.filesystem/filesystem-registry opts))
 
 (defmethod ig/init-key :lateralus/self-awareness-tools [_ {:keys [workspace-root]}]
- "Returns the self-awareness tool registry (`self_status`). The tool
-   reads from the interceptor context, so it can be built at system
-   init time like any other tool."
+ "Returns the self-awareness tool registry (`self_status`,
+   `runtime_describe`). The tools read from the interceptor context, so
+   they can be built at system init time like any other tool."
   (tools.self/self-awareness-registry workspace-root))
 
 (defmethod ig/init-key :lateralus/config-tools

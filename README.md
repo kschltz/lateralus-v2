@@ -169,6 +169,14 @@ moves, and write verification. Replacement writes also create timestamped
 backups. These tools enter through the same `Tool` dispatch interceptor as
 every other agent capability.
 
+## Runtime introspection
+
+`runtime_describe` exposes the active runtime as redacted structured data. It
+can return the session summary and loop policy, registered tool contracts, the
+ordered interceptor chain, or all three. API keys and live implementation
+objects are never serialized. The tool reads the immutable per-exchange
+context; it does not bypass the transition/state-delta model.
+
 ## MCP client tools
 
 Lateralus can attach **stdio** MCP servers (Claude Desktop / Cursor

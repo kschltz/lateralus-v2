@@ -118,6 +118,8 @@ The context is an open map. Engine state (`::chain/queue`, `::chain/stack`, `::c
 | `:exchange/assistant-msg-id` | runtime | all stages | UUID for the assistant response |
 | `:exchange/user-text` | runtime | compose-context, memory plugin | the user's prompt |
 | `:agent/state` | runtime | compose-context | persistent state (LLM config, system message, history) |
+| `:agent/agent-map` | runtime | runtime inspection, sub-agent tools | active redacted-by-consumer runtime descriptor source |
+| `:agent/exchange-chain` | runtime | runtime inspection | exact ordered interceptor vector executing this exchange |
 | `:llm/client` | runtime | llm-call | Integrant-configured LlmClient (pre-wired from agent-map) |
 | `:embedder` | runtime | (available to interceptors) | Integrant-configured Embedder (pre-wired from agent-map) |
 | `:memory/backend` | runtime | (available to interceptors) | Integrant-configured MemoryBackend (pre-wired from agent-map) |
@@ -154,6 +156,19 @@ round-trip validation, backups for replacements, atomic moves, and post-write
 verification. `file_create` is strictly create-only and refuses an existing
 path. `file_update` validates all edits before taking the lock and rechecks a
 staleness sentinel at commit, so failed or racing edits produce zero writes.
+
+## Runtime introspection
+
+The `runtime_describe` tool reads the current immutable interceptor context and
+returns a redacted descriptor of the session summary, loop policy, state keys,
+registered tool contracts, and ordered interceptor chain. The outer runtime
+injects `:agent/agent-map` and `:agent/exchange-chain` into each exchange
+context; the tool selects safe data from those values and never returns API
+keys or live implementation objects. Its `section` input (`summary`, `tools`,
+`chain`, or `all`) lets the model bound output to the information it needs.
+
+This is inspection only. Runtime changes still use allowlisted transition
+envelopes harvested and applied in the `:tools` interceptor slot.
 
 ## Extension points
 
