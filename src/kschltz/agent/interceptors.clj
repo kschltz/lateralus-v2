@@ -29,8 +29,7 @@
      store-exchange   — leave stage; records the final exchange
      deliver-responses — leave stage; hands responses to listeners
      notify           — leave stage; fires on-thought / on-response"
-    (:require [cheshire.core :as json]
-              [clojure.string :as str]
+    (:require [clojure.string :as str]
               [kschltz.agent.chain :as chain]
               [kschltz.agent.interceptors.schema :as schema]
               [kschltz.agent.llm.client :as llm-client]
@@ -46,20 +45,6 @@
    replaces this with the real HTTP-backed implementation."
   []
   (llm-client/stub-client))
-
-(defn- debug-log!
-  [hypothesis-id location message data]
-  (try
-    (spit "/opt/cursor/logs/debug.log"
-          (str (json/generate-string
-                {:hypothesisId hypothesis-id
-                 :location location
-                 :message message
-                 :data data
-                 :timestamp (System/currentTimeMillis)})
-               "\n")
-          :append true)
-    (catch Throwable _ nil)))
 
 (defn call-llm
   "Invoke the LlmClient on ctx. Reads `:llm/client` (pre-wired by
@@ -448,13 +433,6 @@
    history — no double-persist."
   {:name ::error-boundary
    :error (fn [ctx ex]
-            ;; #region agent log
-            (debug-log! "D" "interceptors.clj:error-boundary"
-                        "Interceptor error handled"
-                        {:class (.getName (class ex))
-                         :message (ex-message ex)
-                         :stage (str (or (:chain/stage (ex-data ex)) :unknown))})
-            ;; #endregion
             (let [state        (:agent/state ctx)
                   prev-history (or (:agent/history state) [])
                   user-text    (:exchange/user-text ctx)
@@ -533,17 +511,10 @@
   {:name ::parse-response
    :enter (fn [ctx]
             (let [resp      (:llm/response ctx)
-                  thinking  (response-thinking resp)
-                  calls     (response-tool-calls resp)]
-              ;; #region agent log
-              (debug-log! "B" "interceptors.clj:parse-response"
-                          "Parsed LLM response"
-                          {:response-blank (str/blank? (response-text resp))
-                           :calls (mapv #(get-in % [:function :name]) calls)})
-              ;; #endregion
+                  thinking  (response-thinking resp)]
               (cond-> (assoc ctx
                              :exchange/response (response-text resp)
-                             :tool/calls        calls)
+                             :tool/calls        (response-tool-calls resp))
                 (seq thinking) (assoc :exchange/thinking thinking))))})
 
 (def store-exchange

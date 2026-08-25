@@ -29,20 +29,6 @@
   "Cap on Malli self-heal retries for invalid outgoing requests."
   3)
 
-(defn- debug-log!
-  [hypothesis-id location message data]
-  (try
-    (spit "/opt/cursor/logs/debug.log"
-          (str (json/generate-string
-                {:hypothesisId hypothesis-id
-                 :location location
-                 :message message
-                 :data data
-                 :timestamp (System/currentTimeMillis)})
-               "\n")
-          :append true)
-    (catch Throwable _ nil)))
-
 ;; ---- Loop protocol ----
 
 (defprotocol Loop
@@ -202,22 +188,7 @@
                                    (take limit all-calls)
                                    all-calls)
                   dropped-count  (- (count all-calls) (count capped-calls))
-                  ;; #region agent log
-                  _dispatch-before
-                  (debug-log! "C" "loop.clj:dispatch-tools:before"
-                              "Dispatch boundary entered"
-                              {:calls (mapv #(get-in % [:function :name]) capped-calls)
-                               :already already
-                               :limit limit})
-                  ;; #endregion
                   results        (tool/execute-tools registry ctx capped-calls)
-                  ;; #region agent log
-                  _dispatch-after
-                  (debug-log! "C" "loop.clj:dispatch-tools:after"
-                              "Dispatch boundary completed"
-                              {:result-count (count results)
-                               :calls (mapv #(get-in % [:call :function :name]) results)})
-                  ;; #endregion
                   ctx'           (-> ctx
                                      (assoc :tool/calls capped-calls
                                             :tool/results results)
@@ -374,15 +345,6 @@
                                                         (seq results)
                                                         implemented?)
                                      :else (-continue? loop ctx))]
-              ;; #region agent log
-              (debug-log! "A" "loop.clj:tool-loop"
-                          "Continuation decision"
-                          {:depth depth
-                           :ctx-max-depth ctx-max-depth
-                           :result-count (count results)
-                           :over-total over-total?
-                           :should-continue should-continue?})
-              ;; #endregion
               (cond
                 over-total?
                 (assoc ctx :agent/loop-continuing? false :agent/tool-cap-hit true)
@@ -586,15 +548,6 @@
                   ;; response with NO tool_calls is a clean final answer —
                   ;; deliver it as-is.
                   last-turn-called-tools? (seq (:tool/calls ctx))]
-              ;; #region agent log
-              (debug-log! "A" "loop.clj:ensure-text"
-                          "Ensure-text branch inputs"
-                          {:summary-attempts summary-attempts
-                           :continuing continuing?
-                           :tools-ran (boolean tools-ran?)
-                           :last-turn-called-tools (boolean last-turn-called-tools?)
-                           :response-blank (str/blank? response)})
-              ;; #endregion
               (cond
                 continuing? ctx
                 (and (not (str/blank? response)) (not last-turn-called-tools?)) ctx
