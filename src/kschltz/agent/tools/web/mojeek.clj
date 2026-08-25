@@ -412,7 +412,9 @@
    [:headers {:optional true} :map]])
 
 (m/=> default-http-fn [:=> [:cat HttpRequest] HttpResponse])
-(m/=> provider [:=> [:cat ProviderConfig] :any])
+(m/=> provider
+      [:=> [:cat ProviderConfig]
+       [:fn #(satisfies? protocol/WebProvider %)]])
 
 (mi/instrument! {:filters [(mi/-filter-ns
                             'kschltz.agent.tools.web.mojeek)]})

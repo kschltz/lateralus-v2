@@ -191,6 +191,6 @@
        [:vector :map]])
 
 (m/=> connect-http!
-      [:=> [:cat :map] :any])
+      [:=> [:cat :map] [:fn proto/transport?]])
 
 (mi/instrument! {:filters [(mi/-filter-ns 'kschltz.agent.tools.mcp.http)]})

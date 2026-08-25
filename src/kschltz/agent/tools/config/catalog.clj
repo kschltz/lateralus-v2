@@ -47,9 +47,10 @@
   (-list-models catalog opts))
 
 (m/=> stub-catalog [:function
-                    [:=> [:cat] :any]
-                    [:=> [:cat [:sequential :string]] :any]])
-(m/=> http-catalog [:=> [:cat] :any])
+                    [:=> [:cat] [:fn model-catalog?]]
+                    [:=> [:cat [:sequential :string]]
+                     [:fn model-catalog?]]])
+(m/=> http-catalog [:=> [:cat] [:fn model-catalog?]])
 (m/=> list-models [:=> [:cat :any ListModelsOpts] [:vector :string]])
 
 (defn instrument!

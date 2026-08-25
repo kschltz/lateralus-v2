@@ -134,7 +134,8 @@
 (m/=> post-embedding
       [:=> [:cat EmbeddingRequest] [:vector number?]])
 (m/=> http-embedder
-      [:=> [:cat HttpEmbedderOpts] :any])
+      [:=> [:cat HttpEmbedderOpts]
+       [:fn #(satisfies? embedding/Embedder %)]])
 
 (defn instrument!
   []

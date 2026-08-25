@@ -389,7 +389,8 @@
 (m/=> post-chat
       [:=> [:cat HttpCallOpts] schemas/ChatResponse])
 (m/=> http-client
-      [:=> [:cat HttpClientOpts] :any])
+      [:=> [:cat HttpClientOpts]
+       [:fn #(satisfies? lcm-client/LlmClient %)]])
 
 (defn instrument!
   []

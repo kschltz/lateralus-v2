@@ -26,7 +26,8 @@
 
 (m/=> embed* [:=> [:cat :any :string] [:vector number?]])
 (m/=> dimensions* [:=> [:cat :any] [:int {:min 1}]])
-(m/=> langchain4j-embedder [:=> [:cat] :any])
+(m/=> langchain4j-embedder
+      [:=> [:cat] [:fn #(satisfies? embedding/Embedder %)]])
 
 (mi/instrument!
  {:filters [(mi/-filter-ns
