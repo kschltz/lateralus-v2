@@ -6,7 +6,8 @@
   (:require [kschltz.agent.chain :as chain]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.plugin :as plugin]
-            [kschltz.agent.plugins.base :as plugins.base]))
+            [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.runtime-reload :as runtime-reload]))
 
 (def ^:private default-exchange-chain
   (plugin/assemble-chain [(plugins.base/base-plugin)]))
@@ -51,77 +52,6 @@
   (send-message [runtime user-text] "Run one exchange.")
   (stop [runtime] "Return the current merged state."))
 
-(def ^:private restart-required-namespaces
-  #{"kschltz.agent.runtime"
-    "kschltz.agent.chain"
-    "kschltz.agent.system"
-    "kschltz.agent.tool"
-    "kschltz.agent.transitions"})
-
-(defn- apply-runtime-reload!
-  "Consume a deferred runtime reload after the current exchange finishes."
-  [runtime request]
-  (let [namespaces (vec (distinct (:namespaces request)))
-        restart-required (vec (filter restart-required-namespaces namespaces))
-        rebuild (:agent/rebuild-chain (:agent-map runtime))]
-    (try
-      (cond
-        (seq restart-required)
-        (swap! (:state runtime)
-               (fn [state]
-                 (-> state
-                     (dissoc :agent/runtime-reload)
-                     (assoc :agent/runtime-reload-status
-                            {:ok false
-                             :status :restart-required
-                             :namespaces restart-required}))))
-
-        (not (fn? rebuild))
-        (swap! (:state runtime)
-               (fn [state]
-                 (-> state
-                     (dissoc :agent/runtime-reload)
-                     (assoc :agent/runtime-reload-status
-                            {:ok false
-                             :status :unavailable
-                             :namespaces namespaces}))))
-
-        :else
-        (do
-          (doseq [ns-name namespaces]
-            (require (symbol ns-name) :reload))
-          (let [new-chain (rebuild)]
-            (when-not (vector? new-chain)
-              (throw (ex-info "Runtime chain rebuild did not return a vector"
-                              {:namespaces namespaces})))
-            (reset! (:chain runtime) new-chain)
-            (swap! (:state runtime)
-                   (fn [state]
-                     (let [revision (inc
-                                     (get-in state
-                                             [:agent/runtime-reload-status
-                                              :revision]
-                                             0))]
-                       (-> state
-                           (dissoc :agent/runtime-reload)
-                           (assoc :agent/runtime-reload-status
-                                  {:ok true
-                                   :status :reloaded
-                                   :namespaces namespaces
-                                   :revision revision
-                                   :interceptor-count (count new-chain)}))))))))
-      (catch Throwable t
-        (swap! (:state runtime)
-               (fn [state]
-                 (-> state
-                     (dissoc :agent/runtime-reload)
-                     (assoc :agent/runtime-reload-status
-                            {:ok false
-                             :status :error
-                             :namespaces namespaces
-                             :error (or (ex-message t)
-                                        (.getName (class t)))}))))))))
-
 (defrecord RuntimeRecord [state agent-map session-id log-sink chain]
   AgentRuntime
   (session-id [_] session-id)
@@ -151,7 +81,7 @@
                                                      (usage-delta base-state (:llm/response result))))]
       (reset! (:state this) merged)
       (when-let [request (:agent/runtime-reload merged)]
-        (apply-runtime-reload! this request))
+        (runtime-reload/apply! this request))
       (cond-> result
         (:agent/runtime-reload-status @(:state this))
         (assoc :agent/runtime-reload-status
