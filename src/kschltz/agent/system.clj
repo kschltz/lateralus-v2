@@ -394,7 +394,8 @@
 (defmethod ig/init-key :lateralus/clojure-tools [_ opts]
  "Returns the Clojure structured-editing tool registry (clojure_query,
   clojure_add_require, clojure_remove_def, clojure_rename_symbol,
-  clojure_insert_form, clojure_edit_def, clojure_format_file)."
+  clojure_insert_form, clojure_edit_def, clojure_format_file,
+  clojure_lint)."
   (tools.clojure/clojure-registry opts))
 
 (defmethod ig/init-key :lateralus/runtime-tools [_ opts]

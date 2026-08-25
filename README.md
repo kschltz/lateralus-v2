@@ -191,6 +191,8 @@ The `clojure_*` structured-edit tools use the same mutation guarantees while
 preserving comments and whitespace through rewrite-clj. They reject non-
 Clojure targets, workspace/symlink escapes, blocked paths, and stale
 read-transform-write attempts with structured JSON errors.
+`clojure_lint` provides bounded, read-only clj-kondo findings after edits and
+returns a structured optional-capability error when clj-kondo is unavailable.
 
 ## Runtime introspection
 

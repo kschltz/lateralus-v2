@@ -42,9 +42,9 @@
   [registry name args]
   (json/parse-string (tool/invoke-tool (get registry name) args dummy-ctx) true))
 
-(deftest clojure-registry-contains-seven-tools
+(deftest clojure-registry-contains-eight-tools
   (let [registry (tools.clojure/clojure-registry)]
-    (is (= 7 (count registry)))
+    (is (= 8 (count registry)))
     (is (contains? registry "clojure_query"))
     (is (contains? registry "clojure_add_require"))
     (is (contains? registry "clojure_remove_def"))
@@ -52,6 +52,7 @@
     (is (contains? registry "clojure_insert_form"))
     (is (contains? registry "clojure_edit_def"))
     (is (contains? registry "clojure_format_file"))
+    (is (contains? registry "clojure_lint"))
     (is (every? tool/tool? (vals registry)))))
 
 (deftest query-lists-defs-and-requires

@@ -173,6 +173,10 @@ blocked-path, per-path lock, timestamped backup, atomic-landing, optimistic
 concurrency, and verification primitives. Their additional round-trip parse
 guard runs before commit, and non-Clojure targets receive a structured routing
 error instead of being edited as source.
+The adjacent `clojure_lint` tool runs a bounded local clj-kondo subprocess
+against policy-validated paths and returns structured findings without
+modifying files. It introduces no network boundary and degrades explicitly
+when the optional executable is unavailable.
 
 ## Runtime introspection
 

@@ -14,6 +14,7 @@
   (:require [cheshire.core :as json]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.clojure-impl :as impl]
+            [kschltz.agent.tools.clojure-lint :as lint]
             [rewrite-clj.zip :as z]
             [rewrite-clj.node :as n]))
 
@@ -351,16 +352,21 @@
    Accepts an optional `opts` map with:
      :workspace-root — root for resolving relative paths
      :max-read-bytes — cap for source reads (default 256 KB)
+     :blocked-paths  — forbidden path segments shared with file tools
+     :lint-runner    — optional diagnostics runner seam for tests
 
    When `:workspace-root` is omitted, the current working directory is
    used. All reads and writes enforce canonical workspace containment,
    blocked paths, and Clojure/EDN file types."
   ([] (clojure-registry {}))
-  ([{:keys [workspace-root max-read-bytes]}]
+  ([{:keys [workspace-root max-read-bytes blocked-paths lint-runner]}]
    {"clojure_query"         (query workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_add_require"   (add-require workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_remove_def"    (remove-def workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_rename_symbol" (rename-symbol workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_insert_form"   (insert-form workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_edit_def"      (edit-def workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure_format_file"   (format-file workspace-root (or max-read-bytes default-max-read-bytes))}))
+    "clojure_format_file"   (format-file workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_lint"          (lint/clojure-lint workspace-root
+                                               {:blocked-paths blocked-paths
+                                                :runner lint-runner})}))
