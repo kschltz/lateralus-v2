@@ -75,4 +75,10 @@
      (with-meta
        [(seed-registry-interceptor registry session)]
        {:plugin/name :tools
-        :plugin/rebuild (fn [] (tools-plugin registry opts))}))))
+        :plugin/rebuild
+        (fn []
+          (let [fresh-registry
+                (if-let [rebuild (-> registry meta :registry/rebuild)]
+                  (rebuild)
+                  registry)]
+            (tools-plugin fresh-registry opts)))}))))

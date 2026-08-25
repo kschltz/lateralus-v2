@@ -37,4 +37,17 @@
                      {:namespaces ["kschltz.agent.tools.file-path"]})
       (is (= :unavailable
              (get-in @(:state runtime)
-                     [:agent/runtime-reload-status :status]))))))
+                     [:agent/runtime-reload-status :status])))))
+  (testing "rebuild failures are captured and consume the request"
+    (let [runtime (fake-runtime
+                   (fn []
+                     (throw (ex-info "rebuild failed" {:phase :test}))))]
+      (reload/apply! runtime
+                     {:namespaces ["kschltz.agent.tools.file-path"]})
+      (is (= :error
+             (get-in @(:state runtime)
+                     [:agent/runtime-reload-status :status])))
+      (is (= "rebuild failed"
+             (get-in @(:state runtime)
+                     [:agent/runtime-reload-status :error])))
+      (is (nil? (:agent/runtime-reload @(:state runtime)))))))

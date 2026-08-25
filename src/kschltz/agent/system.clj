@@ -98,6 +98,9 @@
   "Malli schema for :lateralus/llm-client."
   [:multi {:dispatch :impl}
    [:stub [:map [:impl [:= :stub]]]]
+   [:provided [:map
+               [:impl [:= :provided]]
+               [:client [:fn #(satisfies? llm-client/LlmClient %)]]]]
    [:http [:map
            [:impl [:= :http]]
            [:base-url :string]
@@ -203,6 +206,43 @@
 (defmethod ig/assert-key :lateralus/runtime-tools [_ config]
   (assert-malli! :lateralus/runtime-tools runtime.schemas/RuntimeConfig config))
 
+(def ^:private HarnessToolConfig
+  [:map
+   [:workspace-root {:optional true} :string]])
+
+(def ^:private FileToolsConfig
+  [:map
+   [:workspace-root {:optional true} :string]
+   [:max-read-bytes {:optional true} :int]
+   [:max-search-file-bytes {:optional true} :int]
+   [:max-search-results {:optional true} :int]
+   [:max-list-entries {:optional true} :int]
+   [:max-glob-results {:optional true} :int]
+   [:max-write-bytes {:optional true} :int]
+   [:refuse-clojure? {:optional true} :boolean]
+   [:blocked-paths {:optional true} [:set :string]]
+   [:clojure-guard? {:optional true} :boolean]
+   [:allow-read-outside-workspace? {:optional true} :boolean]])
+
+(def ^:private ConfigToolsConfig
+  [:map
+   [:catalog {:optional true}
+    [:or [:enum :http :stub]
+     [:fn config.catalog/model-catalog?]]]])
+
+(defmethod ig/assert-key :lateralus/file-tools [_ config]
+  (assert-malli! :lateralus/file-tools FileToolsConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/self-awareness-tools [_ config]
+  (assert-malli! :lateralus/self-awareness-tools HarnessToolConfig
+                 (or config {})))
+
+(defmethod ig/assert-key :lateralus/clojure-tools [_ config]
+  (assert-malli! :lateralus/clojure-tools HarnessToolConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/config-tools [_ config]
+  (assert-malli! :lateralus/config-tools ConfigToolsConfig (or config {})))
+
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
 
@@ -211,6 +251,7 @@
 (defmethod ig/init-key :lateralus/llm-client [_ {:keys [impl] :as opts}]
   (case (or impl :stub)
     :stub (llm-client/stub-client)
+    :provided (:client opts)
     :http (llm-client/http-client opts)))
 
 ;; Separate key for the LLM config (the :base-url / :api-key /
@@ -227,11 +268,15 @@
     :langchain4j  (let [embedder (resolve 'kschltz.agent.memory.langchain4j-embedding/langchain4j-embedder)]
                     (embedder))))
 
+(declare rebuildable-registry)
+
 (defmethod ig/init-key :lateralus/web-tools [_ opts]
   "Build the web tool registry from the web-tools config. The default
    provider is :none, so the registry is always present but performs no
    network I/O unless the operator opts into :mojeek."
-  (tools.web/web-registry opts))
+  (rebuildable-registry
+   (tools.web/web-registry opts)
+   #(tools.web/web-registry opts)))
 
 (defmethod ig/init-key :lateralus/mcp-tools [_ opts]
   "Build an `McpSession` from configured servers. Default is
@@ -247,7 +292,9 @@
 (defmethod ig/init-key :lateralus/mcp-session-tools [_ {:keys [session]}]
   "Control tools for mid-session MCP setup (`mcp_list_servers`,
    `mcp_upsert_server`, `mcp_remove_server`, `mcp_refresh_server`)."
-  (mcp.session-tools/session-tools-registry session))
+  (rebuildable-registry
+   (mcp.session-tools/session-tools-registry session)
+   #(mcp.session-tools/session-tools-registry session)))
 
 (defmethod ig/init-key :lateralus/logging [_ opts]
   "Resolve the logging config. Defaults are applied at sink-build time
@@ -307,9 +354,12 @@
 (defmethod ig/init-key :lateralus/workbench-tools [_ {:keys [workbench]}]
  "Portal tool registry (`portal_submit`, `portal_clear`, `portal_focus`)
    derived from a live workbench. Empty map when workbench is disabled."
-  (if workbench
-    ((requiring-resolve 'kschltz.agent.workbench.protocol/tools) workbench)
-    {}))
+  (let [build #(if workbench
+                 ((requiring-resolve
+                   'kschltz.agent.workbench.protocol/tools)
+                  workbench)
+                 {})]
+    (rebuildable-registry (build) build)))
 
 (defmethod ig/init-key :lateralus/loop-opts [_ opts]
   "Resolve the loop-opts config (per-exchange / per-turn tool-call caps
@@ -359,23 +409,38 @@
    to merge left-to-right. The merged map is consumed by
    `:lateralus/tools-plugin`, which seeds it on the context at chain
    execution time."
-  (if (map? tools)
-    tools
-    (apply merge {} tools)))
+  (let [registries (if (map? tools) [tools] (vec tools))
+        rebuild-one (fn [registry]
+                      (if-let [rebuild (-> registry meta :registry/rebuild)]
+                        (rebuild)
+                        registry))]
+    (letfn [(rebuild []
+              (with-meta (apply merge {} (map rebuild-one registries))
+                {:registry/rebuild rebuild}))]
+      (with-meta (apply merge {} registries)
+        {:registry/rebuild rebuild}))))
+
+(defn- rebuildable-registry
+  [registry rebuild]
+  (with-meta registry {:registry/rebuild rebuild}))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
    registry (`file_read`, `file_list`, `file_info`, `file_glob`,
    `file_search`, and safe mutation tools).
-   Used by the tool-loop example config; not part of the default config
-   so production agents start with an empty tool registry."
-  (tools.filesystem/filesystem-registry opts))
+   Included in the default runtime and test configurations with the
+   workspace root pinned to the process working directory."
+  (rebuildable-registry
+   (tools.filesystem/filesystem-registry opts)
+   #(tools.filesystem/filesystem-registry opts)))
 
 (defmethod ig/init-key :lateralus/self-awareness-tools [_ {:keys [workspace-root]}]
  "Returns the self-awareness tool registry (`self_status`,
    `runtime_describe`). The tools read from the interceptor context, so
    they can be built at system init time like any other tool."
-  (tools.self/self-awareness-registry workspace-root))
+ (rebuildable-registry
+  (tools.self/self-awareness-registry workspace-root)
+  #(tools.self/self-awareness-registry workspace-root)))
 
 (defmethod ig/init-key :lateralus/config-tools
   [_ {:keys [catalog] :or {catalog :http}}]
@@ -389,14 +454,18 @@
               (if (config.catalog/model-catalog? catalog)
                 catalog
                 (config.catalog/http-catalog)))]
-    (tools.config/config-registry {:catalog cat})))
+    (rebuildable-registry
+     (tools.config/config-registry {:catalog cat})
+     #(tools.config/config-registry {:catalog cat}))))
 
 (defmethod ig/init-key :lateralus/clojure-tools [_ opts]
  "Returns the Clojure structured-editing tool registry (clojure_query,
   clojure_add_require, clojure_remove_def, clojure_rename_symbol,
   clojure_insert_form, clojure_edit_def, clojure_format_file,
   clojure_lint)."
-  (tools.clojure/clojure-registry opts))
+  (rebuildable-registry
+   (tools.clojure/clojure-registry opts)
+   #(tools.clojure/clojure-registry opts)))
 
 (defmethod ig/init-key :lateralus/runtime-tools [_ opts]
  "Returns the runtime-eval tool registry (clojure_eval, clojure_add_lib,
@@ -404,7 +473,9 @@
    dependencies at runtime; gate them with `:enabled?` / `:network?`.
    JVM-only — not wired into the native-image config (GraalVM cannot
    compile arbitrary forms at runtime)."
-  (tools.runtime/runtime-registry opts))
+  (rebuildable-registry
+   (tools.runtime/runtime-registry opts)
+   #(tools.runtime/runtime-registry opts)))
 
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session]}]
   (plugins.tools/tools-plugin registry {:mcp-session mcp-session}))
@@ -488,8 +559,9 @@
    :lateralus/cli-ui              {:enabled? :auto :theme :default}
    :lateralus/thinking            {:mode :preview}
    :lateralus/loop-opts            {}
-   :lateralus/file-tools           {}
-   :lateralus/self-awareness-tools {}
+   :lateralus/file-tools           {:workspace-root "."}
+   :lateralus/self-awareness-tools {:workspace-root "."}
+   :lateralus/clojure-tools        {:workspace-root "."}
    :lateralus/config-tools         {:catalog :stub}
    :lateralus/runtime-tools        {}
    :lateralus/web-tools            {:provider :none}
@@ -499,6 +571,7 @@
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
                                     (ig/ref :lateralus/self-awareness-tools)
                                     (ig/ref :lateralus/config-tools)
+                                    (ig/ref :lateralus/clojure-tools)
                                     (ig/ref :lateralus/runtime-tools)
                                     (ig/ref :lateralus/web-tools)
                                     (ig/ref :lateralus/mcp-session-tools)]

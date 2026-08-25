@@ -30,9 +30,9 @@
                             :embedder #ig/ref :lateralus/embedder
                             :top-y    3
                             :last-n   5}
- :lateralus/file-tools           {}
- :lateralus/self-awareness-tools {}
- :lateralus/clojure-tools        {}
+ :lateralus/file-tools           {:workspace-root "."}
+ :lateralus/self-awareness-tools {:workspace-root "."}
+ :lateralus/clojure-tools        {:workspace-root "."}
  ;; Session config tools (LLM, system message, loop policy, tool overlay).
  ;; Transitions are harvested/applied in the base :tools slot; :catalog :http
  ;; lists models via the OpenAI-compatible endpoint.

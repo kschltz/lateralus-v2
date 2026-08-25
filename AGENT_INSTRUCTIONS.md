@@ -11,6 +11,7 @@
 - **Session config / transitions:** `docs/transitions.md` (`transitions`, `set_llm_config` + `list_llm_models`, `ModelCatalog`, `:lateralus/config-tools`)
 - **Follow-up goal (dynamic MCP tool setup):** `goals/dynamic-mcp-tool-setup/goal.md` → `plan.md` — design: `docs/dynamic-mcp-tool-setup.md`
 - **Runtime-eval tool:** `docs/runtime-eval.md` (`tools.runtime`, `clojure_eval` + `clojure_add_lib` + `clojure_loaded_libs`, `ClojureRuntime` protocol, `:lateralus/runtime-tools` Integrant key)
+- **Network boundary matrix:** `docs/network-boundaries.md` (protocol isolation + Malli instrumentation)
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)
 - **CLI profiles:** `~/.config/lateralus/` via `kschltz.agent.cli.profile.*` (no `--config` → interactive gate; secrets via `OLLAMA_API_KEY` only)

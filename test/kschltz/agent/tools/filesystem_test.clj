@@ -450,6 +450,27 @@
       (is (= "blocked-path" (:error parsed)))
       (is (not (.exists (io/file @tmp-dir ".git")))))))
 
+(deftest generic-mutations-route-clojure-files-to-structured-tools
+  (let [target (temp-file "routed.clj" "(ns routed)\n")
+        reg (tools.filesystem/filesystem-registry
+             {:workspace-root (str @tmp-dir)})
+        write-result (-> (tool/invoke-tool
+                          (get reg "file_write")
+                          {:path "routed.clj" :content "(ns replaced)\n"}
+                          dummy-ctx)
+                         (json/parse-string true))
+        update-result (-> (tool/invoke-tool
+                           (get reg "file_update")
+                           {:path "routed.clj"
+                            :edits [{:old-text "routed"
+                                     :new-text "replaced"}]}
+                           dummy-ctx)
+                          (json/parse-string true))]
+    (is (= "use-clj-edit" (:error write-result)))
+    (is (= "clojure_*" (:use-tool write-result)))
+    (is (= "use-clj-edit" (:error update-result)))
+    (is (= "(ns routed)\n" (slurp target)))))
+
 (deftest file-write-rejects-outside-workspace-without-force
   (testing "file_write refuses paths outside the workspace root"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})

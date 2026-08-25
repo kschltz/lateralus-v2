@@ -120,6 +120,18 @@
       (is (= :tools (-> plugins (nth 2) meta :plugin/name)))
       (is (every? fn? (map #(-> % meta :plugin/rebuild) plugins))))))
 
+(deftest merged-tool-registry-can-rebuild-fresh-tool-instances
+  (let [s (with-system system/default-config)
+        registry (:lateralus/tool-registry s)
+        rebuild (-> registry meta :registry/rebuild)
+        fresh (rebuild)]
+    (is (fn? rebuild))
+    (is (= (set (keys registry)) (set (keys fresh))))
+    (is (not (identical? (get registry "file_read")
+                         (get fresh "file_read"))))
+    (is (fn? (-> fresh meta :registry/rebuild))
+        "rebuilt registries remain rebuildable for later reloads")))
+
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"
     (let [s (with-system system/default-config)]
@@ -223,3 +235,13 @@
       (is (seq (:problems data)) "ex-data contains Malli problems")
       (is (some #(= :store (last (:path %))) (:problems data))
           "error mentions the invalid :store key"))))
+
+(deftest invalid-harness-tool-configs-fail-fast
+  (doseq [[key config]
+          [[:lateralus/file-tools {:workspace-root 42}]
+           [:lateralus/self-awareness-tools {:workspace-root 42}]
+           [:lateralus/clojure-tools {:workspace-root 42}]
+           [:lateralus/config-tools {:catalog :unknown}]]]
+    (let [data (init-throws? {key config})]
+      (is (= key (:key data)) (str "error names " key))
+      (is (seq (:problems data)) (str key " carries Malli problems")))))

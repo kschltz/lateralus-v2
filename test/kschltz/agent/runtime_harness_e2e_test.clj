@@ -3,15 +3,10 @@
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
+            [integrant.core :as ig]
             [kschltz.agent.llm.client :as llm]
-            [kschltz.agent.plugin :as plugin]
-            [kschltz.agent.plugins.base :as plugins.base]
-            [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.runtime :as runtime]
-            [kschltz.agent.tools.config :as tools.config]
-            [kschltz.agent.tools.config.catalog :as catalog]
-            [kschltz.agent.tools.filesystem :as filesystem]
-            [kschltz.agent.tools.self :as tools.self])
+            [kschltz.agent.system :as system])
   (:import [java.io File]))
 
 (defn- tool-call
@@ -57,6 +52,11 @@
                             {:max-loop-depth 9})
                  (tool-call "memory" "set_memory_policy"
                             {:recall-enabled false})
+                 (tool-call "model" "set_llm_config"
+                            {:model "edited-model"})
+                 (tool-call "tools" "set_tool_enabled"
+                            {:tool-name "file_glob"
+                             :enabled false})
                  (tool-call "reload" "reload_runtime"
                             {:namespaces
                              ["kschltz.agent.interceptors"]})]})
@@ -80,29 +80,20 @@
                                           :replacement "BETA\n"}]})]}))
 
               (response {:content "runtime and file updated"}))))
-        registry (merge
-                  (filesystem/filesystem-registry
-                   {:workspace-root (.getAbsolutePath workspace)})
-                  (tools.self/self-awareness-registry
-                   (.getAbsolutePath workspace))
-                  (tools.config/config-registry
-                   {:catalog (catalog/stub-catalog)}))
-        chain (plugin/assemble-chain
-               [(plugins.base/base-plugin)
-                (plugins.tools/tools-plugin registry)])
-        r (runtime/start
-           {:agent/llm-client client
-            :agent/loop-opts {:max-loop-depth 5}
-            :exchange-chain chain
-            :agent/rebuild-chain
-            (fn []
-              (plugin/assemble-chain
-               [(plugins.base/base-plugin)
-                (plugins.tools/tools-plugin registry)]))
-            :initial-state {:model "offline-harness"
-                            :base-url "stub"
-                            :agent/system-message "initial"}}
-           "runtime-harness-e2e")]
+        root (.getAbsolutePath workspace)
+        config (-> system/default-config
+                   (assoc :lateralus/llm-client
+                          {:impl :provided :client client}
+                          :lateralus/llm-config
+                          {:model "offline-harness" :base-url "stub"}
+                          :lateralus/file-tools {:workspace-root root}
+                          :lateralus/self-awareness-tools
+                          {:workspace-root root}
+                          :lateralus/clojure-tools {:workspace-root root}
+                          :lateralus/config-tools {:catalog :stub}))
+        ig-system (ig/init config)
+        agent (:lateralus/agent ig-system)
+        r (runtime/start agent "runtime-harness-e2e")]
     (try
       (let [result (runtime/send-message r "Update the runtime and notes file")
             state (runtime/stop r)
@@ -114,19 +105,30 @@
         (is (= "runtime edited through interceptors"
                (:agent/system-message state)))
         (is (= 9 (get-in state [:agent/loop-opts :max-loop-depth])))
+        (is (= "edited-model" (:model state)))
+        (is (= ["file_glob"] (:agent/disabled-tools state)))
         (is (false? (get-in state
                             [:agent/memory-policy :recall-enabled])))
         (is (= :reloaded
                (get-in state
                        [:agent/runtime-reload-status :status])))
+        (let [described (-> (:agent/all-tool-results result)
+                            first
+                            :result
+                            (json/parse-string true))]
+          (is (seq (:chain described)))
+          (is (every? :name (:chain described))))
         (is (= ["runtime_describe"
                 "set_system_message"
                 "set_loop_policy"
                 "set_memory_policy"
+                "set_llm_config"
+                "set_tool_enabled"
                 "reload_runtime"
                 "file_read"
                 "file_patch"]
                names)))
       (finally
+        (ig/halt! ig-system)
         (doseq [^File entry (reverse (file-seq workspace))]
           (.delete entry))))))

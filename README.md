@@ -316,7 +316,8 @@ The interceptor/runtime/file harness has a deterministic offline scenario:
 clojure -M:e2e:workbench -n kschltz.agent.runtime-harness-e2e-test
 ```
 
-It drives runtime introspection, policy transitions, `file_read`, and a
+It initializes the production Integrant graph, then drives runtime
+introspection, policy/tool transitions, deferred reload, `file_read`, and a
 hash-anchored `file_patch` through the real ReAct interceptor chain.
 
 The default `clojure -M:test` and `clojure -T:build test` exclude these

@@ -1,6 +1,6 @@
 # Lateralus v2 Architecture
 
-This document describes the current Integrant + plugin/interceptor architecture of `lateralus-v2`. For the original thesis and historical context, see [`docs/interceptor-loop-design-note.md`](docs/interceptor-loop-design-note.md). For the memory subsystem, see [`docs/memory-v2.md`](docs/memory-v2.md).
+This document describes the current Integrant + plugin/interceptor architecture of `lateralus-v2`. For the original thesis and historical context, see [`docs/interceptor-loop-design-note.md`](docs/interceptor-loop-design-note.md). For the memory subsystem, see [`docs/memory-v2.md`](docs/memory-v2.md). Outbound protocol and Malli requirements are indexed in [`docs/network-boundaries.md`](network-boundaries.md).
 
 ## Overview
 

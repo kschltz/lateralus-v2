@@ -5,6 +5,21 @@ All notable changes to `lateralus-v2`.
 ## [Unreleased]
 
 ### Added
+- **Interceptor-native runtime control plane**: redacted `runtime_describe`;
+  closed transitions for LLM, system-message, loop, tool, memory, and MCP
+  policy; plus deferred `reload_runtime` with Integrant plugin/tool-registry
+  rebuilds and explicit process-restart boundaries for core JVM classes.
+- **Coding-agent filesystem harness**: bounded hash-witnessed reads,
+  deterministic list/search/glob, create-only writes, ambiguity-safe updates,
+  SHA-anchored line patches, canonical workspace/symlink guards, blocked
+  paths, optimistic concurrency, atomic commits, backups, verification, and
+  rewrite-clj structured edits with optional clj-kondo diagnostics.
+- **Offline runtime/file E2E** initialized through the production Integrant
+  graph, covering introspection, runtime transitions, deferred reload, file
+  read, and snapshot patch.
+- **Instrumented network boundaries**: CLI model listing now uses
+  `ModelCatalog`; LLM HTTP, HTTP embeddings, web providers, and MCP HTTP leaf
+  operations have Malli-instrumented implementation schemas.
 - **Runtime-eval tool suite** (`kschltz.agent.tools.runtime.*`): `clojure_eval` (evaluate Clojure in a persistent runtime namespace, with stdout/value/exception capture and a per-call timeout), `clojure_add_lib` (load Maven/Git dependencies at runtime via Clojure 1.12 `clojure.repl.deps/add-libs`), and `clojure_loaded_libs`. Isolated behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary; wired via the `:lateralus/runtime-tools` Integrant key (JVM config + `default-config`; native-image enables eval with `:network? false`). Guarded by `:enabled?` / `:network?` toggles. See `docs/runtime-eval.md`.
 - Bootstrap: new repo at `net.clojars.kschltz/lateralus-v2`, Clojure 1.12.5, Integrant, Malli, hato.
 - Chain engine (`kschltz.agent.chain`): Pedestal-style enter/leave/error interceptor engine with pure context maps.
