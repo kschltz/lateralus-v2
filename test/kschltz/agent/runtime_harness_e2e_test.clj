@@ -28,12 +28,12 @@
 
 (defn- latest-tool-result
   [request]
-  (some->> (:messages request)
-           reverse
-           (filter #(= "tool" (some-> (:role %) name)))
-           first
-           :content
-           (json/parse-string true)))
+  (when-let [content (some->> (:messages request)
+                              reverse
+                              (filter #(= "tool" (some-> (:role %) name)))
+                              first
+                              :content)]
+    (json/parse-string content true)))
 
 (deftest ^:e2e runtime-controls-and-snapshot-patch-flow-through-real-chain
   (let [workspace (doto (File/createTempFile "lateralus-runtime-e2e" "")
