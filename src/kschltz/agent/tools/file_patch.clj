@@ -6,7 +6,7 @@
             [kschltz.agent.tools.file-safety :as fs])
   (:import [java.nio ByteBuffer]
            [java.nio.charset CodingErrorAction StandardCharsets]
-           [java.nio.file Files Path]))
+           [java.nio.file Files]))
 
 (def Patch
   [:map {:closed true}
