@@ -163,6 +163,8 @@ The default tool registry includes bounded, line-numbered file reads and safe
 create/write/update operations:
 
 - `file_read` returns a window, continuation metadata, and a SHA-256 witness.
+- `file_list` is deterministic and bounded; all read/discovery tools enforce
+  canonical workspace containment and blocked paths by default.
 - `file_update` applies ambiguity-safe text edits atomically and detects races.
 - `file_write` accepts `expected-sha256` to reject stale full-file replacements.
 - `file_create` is create-only; it never silently overwrites an existing file.

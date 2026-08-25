@@ -148,6 +148,10 @@ mutations through the normal `Tool` dispatch interceptor. `file_read` returns
 line-numbered windows plus the SHA-256 of the exact bytes consumed. Callers can
 carry that digest into `file_write` as `expected-sha256`; the writer returns a
 structured `stale-file` conflict instead of overwriting a changed file.
+Read, list, info, and search operations resolve canonical paths under the
+workspace, reject blocked segments, and never follow a workspace symlink to an
+outside target unless the operator explicitly enables outside-workspace reads.
+Directory listings are sorted and capped with total/truncation metadata.
 
 `file_write`, `file_update`, and `file_create` share one mutation boundary:
 canonical workspace containment (including symlink resolution), unskippable

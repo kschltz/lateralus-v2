@@ -4,8 +4,9 @@
    These are file operations exposed to the LLM: read a file, list a
    directory, get file metadata, search for text inside a directory
    tree, create a file, overwrite a file, and apply in-place edits to a
-   file. Paths may be absolute or relative; when a `:workspace-root` is
-   provided, relative paths are resolved against it.
+   file. Paths may be absolute or relative, but all operations are constrained
+   to the canonical `:workspace-root` by default. Operators may explicitly
+   allow outside-workspace reads; writes remain independently guarded.
 
    `file_read`, `file_list`, `file_info`, `file_search`, and
    `file_create` are convenience wrappers that live in this namespace.
@@ -36,6 +37,7 @@
             [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-path :as fpath]
+            [kschltz.agent.tools.file-safety :as fs]
             [kschltz.agent.tools.file-write :as fw])
   (:import [java.io BufferedReader File InputStream InputStreamReader]
            [java.nio.charset CharsetDecoder CodingErrorAction StandardCharsets]
@@ -57,10 +59,19 @@
   "Default cap on the number of text search hits returned."
   100)
 
+(def default-max-list-entries
+  "Default cap for one `file_list` response."
+  500)
+
 (def InputSchema:Path
   "Common input schema for tools that take a single path."
   [:map
    [:path :string]])
+
+(def InputSchema:ListDirectory
+  [:map
+   [:path :string]
+   [:max-entries {:optional true} [:int {:min 1}]]])
 
 (def InputSchema:ReadFile
   "Input schema for `file_read`."
@@ -99,6 +110,28 @@
   "UTF-8 byte length of `s`."
   [^String s]
   (alength (.getBytes s "UTF-8")))
+
+(defn- resolve-readable-path
+  "Resolve a model-provided path under the configured read policy."
+  [workspace-root user-path blocked-paths allow-read-outside-workspace?]
+  (let [requested (fpath/resolve-path workspace-root user-path)
+        canonical (fs/canonical-path requested)
+        root (fs/canonical-path
+              (.toPath (fpath/workspace-root->file workspace-root)))]
+    (cond
+      (and (not allow-read-outside-workspace?)
+           (not (fs/within-write-dir? root canonical)))
+      (throw (ex-info "Path resolves outside the configured workspace"
+                      {:error :outside-workspace
+                       :path (fpath/path->str requested)}))
+
+      (or (fs/blocked-path? requested blocked-paths)
+          (fs/blocked-path? canonical blocked-paths))
+      (throw (ex-info "Path contains a blocked segment"
+                      {:error :blocked-path
+                       :path (fpath/path->str requested)}))
+
+      :else canonical)))
 
 (defn- read-first-bytes
   "Read up to `n` bytes from `path`, returning a byte array of the bytes
@@ -304,10 +337,18 @@
 
 (defn- do-list-directory
   "List children of `path`. Returns a vector of EDN maps."
-  [^Path path]
+  [^Path path max-entries]
   (let [dir (.toFile path)]
     (if (.isDirectory dir)
-      (mapv describe-entry (.listFiles dir))
+      (let [entries (->> (.listFiles dir)
+                         (map describe-entry)
+                         (sort-by :name)
+                         vec)
+            total (count entries)
+            selected (subvec entries 0 (min total max-entries))]
+        {:entries selected
+         :total-entries total
+         :truncated (< (count selected) total)})
       (throw (ex-info "Path is not a directory" {:path (fpath/path->str path)})))))
 
 (defn- do-file-info
@@ -331,19 +372,21 @@
     (re-pattern (str "(?i)" pattern))
     (catch Throwable t
       (throw (ex-info (str "Invalid search pattern: " (ex-message t))
-                      {:pattern pattern})))))
+                      {:error :invalid-pattern
+                       :pattern pattern})))))
 
 (defn- do-search-files
   "Recursively search files under `path` for `pattern`. Returns up to
    `max-results` hits as EDN maps with `:file`, `:line`, and `:text`.
    Skips files larger than `max-search-file-bytes`. Uses
    `default-max-results` when the caller does not supply a per-call cap."
-  [^Path path pattern max-results max-search-file-bytes default-max-results]
+  [^Path path pattern max-results max-search-file-bytes default-max-results blocked-paths]
   (let [re (compile-pattern pattern)
         max (safe-int max-results default-max-results)
         results (volatile! [])]
     (doseq [^File f (file-seq (.toFile path))
             :when (and (.isFile f)
+                       (not (fs/blocked-path? (.toPath f) blocked-paths))
                        (<= (.length f) max-search-file-bytes))
             :while (< (count @results) max)]
       (try
@@ -360,11 +403,18 @@
     @results))
 
 (defn- error-result
-  "Format an exception as a model-readable string."
+  "Format an exception as a structured model-readable JSON envelope."
   [t]
-  (format "Filesystem tool error: %s" (ex-message t)))
+  (let [data (if (instance? clojure.lang.ExceptionInfo t)
+               (ex-data t)
+               {})]
+    (json/generate-string
+     (merge {:ok false
+             :error (or (:error data) :filesystem-error)
+             :message (or (ex-message t) (.getName (class t)))}
+            (dissoc data :error)))))
 
-(deftype ReadFileTool [workspace-root max-read-bytes]
+(deftype ReadFileTool [workspace-root max-read-bytes blocked-paths allow-read-outside-workspace?]
   tool/Tool
   (-name [_] "file_read")
   (-description [_]
@@ -373,28 +423,36 @@
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
     (try
-      (read-file-json (fpath/resolve-path workspace-root (:path args))
+      (read-file-json (resolve-readable-path workspace-root
+                                             (:path args)
+                                             blocked-paths
+                                             allow-read-outside-workspace?)
                       (:offset args)
                       (:limit args)
                       max-read-bytes)
       (catch Throwable t
         (error-result t)))))
 
-(deftype ListDirectoryTool [workspace-root]
+(deftype ListDirectoryTool [workspace-root default-max-entries blocked-paths allow-read-outside-workspace?]
   tool/Tool
   (-name [_] "file_list")
   (-description [_]
     "List the files and directories inside a directory. Returns a JSON object with an `entries` array; each entry has `name` and `type` (`file`, `directory`, or `other`).")
-  (-input-schema [_] InputSchema:Path)
+  (-input-schema [_] InputSchema:ListDirectory)
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       {:entries (do-list-directory (fpath/resolve-path workspace-root (:path args)))})
+       (do-list-directory
+        (resolve-readable-path workspace-root
+                               (:path args)
+                               blocked-paths
+                               allow-read-outside-workspace?)
+        (safe-int (:max-entries args) default-max-entries)))
       (catch Throwable t
         (error-result t)))))
 
-(deftype FileInfoTool [workspace-root]
+(deftype FileInfoTool [workspace-root blocked-paths allow-read-outside-workspace?]
   tool/Tool
   (-name [_] "file_info")
   (-description [_]
@@ -404,11 +462,16 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       (do-file-info (fpath/resolve-path workspace-root (:path args))))
+       (do-file-info
+        (resolve-readable-path workspace-root
+                               (:path args)
+                               blocked-paths
+                               allow-read-outside-workspace?)))
       (catch Throwable t
         (error-result t)))))
 
-(deftype SearchFilesTool [workspace-root max-search-file-bytes default-max-search-results]
+(deftype SearchFilesTool [workspace-root max-search-file-bytes default-max-search-results
+                          blocked-paths allow-read-outside-workspace?]
   tool/Tool
   (-name [_] "file_search")
   (-description [_]
@@ -418,11 +481,15 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       (do-search-files (fpath/resolve-path workspace-root (:path args))
+       (do-search-files (resolve-readable-path workspace-root
+                                               (:path args)
+                                               blocked-paths
+                                               allow-read-outside-workspace?)
                         (:pattern args)
                         (:max-results args)
                         max-search-file-bytes
-                        default-max-search-results))
+                        default-max-search-results
+                        blocked-paths))
       (catch Throwable t
         (error-result t)))))
 
@@ -442,29 +509,42 @@
 
 (defn read-file
   "Return a new `file_read` Tool instance."
-  ([] (read-file nil default-max-read-bytes))
-  ([workspace-root] (read-file workspace-root default-max-read-bytes))
+  ([] (read-file nil default-max-read-bytes fs/default-blocked-paths false))
+  ([workspace-root] (read-file workspace-root default-max-read-bytes fs/default-blocked-paths false))
   ([workspace-root max-read-bytes]
-   (->ReadFileTool workspace-root max-read-bytes)))
+   (read-file workspace-root max-read-bytes fs/default-blocked-paths false))
+  ([workspace-root max-read-bytes blocked-paths allow-read-outside-workspace?]
+   (->ReadFileTool workspace-root max-read-bytes blocked-paths allow-read-outside-workspace?)))
 
 (defn list-directory
   "Return a new `file_list` Tool instance."
-  ([] (list-directory nil))
+  ([] (list-directory nil default-max-list-entries fs/default-blocked-paths false))
   ([workspace-root]
-   (->ListDirectoryTool workspace-root)))
+   (list-directory workspace-root default-max-list-entries fs/default-blocked-paths false))
+  ([workspace-root max-entries blocked-paths allow-read-outside-workspace?]
+   (->ListDirectoryTool workspace-root max-entries blocked-paths allow-read-outside-workspace?)))
 
 (defn file-info
   "Return a new `file_info` Tool instance."
-  ([] (file-info nil))
+  ([] (file-info nil fs/default-blocked-paths false))
   ([workspace-root]
-   (->FileInfoTool workspace-root)))
+   (file-info workspace-root fs/default-blocked-paths false))
+  ([workspace-root blocked-paths allow-read-outside-workspace?]
+   (->FileInfoTool workspace-root blocked-paths allow-read-outside-workspace?)))
 
 (defn search-files
   "Return a new `file_search` Tool instance."
-  ([] (search-files nil default-max-search-file-bytes default-max-search-results))
-  ([workspace-root] (search-files workspace-root default-max-search-file-bytes default-max-search-results))
+  ([] (search-files nil default-max-search-file-bytes default-max-search-results
+                    fs/default-blocked-paths false))
+  ([workspace-root] (search-files workspace-root default-max-search-file-bytes
+                                  default-max-search-results fs/default-blocked-paths false))
   ([workspace-root max-search-file-bytes default-max-search-results]
-   (->SearchFilesTool workspace-root max-search-file-bytes default-max-search-results)))
+   (search-files workspace-root max-search-file-bytes default-max-search-results
+                 fs/default-blocked-paths false))
+  ([workspace-root max-search-file-bytes default-max-search-results
+    blocked-paths allow-read-outside-workspace?]
+   (->SearchFilesTool workspace-root max-search-file-bytes default-max-search-results
+                      blocked-paths allow-read-outside-workspace?)))
 
 (defn create-file
   "Return a new `file_create` Tool instance."
@@ -500,6 +580,7 @@
                                    (default 128 KB)
      :max-search-results      — default hit cap for `file_search`
                                    (default 100)
+     :max-list-entries       — cap for `file_list` (default 500)
      :max-write-bytes         — cap for `file_write` and `file_update`
                                    (default 10 MiB)
      :refuse-clojure?         — refuse Clojure/EDN targets unless a
@@ -509,31 +590,47 @@
                                    (default .git, target, node_modules, .svn, CVS)
      :clojure-guard?          — round-trip-validate Clojure/EDN results
                                    via rewrite-clj (default false)
+     :allow-read-outside-workspace?
+                                — operator escape hatch for read/list/info/search
+                                  (default false; blocked paths still apply)
 
    When `:workspace-root` is omitted, the current working directory is
-   used. `file_write` and `file_update` enforce workspace-root
-   containment (per-call `:force` skips it) and always refuse blocked
-   path segments; `file_create` uses the same guardrails and never
-   overwrites an existing path."
+   used. Reads enforce canonical containment unless explicitly configured
+   otherwise. Writes enforce containment (`:force` skips only containment)
+   and always refuse blocked path segments; `file_create` uses the same
+   guardrails and never overwrites an existing path."
   ([] (filesystem-registry {}))
   ([{:keys [workspace-root
             max-read-bytes
             max-search-file-bytes
             max-search-results
+            max-list-entries
             max-write-bytes
             refuse-clojure?
             blocked-paths
-            clojure-guard?]}]
-   (let [write-opts {:max-write-bytes  max-write-bytes
+            clojure-guard?
+            allow-read-outside-workspace?]}]
+   (let [blocked-paths (or blocked-paths fs/default-blocked-paths)
+         allow-read-outside-workspace? (boolean allow-read-outside-workspace?)
+         write-opts {:max-write-bytes  max-write-bytes
                      :refuse-clojure? refuse-clojure?
                      :blocked-paths   blocked-paths
                      :clojure-guard?  clojure-guard?}]
-     {"file_read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
-      "file_list"    (list-directory workspace-root)
-      "file_info"    (file-info workspace-root)
-     "file_create"  (create-file workspace-root write-opts)
+     {"file_read"    (read-file workspace-root
+                                (or max-read-bytes default-max-read-bytes)
+                                blocked-paths
+                                allow-read-outside-workspace?)
+      "file_list"    (list-directory workspace-root
+                                     (or max-list-entries default-max-list-entries)
+                                     blocked-paths
+                                     allow-read-outside-workspace?)
+      "file_info"    (file-info workspace-root blocked-paths
+                               allow-read-outside-workspace?)
+      "file_create"  (create-file workspace-root write-opts)
       "file_search"  (search-files workspace-root
                                   (or max-search-file-bytes default-max-search-file-bytes)
-                                  (or max-search-results default-max-search-results))
+                                  (or max-search-results default-max-search-results)
+                                  blocked-paths
+                                  allow-read-outside-workspace?)
       "file_write"   (fw/write-file workspace-root write-opts)
       "file_update"  (fw/update-file workspace-root write-opts)})))
