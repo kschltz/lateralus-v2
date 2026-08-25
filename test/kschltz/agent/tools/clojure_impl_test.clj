@@ -67,9 +67,27 @@
 (deftest write-with-backup-creates-sidecar
   (temp-file "sample.clj" "(ns a)")
   (let [path (impl/resolve-path (str @tmp-dir) "sample.clj")]
-    (impl/write-with-backup! path "(ns b)")
-    (is (.exists (io/file @tmp-dir "sample.clj.bak")))
-    (is (= "(ns b)" (slurp (io/file @tmp-dir "sample.clj"))))))
+    (let [result (impl/write-with-backup! path "(ns a)" "(ns b)")
+          backup (io/file (:backup-path result))]
+      (is (.exists backup))
+      (is (re-find #"\.bak\.\d+$" (.getName backup)))
+      (is (= "(ns a)" (slurp backup)))
+      (is (= "(ns b)" (slurp (io/file @tmp-dir "sample.clj"))))
+      (is (string? (:previous-sha256 result)))
+      (is (string? (:sha256 result))))))
+
+(deftest write-with-backup-rejects-stale-original
+  (temp-file "stale.clj" "(ns current)")
+  (let [path (impl/resolve-path (str @tmp-dir) "stale.clj")]
+    (try
+      (impl/write-with-backup! path "(ns observed)" "(ns replacement)")
+      (is false "stale write should throw")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :stale-file (:error (ex-data e))))
+        (is (= "(ns current)" (slurp (.toFile path))))
+        (is (empty?
+             (filter #(re-find #"\.bak\.\d+$" (.getName ^File %))
+                     (file-seq @tmp-dir))))))))
 
 (deftest malformed-source-throws
   (is (thrown? Exception (impl/parse-or-fail "(def" "path"))))

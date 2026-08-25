@@ -157,6 +157,12 @@ verification. `file_create` is strictly create-only and refuses an existing
 path. `file_update` validates all edits before taking the lock and rechecks a
 staleness sentinel at commit, so failed or racing edits produce zero writes.
 
+The rewrite-clj-backed `clojure_*` tools share the same canonical containment,
+blocked-path, per-path lock, timestamped backup, atomic-landing, optimistic
+concurrency, and verification primitives. Their additional round-trip parse
+guard runs before commit, and non-Clojure targets receive a structured routing
+error instead of being edited as source.
+
 ## Runtime introspection
 
 The `runtime_describe` tool reads the current immutable interceptor context and

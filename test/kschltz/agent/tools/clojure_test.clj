@@ -6,7 +6,9 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.clojure :as tools.clojure])
-  (:import [java.io File]))
+  (:import [java.io File]
+           [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
 
 (def ^:private tmp-dir
   "Temporary directory for Clojure tool tests."
@@ -155,20 +157,67 @@
 
 (deftest write-creates-backup
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
-  (let [reg (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})]
-    (invoke reg "clojure_remove_def" {:path "sample.clj" :name "foo"})
-    (is (.exists (io/file @tmp-dir "sample.clj.bak")))))
+  (let [reg (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
+        result (invoke reg "clojure_remove_def" {:path "sample.clj" :name "foo"})
+        backup (io/file (:backup-path result))]
+    (is (.exists backup))
+    (is (re-find #"\.bak\.\d+$" (.getName backup)))
+    (is (= "(ns sample)\n(defn foo [] 1)" (slurp backup)))
+    (is (string? (:previous-sha256 result)))
+    (is (string? (:sha256 result)))))
 
 (deftest malformed-edit-is-rejected
   (temp-file "sample.clj" "(ns sample)\n(defn foo [] 1)")
   (let [reg     (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        result  (tool/invoke-tool (get reg "clojure_insert_form")
-                                {:path "sample.clj" :form "(def" :position :end} dummy-ctx)
+        result  (invoke reg "clojure_insert_form"
+                        {:path "sample.clj" :form "(def" :position :end})
         content (slurp (io/file @tmp-dir "sample.clj"))]
-    (is (str/starts-with? result "Clojure tool error:"))
+    (is (false? (:ok result)))
+    (is (= "clojure-tool-error" (:error result)))
     (is (= "(ns sample)\n(defn foo [] 1)" content))))
 
 (deftest missing-file-returns-error
   (let [reg    (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
-        result (tool/invoke-tool (get reg "clojure_query") {:path "missing.clj"} dummy-ctx)]
-    (is (str/starts-with? result "Clojure tool error:"))))
+        result (invoke reg "clojure_query" {:path "missing.clj"})]
+    (is (false? (:ok result)))
+    (is (= "clojure-tool-error" (:error result)))))
+
+(deftest clojure-tools-enforce-workspace-and-path-policy
+  (let [reg (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})]
+    (testing "absolute paths outside the workspace are rejected"
+      (let [outside (File/createTempFile "lateralus-clj-outside-" ".clj")
+            _ (spit outside "(ns outside)")
+            result (invoke reg "clojure_query" {:path (.getAbsolutePath outside)})]
+        (is (= "outside-workspace" (:error result)))
+        (.delete outside)))
+    (testing "blocked path segments are rejected for reads and writes"
+      (temp-file "target/generated.clj" "(ns generated)")
+      (let [result (invoke reg "clojure_remove_def"
+                           {:path "target/generated.clj" :name "x"})]
+        (is (= "blocked-path" (:error result)))
+        (is (= "(ns generated)"
+               (slurp (io/file @tmp-dir "target/generated.clj"))))))
+    (testing "non-Clojure files are routed to the generic file tools"
+      (temp-file "notes.txt" "plain text")
+      (let [result (invoke reg "clojure_query" {:path "notes.txt"})]
+        (is (= "wrong-file-type" (:error result)))
+        (is (= "file_read/file_update" (:use-tool result)))))))
+
+(deftest clojure-tools-reject-symlink-escape
+  (let [outside-dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                                   (str "lateralus-clj-link-" (random-uuid)))
+                      (.mkdirs))
+        outside-file (io/file outside-dir "outside.clj")
+        _ (spit outside-file "(ns outside)\n(def x 1)")
+        link (io/file @tmp-dir "escape")
+        _ (Files/createSymbolicLink (.toPath link)
+                                    (.toPath outside-dir)
+                                    (make-array FileAttribute 0))
+        reg (tools.clojure/clojure-registry {:workspace-root (str @tmp-dir)})
+        result (invoke reg "clojure_remove_def"
+                       {:path "escape/outside.clj" :name "x"})]
+    (is (= "outside-workspace" (:error result)))
+    (is (= "(ns outside)\n(def x 1)" (slurp outside-file)))
+    (.delete link)
+    (.delete outside-file)
+    (.delete outside-dir)))

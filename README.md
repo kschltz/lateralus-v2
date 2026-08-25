@@ -173,6 +173,11 @@ moves, and write verification. Replacement writes also create timestamped
 backups. These tools enter through the same `Tool` dispatch interceptor as
 every other agent capability.
 
+The `clojure_*` structured-edit tools use the same mutation guarantees while
+preserving comments and whitespace through rewrite-clj. They reject non-
+Clojure targets, workspace/symlink escapes, blocked paths, and stale
+read-transform-write attempts with structured JSON errors.
+
 ## Runtime introspection
 
 `runtime_describe` exposes the active runtime as redacted structured data. It
