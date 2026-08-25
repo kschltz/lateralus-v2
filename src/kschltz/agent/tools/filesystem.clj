@@ -39,6 +39,8 @@
             [kschltz.agent.tools.file-glob :as file-glob]
             [kschltz.agent.tools.file-patch :as file-patch]
             [kschltz.agent.tools.file-path :as fpath]
+            [kschltz.agent.tools.file-read-policy :as read-policy
+             :refer [byte-count safe-int]]
             [kschltz.agent.tools.file-safety :as fs]
             [kschltz.agent.tools.file-write :as fw])
   (:import [java.io BufferedReader File InputStream InputStreamReader]
@@ -51,16 +53,13 @@
    `:content` string. Not a gate that refuses a file — reads beyond the
    budget return a window with a continuation marker."
   (* 256 1024))
-
 (def default-max-search-file-bytes
   "Default upper bound on how many bytes `file_search` will read from a
    single file while scanning."
   (* 128 1024))
-
 (def default-max-search-results
   "Default cap on the number of text search hits returned."
   100)
-
 (def default-max-list-entries
   "Default cap for one `file_list` response."
   500)
@@ -98,42 +97,6 @@
 (def OutputSchema:String
   "All filesystem tools return a JSON or plain string."
   :string)
-
-(defn- safe-int
-  "Coerce a value to a positive integer, returning default if missing or invalid."
-  [value default]
-  (let [v (if (integer? value)
-            value
-            (try (Long/parseLong (str value))
-                 (catch Throwable _ default)))]
-    (if (pos? v) v default)))
-
-(defn- byte-count
-  "UTF-8 byte length of `s`."
-  [^String s]
-  (alength (.getBytes s "UTF-8")))
-
-(defn- resolve-readable-path
-  "Resolve a model-provided path under the configured read policy."
-  [workspace-root user-path blocked-paths allow-read-outside-workspace?]
-  (let [requested (fpath/resolve-path workspace-root user-path)
-        canonical (fs/canonical-path requested)
-        root (fs/canonical-path
-              (.toPath (fpath/workspace-root->file workspace-root)))]
-    (cond
-      (and (not allow-read-outside-workspace?)
-           (not (fs/within-write-dir? root canonical)))
-      (throw (ex-info "Path resolves outside the configured workspace"
-                      {:error :outside-workspace
-                       :path (fpath/path->str requested)}))
-
-      (or (fs/blocked-path? requested blocked-paths)
-          (fs/blocked-path? canonical blocked-paths))
-      (throw (ex-info "Path contains a blocked segment"
-                      {:error :blocked-path
-                       :path (fpath/path->str requested)}))
-
-      :else canonical)))
 
 (defn- read-first-bytes
   "Read up to `n` bytes from `path`, returning a byte array of the bytes
@@ -313,7 +276,7 @@
   Returns either the structured content map or the `{:error
   \"binary-file\" ...}` map, both as a JSON string. Unexpected I/O errors
   (e.g. permission denied) propagate to the caller, which maps them to
-  `error-result`."
+  a structured error envelope."
   [^Path path offset-arg limit-arg max-read-bytes]
   (let [size (Files/size path)
         sample-len (min 8192 size)
@@ -404,18 +367,6 @@
           nil)))
     @results))
 
-(defn- error-result
-  "Format an exception as a structured model-readable JSON envelope."
-  [t]
-  (let [data (if (instance? clojure.lang.ExceptionInfo t)
-               (ex-data t)
-               {})]
-    (json/generate-string
-     (merge {:ok false
-             :error (or (:error data) :filesystem-error)
-             :message (or (ex-message t) (.getName (class t)))}
-            (dissoc data :error)))))
-
 (deftype ReadFileTool [workspace-root max-read-bytes blocked-paths allow-read-outside-workspace?]
   tool/Tool
   (-name [_] "file_read")
@@ -425,15 +376,16 @@
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
     (try
-      (read-file-json (resolve-readable-path workspace-root
-                                             (:path args)
-                                             blocked-paths
-                                             allow-read-outside-workspace?)
+      (read-file-json (read-policy/resolve-readable-path
+                       workspace-root
+                       (:path args)
+                       blocked-paths
+                       allow-read-outside-workspace?)
                       (:offset args)
                       (:limit args)
                       max-read-bytes)
       (catch Throwable t
-        (error-result t)))))
+        (read-policy/error-result t)))))
 
 (deftype ListDirectoryTool [workspace-root default-max-entries blocked-paths allow-read-outside-workspace?]
   tool/Tool
@@ -446,13 +398,14 @@
     (try
       (json/generate-string
        (do-list-directory
-        (resolve-readable-path workspace-root
-                               (:path args)
-                               blocked-paths
-                               allow-read-outside-workspace?)
+        (read-policy/resolve-readable-path
+         workspace-root
+         (:path args)
+         blocked-paths
+         allow-read-outside-workspace?)
         (safe-int (:max-entries args) default-max-entries)))
       (catch Throwable t
-        (error-result t)))))
+        (read-policy/error-result t)))))
 
 (deftype FileInfoTool [workspace-root blocked-paths allow-read-outside-workspace?]
   tool/Tool
@@ -465,12 +418,13 @@
     (try
       (json/generate-string
        (do-file-info
-        (resolve-readable-path workspace-root
-                               (:path args)
-                               blocked-paths
-                               allow-read-outside-workspace?)))
+        (read-policy/resolve-readable-path
+         workspace-root
+         (:path args)
+         blocked-paths
+         allow-read-outside-workspace?)))
       (catch Throwable t
-        (error-result t)))))
+        (read-policy/error-result t)))))
 
 (deftype SearchFilesTool [workspace-root max-search-file-bytes default-max-search-results
                           blocked-paths allow-read-outside-workspace?]
@@ -483,17 +437,18 @@
   (-invoke [_ args _ctx]
     (try
       (json/generate-string
-       (do-search-files (resolve-readable-path workspace-root
-                                               (:path args)
-                                               blocked-paths
-                                               allow-read-outside-workspace?)
+       (do-search-files (read-policy/resolve-readable-path
+                         workspace-root
+                         (:path args)
+                         blocked-paths
+                         allow-read-outside-workspace?)
                         (:pattern args)
                         (:max-results args)
                         max-search-file-bytes
                         default-max-search-results
                         blocked-paths))
       (catch Throwable t
-        (error-result t)))))
+        (read-policy/error-result t)))))
 
 (deftype CreateFileTool [delegate]
   tool/Tool
