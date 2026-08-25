@@ -39,6 +39,29 @@ before the next ReAct LLM call.
 
 {:op :mcp-refresh-server
  :server-id "…"}
+
+{:op :set-system-message
+ :message "…"}
+
+{:op :set-loop-opts
+ :max-loop-depth 8
+ :max-tool-calls-per-exchange 40
+ :max-tool-calls-per-turn 10
+ :tool-content-caps {"file_read" 65536}}
+
+{:op :set-tool-enabled
+ :tool-name "file_write"
+ :enabled false}
+
+{:op :set-memory-policy
+ :top-y 8
+ :last-n 12
+ :recall-enabled true
+ :persist-enabled false}
+
+{:op :reload-runtime
+ :namespaces ["kschltz.agent.interceptors"
+              "kschltz.agent.plugins.base"]}
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -79,6 +102,50 @@ Integrant:
 ```clojure
 :lateralus/config-tools {:catalog :http}  ; or :stub for offline
 ```
+
+### `set_system_message`
+
+Replaces `:agent/system-message` through the transition queue. The apply
+interceptor updates the working state immediately, and `:agent/state-delta`
+makes it durable for later exchanges. The tool cannot mutate the session atom.
+
+### `set_loop_policy`
+
+Merges an allowlisted loop-policy patch into `:agent/loop-opts`. Positive
+limits are accepted for loop depth, per-exchange calls, per-turn calls, and
+per-tool content caps. Apply patches the current immutable ctx for same-
+exchange follow-ups and stages the policy in `:agent/state-delta`; the outer
+runtime overlays that session policy on boot defaults for every later
+exchange.
+
+### `set_tool_enabled`
+
+Adds or removes a tool name from the durable session overlay. The tools plugin
+recomputes `static ∪ MCP − disabled` during transition apply and patches the
+in-flight request, so changes affect the next same-exchange LLM call and later
+exchanges. Only tools pre-registered by Integrant or discovered through the
+MCP session can be selected; arbitrary Tool instances cannot be injected.
+`set_tool_enabled` and `runtime_describe` are protected recovery tools.
+
+### `set_memory_policy`
+
+Updates the memory interceptors' session overlay: recall result counts and
+independent recall/persistence switches. The memory plugin reads this policy
+from immutable `:agent/state` on every exchange. Backend and embedder instances
+remain Integrant-managed and are not replaced by this pure-data transition.
+
+### `reload_runtime`
+
+Stages a one-shot reload request. After the current chain finishes and its
+state delta is merged, the outer runtime reloads the named project namespaces,
+asks each Integrant-assembled built-in plugin for a fresh interceptor vector,
+and atomically swaps the chain used by the next exchange. Tool code never
+mutates the chain or runtime atom.
+
+Core engine/protocol namespaces (`runtime`, `chain`, `system`, `tool`, and
+`transitions`) report `restart-required`: replacing their generated
+classes/protocol identities inside a running JVM is unsafe. The request is
+consumed either way, and `runtime_describe` reports the reload status.
 
 ## Pipeline (`:tools` slot)
 

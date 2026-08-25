@@ -15,6 +15,85 @@
     (is (not (tr/valid-transition? {:op :set-llm :model "m" :extra 1})))
     (is (not (tr/valid-transition? {:op :other :model "m"})))))
 
+(deftest runtime-policy-transition-validation
+  (testing "system message and loop policy ops are closed and bounded"
+    (is (tr/valid-transition? {:op :set-system-message :message "new policy"}))
+    (is (not (tr/valid-transition? {:op :set-system-message :message ""})))
+    (is (tr/valid-transition? {:op :set-loop-opts :max-loop-depth 8}))
+    (is (tr/valid-transition?
+         {:op :set-loop-opts
+          :tool-content-caps {"file_read" 4096}}))
+    (is (not (tr/valid-transition? {:op :set-loop-opts})))
+    (is (not (tr/valid-transition?
+              {:op :set-loop-opts :max-loop-depth 0})))
+    (is (not (tr/valid-transition?
+              {:op :set-loop-opts :arbitrary true})))))
+
+(deftest runtime-policy-transitions-produce-durable-delta
+  (let [ops [{:op :set-system-message :message "interceptors all the way down"}
+             {:op :set-loop-opts
+              :max-loop-depth 9
+              :max-tool-calls-per-turn 4}]
+        {:keys [state applied]}
+        (tr/apply-transitions
+         {:agent/loop-opts {:max-tool-calls-per-exchange 20}}
+         ops)
+        delta (tr/durable-delta {} state applied)]
+    (is (= "interceptors all the way down"
+           (:agent/system-message state)))
+    (is (= {:max-tool-calls-per-exchange 20
+            :max-loop-depth 9
+            :max-tool-calls-per-turn 4}
+           (:agent/loop-opts state)))
+    (is (= (:agent/system-message state)
+           (:agent/system-message delta)))
+    (is (= (:agent/loop-opts state)
+           (:agent/loop-opts delta)))))
+
+(deftest tool-overlay-transition-is-durable-and-reversible
+  (let [disable {:op :set-tool-enabled :tool-name "file_write" :enabled false}
+        enable {:op :set-tool-enabled :tool-name "file_write" :enabled true}
+        disabled (tr/apply-transition {} disable)
+        enabled (tr/apply-transition disabled enable)
+        delta (tr/durable-delta {}
+                                disabled
+                                [disable])]
+    (is (tr/valid-transition? disable))
+    (is (= ["file_write"] (:agent/disabled-tools disabled)))
+    (is (= [] (:agent/disabled-tools enabled)))
+    (is (= ["file_write"] (:agent/disabled-tools delta)))))
+
+(deftest memory-policy-transition-is-merged-and-durable
+  (let [op {:op :set-memory-policy
+            :top-y 7
+            :recall-enabled false}
+        before {:agent/memory-policy {:last-n 4
+                                      :persist-enabled true}}
+        after (tr/apply-transition before op)
+        delta (tr/durable-delta before after [op])]
+    (is (tr/valid-transition? op))
+    (is (= {:top-y 7
+            :last-n 4
+            :recall-enabled false
+            :persist-enabled true}
+           (:agent/memory-policy after)))
+    (is (= (:agent/memory-policy after)
+           (:agent/memory-policy delta)))))
+
+(deftest runtime-reload-transition-is-allowlisted-and-durable
+  (let [op {:op :reload-runtime
+            :namespaces ["kschltz.agent.interceptors"
+                         "kschltz.agent.interceptors"]}
+        after (tr/apply-transition {} op)
+        delta (tr/durable-delta {} after [op])]
+    (is (tr/valid-transition? op))
+    (is (not (tr/valid-transition?
+              {:op :reload-runtime :namespaces ["clojure.core"]})))
+    (is (= {:namespaces ["kschltz.agent.interceptors"]}
+           (:agent/runtime-reload after)))
+    (is (= (:agent/runtime-reload after)
+           (:agent/runtime-reload delta)))))
+
 (deftest apply-transitions-folds-left-to-right
   (let [{:keys [state applied]}
         (tr/apply-transitions {:model "a" :base-url "http://old"}
@@ -112,6 +191,24 @@
            (:agent/transitions-applied out)))
     ;; history delta preserved
     (is (= [] (get-in out [:agent/state-delta :agent/history])))))
+
+(deftest apply-queued-patches-loop-policy-on-current-context
+  (let [ctx {:agent/state {:agent/system-message "old"
+                           :agent/loop-opts {:max-loop-depth 3}}
+             :agent/loop-opts {:max-loop-depth 3
+                               :max-tool-calls-per-exchange 10}
+             :agent/transitions
+             [{:op :set-system-message :message "new"}
+              {:op :set-loop-opts :max-loop-depth 6}]
+             :agent/state-delta {}}
+        out (tr.ix/apply-queued-transitions ctx)]
+    (is (= "new" (get-in out [:agent/state :agent/system-message])))
+    (is (= "new" (get-in out [:agent/state-delta :agent/system-message])))
+    (is (= {:max-loop-depth 6
+            :max-tool-calls-per-exchange 10}
+           (:agent/loop-opts out)))
+    (is (= {:max-loop-depth 6}
+           (get-in out [:agent/state-delta :agent/loop-opts])))))
 
 (deftest harvest-interceptor-rewrites-all-tool-results
   (let [envelope (tr/encode-result

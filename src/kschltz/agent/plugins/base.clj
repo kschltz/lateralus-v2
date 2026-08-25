@@ -60,4 +60,5 @@
        (assoc ix/summarize-history-interceptor :slot :history-summarize)
        (assoc ix/deliver-responses :slot :observe)
        (assoc ix/notify :slot :notify)]
-      {:plugin/name :base})))
+      {:plugin/name :base
+       :plugin/rebuild (fn [] (base-plugin))})))

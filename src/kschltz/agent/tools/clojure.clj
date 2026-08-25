@@ -3,8 +3,10 @@
 
    These tools wrap rewrite-clj to read, query, and modify Clojure source
    files while preserving whitespace and comments. Every write is guarded by a
-   round-trip parse check so that malformed edits are never persisted. On
-   success a `.bak` sidecar is written first.
+   round-trip parse check so that malformed edits are never persisted. Reads
+   and writes enforce canonical workspace containment and blocked paths.
+   Successful writes use an optimistic-concurrency fence, timestamped backup,
+   atomic move, and post-write verification.
 
    Paths may be absolute or relative; when a `:workspace-root` is provided,
    relative paths are resolved against it, matching the filesystem tool
@@ -12,16 +14,24 @@
   (:require [cheshire.core :as json]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.clojure-impl :as impl]
+            [kschltz.agent.tools.clojure-lint :as lint]
             [rewrite-clj.zip :as z]
-            [rewrite-clj.node :as n])
-  (:import [java.nio.file Path]))
+            [rewrite-clj.node :as n]))
 
 (def default-max-read-bytes impl/default-max-read-bytes)
 
 (def ^:private OutputSchema:String :string)
 
 (defn- ok-result [m] (json/generate-string m))
-(defn- error-result [t] (format "Clojure tool error: %s" (ex-message t)))
+(defn- error-result [t]
+  (let [data (if (instance? clojure.lang.ExceptionInfo t)
+               (ex-data t)
+               {})]
+    (json/generate-string
+     (merge {:ok false
+             :error (or (:error data) :clojure-tool-error)
+             :message (or (ex-message t) (.getName (class t)))}
+            (dissoc data :error)))))
 
 (def InputSchema:Path
   [:map [:path {:description "Relative or absolute path to the Clojure/EDN file"} :string]])
@@ -125,10 +135,12 @@
                            (let [name-zloc (z/right (z/down ns-zloc))]
                              (z/insert-right name-zloc
                                              (impl/new-require-section-node libspec-node))))
-                out      (impl/root-string-or-fail new-zloc (impl/path->str path'))]
-            (impl/write-with-backup! path' out)
-            (ok-result {:path (impl/path->str path') :changed true
-                        :libspec (pr-str libspec) :alias (when alias-sym (pr-str alias-sym))})))))))
+                out      (impl/root-string-or-fail new-zloc (impl/path->str path'))
+                write    (impl/write-with-backup! path' source out)]
+            (ok-result (merge write
+                              {:changed true
+                               :libspec (pr-str libspec)
+                               :alias (when alias-sym (pr-str alias-sym))}))))))))
 
 (deftype AddRequireTool [workspace-root max-read-bytes]
   tool/Tool
@@ -152,9 +164,9 @@
     (if-not def-zloc
       (ok-result {:path (impl/path->str path') :changed false :reason "definition not found"})
       (let [new-zloc (z/remove def-zloc)
-            out      (impl/root-string-or-fail new-zloc (impl/path->str path'))]
-        (impl/write-with-backup! path' out)
-        (ok-result {:path (impl/path->str path') :changed true :name (pr-str name)})))))
+            out      (impl/root-string-or-fail new-zloc (impl/path->str path'))
+            write    (impl/write-with-backup! path' source out)]
+        (ok-result (merge write {:changed true :name (pr-str name)}))))))
 
 (deftype RemoveDefTool [workspace-root max-read-bytes]
   tool/Tool
@@ -181,10 +193,13 @@
                                       zloc)))]
       (if (zero? @occurrences)
         (ok-result {:path (impl/path->str path') :changed false :reason "symbol not found"})
-        (let [out (impl/root-string-or-fail renamed-zloc (impl/path->str path'))]
-          (impl/write-with-backup! path' out)
-          (ok-result {:path (impl/path->str path') :changed true :renamed @occurrences
-                      :old (pr-str old) :new (pr-str new)}))))))
+        (let [out (impl/root-string-or-fail renamed-zloc (impl/path->str path'))
+              write (impl/write-with-backup! path' source out)]
+          (ok-result (merge write
+                            {:changed true
+                             :renamed @occurrences
+                             :old (pr-str old)
+                             :new (pr-str new)})))))))
 
 (deftype RenameSymbolTool [workspace-root max-read-bytes]
   tool/Tool
@@ -212,9 +227,9 @@
         new-zloc  (if (= position' :beginning)
                     (z/insert-child zloc form-node)
                     (z/append-child zloc form-node))
-        out       (impl/root-string-or-fail new-zloc (impl/path->str path'))]
-    (impl/write-with-backup! path' out)
-    (ok-result {:path (impl/path->str path') :changed true :position (name position')})))
+        out       (impl/root-string-or-fail new-zloc (impl/path->str path'))
+        write     (impl/write-with-backup! path' source out)]
+    (ok-result (merge write {:changed true :position (name position')}))))
 
 (deftype InsertFormTool [workspace-root max-read-bytes]
   tool/Tool
@@ -243,9 +258,9 @@
                           {:kind :clojure-tool/error :path (impl/path->str path')}))
           (let [body-only (impl/remove-all-right first-body)
                 new-zloc  (z/replace body-only body-node)
-                out       (impl/root-string-or-fail new-zloc (impl/path->str path'))]
-            (impl/write-with-backup! path' out)
-            (ok-result {:path (impl/path->str path') :changed true :name (pr-str name)})))))))
+                out       (impl/root-string-or-fail new-zloc (impl/path->str path'))
+                write     (impl/write-with-backup! path' source out)]
+            (ok-result (merge write {:changed true :name (pr-str name)}))))))))
 
 (deftype EditDefTool [workspace-root max-read-bytes]
   tool/Tool
@@ -267,8 +282,8 @@
         out    (impl/root-string-or-fail zloc (impl/path->str path'))]
     (if (= source out)
       (ok-result {:path (impl/path->str path') :changed false})
-      (do (impl/write-with-backup! path' out)
-          (ok-result {:path (impl/path->str path') :changed true})))))
+      (let [write (impl/write-with-backup! path' source out)]
+        (ok-result (merge write {:changed true}))))))
 
 (deftype FormatFileTool [workspace-root max-read-bytes]
   tool/Tool
@@ -337,15 +352,21 @@
    Accepts an optional `opts` map with:
      :workspace-root — root for resolving relative paths
      :max-read-bytes — cap for source reads (default 256 KB)
+     :blocked-paths  — forbidden path segments shared with file tools
+     :lint-runner    — optional diagnostics runner seam for tests
 
    When `:workspace-root` is omitted, the current working directory is
-   used. No path containment is enforced."
+   used. All reads and writes enforce canonical workspace containment,
+   blocked paths, and Clojure/EDN file types."
   ([] (clojure-registry {}))
-  ([{:keys [workspace-root max-read-bytes]}]
+  ([{:keys [workspace-root max-read-bytes blocked-paths lint-runner]}]
    {"clojure_query"         (query workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_add_require"   (add-require workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_remove_def"    (remove-def workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_rename_symbol" (rename-symbol workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_insert_form"   (insert-form workspace-root (or max-read-bytes default-max-read-bytes))
     "clojure_edit_def"      (edit-def workspace-root (or max-read-bytes default-max-read-bytes))
-    "clojure_format_file"   (format-file workspace-root (or max-read-bytes default-max-read-bytes))}))
+    "clojure_format_file"   (format-file workspace-root (or max-read-bytes default-max-read-bytes))
+    "clojure_lint"          (lint/clojure-lint workspace-root
+                                               {:blocked-paths blocked-paths
+                                                :runner lint-runner})}))

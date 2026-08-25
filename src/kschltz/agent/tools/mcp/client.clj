@@ -188,15 +188,15 @@
                        [:server-id {:optional true} :string]
                        [:startup-timeout-ms {:optional true} :int]
                        [:request-timeout-ms {:optional true} :int]]]
-       :any])
+       [:fn proto/client?]])
 
 (m/=> connect-stdio!
-      [:=> [:cat :map] :any])
+      [:=> [:cat :map] [:fn proto/client?]])
 
 (m/=> connect-http!
-      [:=> [:cat :map] :any])
+      [:=> [:cat :map] [:fn proto/client?]])
 
 (m/=> connect!
-      [:=> [:cat :map] :any])
+      [:=> [:cat :map] [:fn proto/client?]])
 
 (mi/instrument! {:filters [(mi/-filter-ns 'kschltz.agent.tools.mcp.client)]})

@@ -63,8 +63,8 @@
     (is (valid? s/WebConfig {:provider :none})))
   (testing "Accepts :mojeek"
     (is (valid? s/WebConfig {:provider :mojeek})))
-  (testing "Accepts :searxng"
-    (is (valid? s/WebConfig {:provider :searxng}))))
+  (testing "Rejects unimplemented providers"
+    (is (not (valid? s/WebConfig {:provider :searxng})))))
 
 (deftest web-config-rejects-unknown-providers
   (testing "Rejects :tavily (not in enum)"

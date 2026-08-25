@@ -2,27 +2,48 @@
   "Internal rewrite-clj helpers for the Clojure structured-editing tools.
    This namespace is not part of the public tool API; it is imported by
    kschltz.agent.tools.clojure."
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
+            [kschltz.agent.tools.file-path :as fpath]
+            [kschltz.agent.tools.file-safety :as fs]
             [rewrite-clj.zip :as z]
             [rewrite-clj.node :as n])
-  (:import [java.io File]
-           [java.nio.file Files Path StandardCopyOption]
+  (:import [java.nio.file Files Path]
            [java.nio.charset StandardCharsets]))
 
 (def default-max-read-bytes (* 256 1024))
 
-(defn workspace-root->file [workspace-root]
-  (if (seq workspace-root) (io/file workspace-root) (io/file ".")))
+(defn resolve-path
+  "Resolve and validate a Clojure/EDN target inside `workspace-root`.
 
-(defn resolve-path [workspace-root user-path]
-  (let [^File root-file (workspace-root->file workspace-root)
-        ^File user-file (io/file user-path)
-        ^Path root-path (.toPath root-file)
-        ^Path user-path' (.toPath user-file)]
-    (.normalize (if (.isAbsolute user-path')
-                  user-path'
-                  (.resolve root-path user-path')))))
+   Canonicalization follows existing symlinks, so a path that appears to be
+   inside the workspace but resolves outside it is rejected. Blocked segments
+   are checked on both the requested and canonical paths."
+  ([workspace-root user-path]
+   (resolve-path workspace-root user-path fs/default-blocked-paths))
+  ([workspace-root user-path blocked-paths]
+   (let [requested (fpath/resolve-path workspace-root user-path)
+         root (fs/canonical-path
+               (.toPath (fpath/workspace-root->file workspace-root)))
+         canonical (fs/canonical-path requested)]
+     (cond
+       (not (fs/within-write-dir? root canonical))
+       (throw (ex-info "Path resolves outside the configured workspace"
+                       {:error :outside-workspace
+                        :path (fpath/path->str requested)}))
+
+       (or (fs/blocked-path? requested blocked-paths)
+           (fs/blocked-path? canonical blocked-paths))
+       (throw (ex-info "Path contains a blocked segment"
+                       {:error :blocked-path
+                        :path (fpath/path->str requested)}))
+
+       (not (fs/clojure-file? canonical))
+       (throw (ex-info "Structured Clojure tools require a Clojure/EDN file"
+                       {:error :wrong-file-type
+                        :path (fpath/path->str requested)
+                        :use-tool "file_read/file_update"}))
+
+       :else canonical))))
 
 (defn path->str [^Path path] (str path))
 
@@ -50,14 +71,33 @@
         (throw (ex-info (format "Round-trip validation failed: %s" (ex-message t))
                         {:kind :clojure-tool/error :path path :reason :round-trip-failed :output out}))))))
 
-(defn write-with-backup! [^Path path content]
-  (let [file (.toFile path)
-        bak  (io/file (str file ".bak"))]
-    (when (.exists file)
-      (.mkdirs (.getParentFile bak))
-      (spit bak (slurp file :encoding "UTF-8") :encoding "UTF-8"))
-    (spit file content :encoding "UTF-8")
-    (path->str path)))
+(defn write-with-backup!
+  "Commit `content` only when the file still matches `original`.
+
+   The read/transform/write race is fenced under the same per-path lock used
+   by the generic file tools. A successful replacement receives a timestamped
+   byte-for-byte backup, atomic landing, and post-write verification."
+  [^Path path ^String original ^String content]
+  (let [original-bytes (.getBytes original StandardCharsets/UTF_8)
+        sentinel (fs/staleness-sentinel path original-bytes)]
+    (fs/with-path-lock (path->str path)
+      (when (fs/check-staleness path sentinel)
+        (throw (ex-info "File changed after it was read"
+                        {:error :stale-file
+                         :path (path->str path)
+                         :expected-sha256 (:sha256 sentinel)})))
+      (let [backup (fs/make-backup! path)]
+        (fs/write-atomically! path content)
+        (let [written (Files/readAllBytes path)
+              expected (.getBytes content StandardCharsets/UTF_8)]
+          (when-not (java.util.Arrays/equals ^bytes expected ^bytes written)
+            (throw (ex-info "Atomic write verification failed"
+                            {:error :write-verify-failed
+                             :path (path->str path)})))
+          {:path (path->str path)
+           :backup-path backup
+           :previous-sha256 (:sha256 sentinel)
+           :sha256 (fs/sha256 written)})))))
 
 (defn top-level-forms [forms-zloc]
   (loop [zloc (z/down forms-zloc) acc []]

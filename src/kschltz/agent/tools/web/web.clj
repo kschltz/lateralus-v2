@@ -10,7 +10,7 @@
 
    Each tool holds a merged `config` map and dispatches through the
    `WebProvider` protocol to whatever provider was wired in by the
-   factory (`:none`, `:mojeek`, `:searxng`, or a test stub). All
+   factory (`:none`, `:mojeek`, `:ddg`, or a test stub). All
    guard pipeline calls happen *inside* the tool so the model-visible
    error shape is consistent across providers.
 
@@ -162,7 +162,7 @@
                 (let [result-count (min (:max-result-count cfg)
                                         (max 1 (or (:result-count args) 5)))
                       opts       (assoc cfg :result-count result-count)
-                      raw        (protocol/-search provider cleaned opts)
+                      raw        (protocol/search provider cleaned opts)
                       guarded    (guards/guard-results (:results raw) cfg)]
                   (json/generate-string
                    (cond-> {:provider (or (:provider raw) provider-name)
@@ -199,7 +199,7 @@
                 override    (:max-bytes args)
                 opts        (cond-> cfg
                              (some? override) (assoc :max-bytes override))
-                raw         (protocol/-fetch provider allowed-url opts)]
+                raw         (protocol/fetch provider allowed-url opts)]
             (json/generate-string
              {:url    (:url raw)
               :title  (:title raw)
@@ -229,7 +229,7 @@
           opts          (cond-> cfg
                          (some? (:selector args)) (assoc :selector (:selector args)))]
       (try
-        (let [raw (protocol/-extract provider (:html args) opts)]
+        (let [raw (protocol/extract provider (:html args) opts)]
           (json/generate-string
            (cond-> {:text           (:text raw)
                     :title          (:title raw)
@@ -246,7 +246,7 @@
 
 (defn- resolve-provider
   "Turn the `:provider` entry of `config` into a `WebProvider` instance.
-   Accepts either a keyword (`:none` / `:mojeek` / `:searxng`) or an
+   Accepts either a keyword (`:none` / `:mojeek` / `:ddg`) or an
    already-resolved `WebProvider` record (the test seam passes records
    directly). Returns `config` with `:provider` set to the instance and
    `:provider-name` set to the backend keyword for JSON error envelopes."
@@ -277,7 +277,7 @@
 
    `config` is a map with at least:
      :provider       — a `WebProvider` instance (or a `:none` /
-                       `:mojeek` / `:searxng` keyword if a wiring layer
+                       `:mojeek` / `:ddg` keyword if a wiring layer
                        has not yet resolved it).
      :provider-name  — keyword naming the backend; included in JSON
                        error envelopes so the model can tell which

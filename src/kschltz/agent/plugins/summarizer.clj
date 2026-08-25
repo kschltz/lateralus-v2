@@ -42,4 +42,10 @@
                                    :model           model})
        :name ::ix/summarize-history
        :slot :history-summarize)]
-    {:plugin/name :summarizer}))
+    {:plugin/name :summarizer
+     :plugin/rebuild
+     (fn []
+       (summarizer-plugin {:llm-client llm-client
+                           :trigger trigger
+                           :protected-pairs protected-pairs
+                           :model model}))}))

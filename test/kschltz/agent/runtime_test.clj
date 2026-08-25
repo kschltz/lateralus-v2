@@ -119,7 +119,10 @@
   (testing "send-message generates session-id, user-msg-id, assistant-msg-id
    on the per-exchange ctx"
     (let [events  (atom [])
-          runtime (runtime/start {:exchange-chain (noop-chain events)})]
+          chain (noop-chain events)
+          agent-map {:exchange-chain chain
+                     :agent/loop-opts {:max-loop-depth 3}}
+          runtime (runtime/start agent-map)]
       (runtime/send-message runtime "hello")
       (let [entered-ctx (-> @events first second)]
         (is (some? (:exchange/session-id entered-ctx))
@@ -131,7 +134,11 @@
         (is (= "hello" (:exchange/user-text entered-ctx))
             "user-text is present on the per-exchange ctx")
         (is (= (runtime/session-id runtime) (:exchange/session-id entered-ctx))
-            "the per-exchange session-id matches the runtime's session-id")))))
+            "the per-exchange session-id matches the runtime's session-id")
+        (is (= agent-map (:agent/agent-map entered-ctx))
+            "runtime descriptor and sub-agent tools can inspect the active agent-map")
+        (is (= chain (:agent/exchange-chain entered-ctx))
+            "runtime descriptor sees the exact ordered chain being executed")))))
 
 (deftest send-message-runs-chain-synchronously
   (testing "send-message runs the chain on the caller thread (MVP simplification).
@@ -183,6 +190,72 @@
       (runtime/send-message runtime "third")
       (is (= {:n 3 :config {:turn 2 :extra :three}} (user-state runtime))
           "scalar :extra is last-write-wins; nested :turn keeps its prior value"))))
+
+(deftest session-loop-policy-overrides-boot-policy-on-later-exchanges
+  (let [seen (atom [])
+        chain [{:name ::loop-policy
+                :enter (fn [ctx]
+                         (swap! seen conj (:agent/loop-opts ctx))
+                         ctx)
+                :leave (fn [ctx]
+                         (assoc ctx :agent/state-delta
+                                {:agent/loop-opts {:max-loop-depth 7}}))}]
+        r (runtime/start {:exchange-chain chain
+                          :agent/loop-opts {:max-loop-depth 3
+                                            :max-tool-calls-per-turn 2}})]
+    (runtime/send-message r "first")
+    (runtime/send-message r "second")
+    (is (= {:max-loop-depth 3
+            :max-tool-calls-per-turn 2}
+           (first @seen)))
+    (is (= {:max-loop-depth 7
+            :max-tool-calls-per-turn 2}
+           (second @seen)))))
+
+(deftest deferred-runtime-reload-rebuilds-chain-for-next-exchange
+  (let [rebuilds (atom 0)
+        new-chain [{:name ::reloaded
+                    :enter #(assoc % :reloaded-chain-ran true)}]
+        old-chain [{:name ::request-reload
+                    :leave #(assoc % :agent/state-delta
+                                   {:agent/runtime-reload
+                                    {:namespaces
+                                     ["kschltz.agent.plugins.tools"]}})}]
+        r (runtime/start
+           {:exchange-chain old-chain
+            :agent/rebuild-chain
+            (fn []
+              (swap! rebuilds inc)
+              new-chain)})
+        first-result (runtime/send-message r "reload")
+        second-result (runtime/send-message r "after")]
+    (is (= 1 @rebuilds))
+    (is (= :reloaded
+           (get-in first-result [:agent/runtime-reload-status :status])))
+    (is (nil? (:agent/runtime-reload (runtime/stop r)))
+        "outer runtime consumes the one-shot request")
+    (is (true? (:reloaded-chain-ran second-result))
+        "the next exchange uses the rebuilt chain")))
+
+(deftest core-runtime-namespaces-require-process-restart
+  (let [rebuilds (atom 0)
+        chain [{:name ::request-core-reload
+                :leave #(assoc % :agent/state-delta
+                               {:agent/runtime-reload
+                                {:namespaces ["kschltz.agent.runtime"]}})}]
+        r (runtime/start
+           {:exchange-chain chain
+            :agent/rebuild-chain
+            (fn []
+              (swap! rebuilds inc)
+              chain)})
+        result (runtime/send-message r "reload core")]
+    (is (zero? @rebuilds))
+    (is (= :restart-required
+           (get-in result [:agent/runtime-reload-status :status])))
+    (is (= ["kschltz.agent.runtime"]
+           (get-in result
+                   [:agent/runtime-reload-status :namespaces])))))
 
 (deftest send-message-uses-custom-chain
   (testing "send-message runs the chain from :exchange-chain in agent-map"

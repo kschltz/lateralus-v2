@@ -26,7 +26,9 @@
             [clojure.string :as str]
             [hato.client :as http]
             [kschltz.agent.llm.client :as lcm-client]
-            [kschltz.agent.llm.schemas :as schemas]))
+            [kschltz.agent.llm.schemas :as schemas]
+            [malli.core :as m]
+            [malli.instrument :as mi]))
 
 (def default-connect-timeout-ms
   "Connect timeout (ms). Cloud APIs routinely need >2s for TLS
@@ -38,6 +40,29 @@
   "Request timeout (ms). A 60s budget is enough for a single
    non-streaming chat completion from any reasonable provider."
   60000)
+
+(def HttpCallOpts
+  [:map
+   [:base-url :string]
+   [:model :string]
+   [:messages [:sequential :map]]
+   [:api-key {:optional true} [:maybe :string]]
+   [:temperature {:optional true} number?]
+   [:max-tokens {:optional true} :int]
+   [:tools {:optional true} [:sequential :map]]
+   [:tool-choice {:optional true} :any]
+   [:connect-timeout-ms {:optional true} :int]
+   [:request-timeout-ms {:optional true} :int]])
+
+(def HttpClientOpts
+  [:map
+   [:base-url :string]
+   [:model {:optional true} :string]
+   [:api-key {:optional true} [:maybe :string]]
+   [:temperature {:optional true} number?]
+   [:max-tokens {:optional true} :int]
+   [:connect-timeout-ms {:optional true} :int]
+   [:request-timeout-ms {:optional true} :int]])
 
 (defn- ->headers
   "Build the HTTP headers for a chat-completions request. Includes
@@ -312,7 +337,11 @@
     (let [status (:status response)]
       (cond
         (<= 200 status 299)
-        (try (json/parse-string (:body response) true)
+        (try (-> (:body response)
+                 (json/parse-string true)
+                 schemas/decode-response)
+             (catch clojure.lang.ExceptionInfo e
+               (throw e))
              (catch Throwable t
                (throw (ex-info "LLM HTTP response body is not valid JSON"
                                {:kind   :parse
@@ -345,9 +374,26 @@
       (let [merged (merge opts req)
             _      (schemas/decode-request merged)
             resp   (post-chat merged)]
-        ;; Note: we don't call decode-response here because real
-        ;; providers routinely return extra fields the strict
-        ;; ChatResponse schema doesn't list. extract-* helpers
-        ;; tolerate that; the schema is for the *request* side
-        ;; and for tests that want strict shape enforcement.
         resp))))
+
+(m/=> get-json
+      [:=> [:cat :string [:maybe :string]] :map])
+(m/=> list-models
+      [:function
+       [:=> [:cat :string] [:vector :string]]
+       [:=> [:cat :string [:maybe :string]] [:vector :string]]])
+(m/=> list-models-thorough
+      [:function
+       [:=> [:cat :string] [:vector :string]]
+       [:=> [:cat :string [:maybe :string]] [:vector :string]]])
+(m/=> post-chat
+      [:=> [:cat HttpCallOpts] schemas/ChatResponse])
+(m/=> http-client
+      [:=> [:cat HttpClientOpts]
+       [:fn #(satisfies? lcm-client/LlmClient %)]])
+
+(defn instrument!
+  []
+  (mi/instrument! {:filters [(mi/-filter-ns 'kschltz.agent.llm.http)]}))
+
+(instrument!)

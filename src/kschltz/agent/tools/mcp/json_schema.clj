@@ -36,7 +36,9 @@
               (string? ty) ty
               (keyword? ty) (name ty)
               :else nil))]
-    (if (and norm (or (nil? t) (= t "object")))
+    (if (nil? norm)
+      [:map]
+      (if (or (nil? t) (= t "object"))
       (let [props (or (:properties norm) {})
             required (set (map (fn [x]
                                  (if (keyword? x) (name x) (str x)))
@@ -57,4 +59,4 @@
         (if (seq entries)
           (into [:map] entries)
           [:map]))
-      (json-type->malli (or t "object")))))
+        (json-type->malli (or t "object"))))))

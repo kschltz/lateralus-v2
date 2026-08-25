@@ -7,11 +7,13 @@
      - empty plugin list produces empty assembled chain
      - halt policy: only keys with halt-key! are halted"
   (:require [clojure.java.io :as io]
+            [cheshire.core :as json]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
             [kschltz.agent.system :as system]
+            [kschltz.agent.tool :as tool]
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.memory.embedding :as embedding]
@@ -57,6 +59,7 @@
       (is (contains? agent :agent/llm-client))
       (is (contains? agent :embedder))
       (is (contains? agent :memory-backend))
+      (is (fn? (:agent/rebuild-chain agent)))
       (is (contains? agent :assembled))
       (is (vector? (:assembled agent))
           "assembled chain is a vector of interceptors")
@@ -68,7 +71,10 @@
       (is (some #(= :kschltz.agent.loop/inject-tools (:name %)) (:assembled agent))
           "tool inject is in the assembled chain")
       (is (some #(= :kschltz.agent.loop/dispatch-tools (:name %)) (:assembled agent))
-          "tool dispatch is in the assembled chain"))))
+          "tool dispatch is in the assembled chain")
+      (is (= (mapv :name (:exchange-chain agent))
+             (mapv :name ((:agent/rebuild-chain agent))))
+          "rebuilt built-in plugins preserve the configured chain shape"))))
 
 (deftest complete-plugin-replaces-base-chain
   (testing "a plugin marked :plugin/complete? true is not prepended with base"
@@ -113,7 +119,29 @@
           plugins (:lateralus/plugins s)]
       (is (= :base (-> plugins first meta :plugin/name)))
       (is (= :memory (-> plugins second meta :plugin/name)))
-      (is (= :tools (-> plugins (nth 2) meta :plugin/name))))))
+      (is (= :tools (-> plugins (nth 2) meta :plugin/name)))
+      (is (every? fn? (map #(-> % meta :plugin/rebuild) plugins))))))
+
+(deftest merged-tool-registry-can-rebuild-fresh-tool-instances
+  (let [s (with-system system/default-config)
+        registry (:lateralus/tool-registry s)
+        rebuild (-> registry meta :registry/rebuild)
+        fresh (rebuild)]
+    (is (fn? rebuild))
+    (is (= (set (keys registry)) (set (keys fresh))))
+    (is (not (identical? (get registry "file_read")
+                         (get fresh "file_read"))))
+    (is (fn? (-> fresh meta :registry/rebuild))
+        "rebuilt registries remain rebuildable for later reloads")))
+
+(deftest every-registered-tool-definition-is-json-serializable
+  (let [s (with-system system/default-config)
+        registry (:lateralus/tool-registry s)]
+    (is (seq registry) "the default system registers tools")
+    (doseq [[name registered-tool] registry]
+      (is (string? (json/generate-string
+                    (tool/tool-definition registered-tool)))
+          (str name " definition serializes to JSON")))))
 
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"
@@ -218,3 +246,13 @@
       (is (seq (:problems data)) "ex-data contains Malli problems")
       (is (some #(= :store (last (:path %))) (:problems data))
           "error mentions the invalid :store key"))))
+
+(deftest invalid-harness-tool-configs-fail-fast
+  (doseq [[key config]
+          [[:lateralus/file-tools {:workspace-root 42}]
+           [:lateralus/self-awareness-tools {:workspace-root 42}]
+           [:lateralus/clojure-tools {:workspace-root 42}]
+           [:lateralus/config-tools {:catalog :unknown}]]]
+    (let [data (init-throws? {key config})]
+      (is (= key (:key data)) (str "error names " key))
+      (is (seq (:problems data)) (str key " carries Malli problems")))))

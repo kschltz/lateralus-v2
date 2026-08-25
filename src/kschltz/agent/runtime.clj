@@ -6,7 +6,8 @@
   (:require [kschltz.agent.chain :as chain]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.plugin :as plugin]
-            [kschltz.agent.plugins.base :as plugins.base]))
+            [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.runtime-reload :as runtime-reload]))
 
 (def ^:private default-exchange-chain
   (plugin/assemble-chain [(plugins.base/base-plugin)]))
@@ -51,31 +52,40 @@
   (send-message [runtime user-text] "Run one exchange.")
   (stop [runtime] "Return the current merged state."))
 
-(defrecord RuntimeRecord [state agent-map session-id log-sink]
+(defrecord RuntimeRecord [state agent-map session-id log-sink chain]
   AgentRuntime
   (session-id [_] session-id)
   (send-message [this user-text]
     (let [user-msg-id      (str (random-uuid))
           assistant-msg-id (str (random-uuid))
           base-state       @(:state this)
+          chain-to-run     @chain
           ctx              {:exchange/session-id       session-id
                             :exchange/user-msg-id      user-msg-id
                             :exchange/assistant-msg-id assistant-msg-id
                             :exchange/user-text        user-text
                             :agent/state               base-state
+                            :agent/agent-map           agent-map
+                            :agent/exchange-chain      chain-to-run
                             :llm/client               (:agent/llm-client agent-map)
                             :memory/backend           (:memory-backend agent-map)
                             :embedder                 (:embedder agent-map)
                             :agent/log-sink           log-sink
-                            :agent/loop-opts          (:agent/loop-opts agent-map)}
-          chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
+                            :agent/loop-opts          (merge
+                                                       (or (:agent/loop-opts agent-map) {})
+                                                       (or (:agent/loop-opts base-state) {}))}
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
           merged           (merge-state base-state
                                         (merge-state delta
                                                      (usage-delta base-state (:llm/response result))))]
       (reset! (:state this) merged)
-      result))
+      (when-let [request (:agent/runtime-reload merged)]
+        (runtime-reload/apply! this request))
+      (cond-> result
+        (:agent/runtime-reload-status @(:state this))
+        (assoc :agent/runtime-reload-status
+               (:agent/runtime-reload-status @(:state this))))))
   (stop [_] @state))
 
 (defn start
@@ -87,10 +97,12 @@
   ([agent-map]
    (start agent-map (str (random-uuid))))
   ([agent-map session-id]
-   (let [log-sink (logging/build-sink (:agent/logging agent-map) session-id)]
+   (let [log-sink (logging/build-sink (:agent/logging agent-map) session-id)
+         initial-chain (get agent-map :exchange-chain default-exchange-chain)]
      (map->RuntimeRecord
       {:state      (atom (merge (:initial-state agent-map {})
                                 {:agent/session-id session-id}))
        :agent-map  agent-map
        :session-id session-id
-       :log-sink   log-sink}))))
+       :log-sink   log-sink
+       :chain      (atom initial-chain)}))))

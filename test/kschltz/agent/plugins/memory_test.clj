@@ -84,6 +84,36 @@
       (is (= 1 (count @calls)))
       (is (= [0.0 0.0 0.0 0.0] (:query-embedding (first @calls)))))))
 
+(deftest memory-plugin-honors-session-policy
+  (let [calls (atom [])
+        b (recording-backend calls [{:content "remembered"}])
+        p (plugins.memory/memory-plugin {:backend b :top-y 3 :last-n 5})
+        recall (by-slot p :enrich)
+        persist (by-slot p :persist)
+        disabled-ctx {:agent/state {:agent/memory-policy
+                                    {:recall-enabled false
+                                     :persist-enabled false}}
+                      :exchange/session-id :s
+                      :exchange/user-msg-id "u"
+                      :exchange/assistant-msg-id "a"
+                      :exchange/user-text "hello"
+                      :exchange/response "world"}
+        disabled-out ((:enter recall) disabled-ctx)
+        _ ((:leave persist) disabled-ctx)]
+    (is (= [] (:memory/recall disabled-out)))
+    (is (empty? @calls))
+    (let [enabled-out
+          ((:enter recall)
+           (assoc disabled-ctx
+                  :agent/state
+                  {:agent/memory-policy
+                   {:recall-enabled true
+                    :top-y 9
+                    :last-n 11}}))]
+      (is (= [{:content "remembered"}] (:memory/recall enabled-out)))
+      (is (= 9 (get-in @calls [0 2 :top-y])))
+      (is (= 11 (get-in @calls [0 2 :last-n]))))))
+
 ;; ---- Integration: memory plugin + base plugin via chain ----
 
 (deftest memory-recall-sets-ctx-key

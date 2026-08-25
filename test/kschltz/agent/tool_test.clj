@@ -83,6 +83,23 @@
       (is (= "adds numbers" (get-in def [:function :description])))
       (is (map? (get-in def [:function :parameters]))))))
 
+(deftest regex-tool-definition-is-json-serializable
+  (testing "Malli regex schemas retain validation and emit JSON Schema pattern strings"
+    (let [pattern #"^allowed(?:\.[a-z]+)?$"
+          t (reify tool/Tool
+              (-name [_] "regex_input")
+              (-description [_] "accepts a constrained name")
+              (-input-schema [_] [:map [:name [:re pattern]]])
+              (-output-schema [_] :string)
+              (-invoke [_ args _] (:name args)))
+          definition (tool/tool-definition t)]
+      (is (= (.pattern pattern)
+             (get-in definition [:function :parameters :properties :name :pattern])))
+      (is (string? (json/generate-string definition)))
+      (is (= "allowed.value" (tool/invoke-tool t {:name "allowed.value"} {})))
+      (is (str/includes? (tool/invoke-tool t {:name "forbidden"} {})
+                         "input validation failed")))))
+
 (deftest tool-definition-rejects-non-portable-name
   (let [t (reify tool/Tool
             (-name [_] "calc/add")

@@ -145,7 +145,7 @@
          [:args {:optional true} [:vector :string]]
          [:env {:optional true} [:map-of :string :string]]
          [:cwd {:optional true} [:maybe :string]]]]
-       :any])
+       [:fn proto/transport?]])
 
 (mi/instrument! {:filters [(mi/-filter-ns 'kschltz.agent.tools.mcp.transport)]})
 

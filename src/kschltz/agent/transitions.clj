@@ -22,7 +22,19 @@
 (def durable-state-keys
   "Keys written into `:agent/state-delta` from applied transitions.
    `:mcp/servers` is replaced wholesale on merge (see runtime)."
-  (into llm-config-keys #{:mcp/servers}))
+  (into llm-config-keys
+        #{:mcp/servers :agent/system-message :agent/loop-opts
+          :agent/disabled-tools :agent/memory-policy
+          :agent/runtime-reload}))
+
+(def LoopOptsPatch
+  "Allowlisted per-session loop policy fields."
+  [:map {:closed true}
+   [:max-loop-depth {:optional true} [:int {:min 1}]]
+   [:max-tool-calls-per-exchange {:optional true} [:int {:min 1}]]
+   [:max-tool-calls-per-turn {:optional true} [:int {:min 1}]]
+   [:tool-content-caps {:optional true}
+    [:map-of [:string {:min 1}] [:int {:min 1}]]]])
 
 (def SetLlmOp
   "Transition that updates allowlisted LLM session config keys.
@@ -58,13 +70,76 @@
    [:op [:= :mcp-refresh-server]]
    [:server-id [:string {:min 1}]]])
 
+(def SetSystemMessageOp
+  [:map {:closed true}
+   [:op [:= :set-system-message]]
+   [:message [:string {:min 1}]]])
+
+(def SetLoopOptsOp
+  [:and
+   [:map {:closed true}
+    [:op [:= :set-loop-opts]]
+    [:max-loop-depth {:optional true} [:int {:min 1}]]
+    [:max-tool-calls-per-exchange {:optional true} [:int {:min 1}]]
+    [:max-tool-calls-per-turn {:optional true} [:int {:min 1}]]
+    [:tool-content-caps {:optional true}
+     [:map-of [:string {:min 1}] [:int {:min 1}]]]]
+   [:fn {:error/message "set-loop-opts requires at least one policy field"}
+    (fn [op]
+      (boolean
+       (some #(contains? op %)
+             [:max-loop-depth
+              :max-tool-calls-per-exchange
+              :max-tool-calls-per-turn
+              :tool-content-caps])))]])
+
+(def SetToolEnabledOp
+  [:map {:closed true}
+   [:op [:= :set-tool-enabled]]
+   [:tool-name [:string {:min 1}]]
+   [:enabled :boolean]])
+
+(def MemoryPolicyPatch
+  [:map {:closed true}
+   [:top-y {:optional true} [:int {:min 1}]]
+   [:last-n {:optional true} [:int {:min 1}]]
+   [:recall-enabled {:optional true} :boolean]
+   [:persist-enabled {:optional true} :boolean]])
+
+(def SetMemoryPolicyOp
+  [:and
+   [:map {:closed true}
+    [:op [:= :set-memory-policy]]
+    [:top-y {:optional true} [:int {:min 1}]]
+    [:last-n {:optional true} [:int {:min 1}]]
+    [:recall-enabled {:optional true} :boolean]
+    [:persist-enabled {:optional true} :boolean]]
+   [:fn {:error/message "set-memory-policy requires at least one policy field"}
+    (fn [op]
+      (boolean
+       (some #(contains? op %)
+             [:top-y :last-n :recall-enabled :persist-enabled])))]])
+
+(def RuntimeNamespace
+  [:re #"^kschltz\.(?:agent(?:\..+)?|lateralus)$"])
+
+(def ReloadRuntimeOp
+  [:map {:closed true}
+   [:op [:= :reload-runtime]]
+   [:namespaces [:vector {:min 1} RuntimeNamespace]]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
    [:set-llm SetLlmOp]
    [:mcp-upsert-server McpUpsertServerOp]
    [:mcp-remove-server McpRemoveServerOp]
-   [:mcp-refresh-server McpRefreshServerOp]])
+   [:mcp-refresh-server McpRefreshServerOp]
+   [:set-system-message SetSystemMessageOp]
+   [:set-loop-opts SetLoopOptsOp]
+   [:set-tool-enabled SetToolEnabledOp]
+   [:set-memory-policy SetMemoryPolicyOp]
+   [:reload-runtime ReloadRuntimeOp]])
 
 (def Transitions
   [:vector Transition])
@@ -109,6 +184,36 @@
               (dissoc (or servers {}) (:server-id op))))
     :mcp-refresh-server
     (or state {})
+    :set-system-message
+    (assoc (or state {}) :agent/system-message (:message op))
+    :set-loop-opts
+    (update (or state {}) :agent/loop-opts
+            (fn [opts]
+              (merge (or opts {})
+                     (select-keys op
+                                  [:max-loop-depth
+                                   :max-tool-calls-per-exchange
+                                   :max-tool-calls-per-turn
+                                   :tool-content-caps]))))
+    :set-tool-enabled
+    (update (or state {}) :agent/disabled-tools
+            (fn [disabled]
+              (let [current (set (or disabled []))
+                    updated (if (:enabled op)
+                              (disj current (:tool-name op))
+                              (conj current (:tool-name op)))]
+                (vec (sort updated)))))
+    :set-memory-policy
+    (update (or state {}) :agent/memory-policy
+            (fn [policy]
+              (merge (or policy {})
+                     (select-keys op
+                                  [:top-y :last-n
+                                   :recall-enabled :persist-enabled]))))
+    :reload-runtime
+    (assoc (or state {})
+           :agent/runtime-reload
+           {:namespaces (vec (distinct (:namespaces op)))})
     state))
 
 (defn apply-transitions
@@ -147,10 +252,25 @@
                              (contains? #{:mcp-upsert-server
                                           :mcp-remove-server}
                                         (:op op)))
-                           applied)]
+                           applied)
+        system-message-touched? (some #(= :set-system-message (:op %)) applied)
+        loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)
+        tools-touched? (some #(= :set-tool-enabled (:op %)) applied)
+        memory-touched? (some #(= :set-memory-policy (:op %)) applied)
+        reload-touched? (some #(= :reload-runtime (:op %)) applied)]
     (cond-> llm-patch
       mcp-touched?
-      (assoc :mcp/servers (or (:mcp/servers after) {})))))
+      (assoc :mcp/servers (or (:mcp/servers after) {}))
+      system-message-touched?
+      (assoc :agent/system-message (:agent/system-message after))
+      loop-opts-touched?
+      (assoc :agent/loop-opts (:agent/loop-opts after))
+      tools-touched?
+      (assoc :agent/disabled-tools (or (:agent/disabled-tools after) []))
+      memory-touched?
+      (assoc :agent/memory-policy (:agent/memory-policy after))
+      reload-touched?
+      (assoc :agent/runtime-reload (:agent/runtime-reload after)))))
 
 (defn redact-transition
   "Return a logging/model-safe copy of `op` with secrets replaced by

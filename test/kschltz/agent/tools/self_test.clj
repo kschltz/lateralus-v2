@@ -15,12 +15,13 @@
     :embedder          (with-meta {} {:embedder/method :noop})
     :memory/backend    (with-meta {} {:memory-backend/impl :noop})}))
 
-(deftest self-awareness-registry-contains-one-tool
-  (testing "self-awareness-registry returns the self_status tool"
+(deftest self-awareness-registry-contains-inspection-tools
+  (testing "self-awareness-registry returns status and runtime description tools"
     (let [registry (tools.self/self-awareness-registry)]
-      (is (= 1 (count registry)))
+      (is (= 2 (count registry)))
       (is (contains? registry "self_status"))
-      (is (tool/tool? (get registry "self_status"))))))
+      (is (contains? registry "runtime_describe"))
+      (is (every? tool/tool? (vals registry))))))
 
 (deftest self-status-returns-json-string
   (testing "self_status returns a JSON string with the expected keys"
@@ -71,3 +72,58 @@
       (is (str/includes? result "input validation failed"))
       (is (str/includes? result "self_status"))
       (is (str/includes? result ":extra")))))
+
+(deftest runtime-describe-is-complete-and-redacted
+  (testing "runtime_describe reports tool and chain contracts without secrets"
+    (let [registry (tools.self/self-awareness-registry "/workspace")
+          chain [{:name :kschltz.agent.test/guard
+                  :plugin/name :base
+                  :plugin/slot :guard
+                  :enter identity}
+                 {:name :kschltz.agent.test/tools
+                  :plugin/name :tools
+                  :plugin/slot :tools
+                  :enter identity
+                  :leave identity}]
+          c (assoc (ctx {:model "test-model"
+                         :base-url "https://example.test/v1"
+                         :api-key "super-secret"
+                         :agent/system-message "everything is an interceptor"
+                         :agent/history [{:role "user"}]
+                         :mcp/servers {"demo" {}}}
+                        "/workspace")
+                   :agent/agent-map {:agent/loop-opts {:max-loop-depth 7}}
+                   :agent/loop-opts {:max-loop-depth 7}
+                   :agent/tool-registry registry
+                   :agent/exchange-chain chain)
+          result (tool/invoke-tool (get registry "runtime_describe")
+                                   {:section "all"}
+                                   c)
+          parsed (json/parse-string result true)]
+      (is (true? (get-in parsed [:summary :configuration :api-key-set])))
+      (is (not (str/includes? result "super-secret")))
+      (is (= 7 (get-in parsed [:summary :loop-policy :max-loop-depth])))
+      (is (= ["demo"] (get-in parsed [:summary :mcp-server-ids])))
+      (is (= ["runtime_describe" "self_status"]
+             (mapv :name (:tools parsed))))
+      (is (= ["kschltz.agent.test/guard" "kschltz.agent.test/tools"]
+             (mapv :name (:chain parsed))))
+      (is (= ["enter" "leave"] (get-in parsed [:chain 1 :stages]))))))
+
+(deftest runtime-describe-sections-and-input-validation
+  (let [registry (tools.self/self-awareness-registry)
+        t (get registry "runtime_describe")
+        c (assoc (ctx {})
+                 :agent/tool-registry registry
+                 :agent/exchange-chain [])]
+    (testing "section selects a bounded portion"
+      (let [parsed (json/parse-string
+                    (tool/invoke-tool t {:section "summary"} c)
+                    true)]
+        (is (contains? parsed :summary))
+        (is (not (contains? parsed :tools)))
+        (is (not (contains? parsed :chain)))))
+    (testing "unknown sections fail Malli validation"
+      (let [result (tool/invoke-tool t {:section "secrets"} c)]
+        (is (str/includes? result "input validation failed"))
+        (is (str/includes? result "runtime_describe"))))))

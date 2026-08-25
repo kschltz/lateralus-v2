@@ -103,6 +103,17 @@ The agent can change its own LLM session knobs mid-run via staged
 - `set_llm_config` — update `:model`, `:base-url`, and/or `:api-key` for the
   rest of the session; applies before the next LLM call (including ReAct
   follow-ups in the same exchange).
+- `set_system_message` — replace the durable system instruction through the
+  transition/state-delta path.
+- `set_loop_policy` — update allowlisted loop depth, tool-call, and
+  per-tool-content limits for the current and later exchanges.
+- `set_tool_enabled` — enable or disable any pre-registered static or MCP tool
+  for the session; recovery/introspection tools remain protected.
+- `set_memory_policy` — tune recall breadth or disable recall/persistence
+  without replacing the Integrant-managed backend or embedder.
+- `reload_runtime` — after source edits, reload allowlisted agent namespaces
+  and rebuild Integrant-assembled built-in plugins for the next exchange;
+  core engine/protocol changes report `restart-required`.
 - `list_llm_models` — list models at the current (or overridden) endpoint
   behind the `ModelCatalog` protocol.
 
@@ -152,6 +163,44 @@ but block runtime dependency loading. See [`docs/runtime-eval.md`](docs/runtime-
 ```clojure
 :lateralus/runtime-tools {:enabled? true :network? true}
 ```
+
+## File harness
+
+The default tool registry includes bounded, line-numbered file reads and safe
+create/write/update operations:
+
+- `file_read` returns a window, continuation metadata, and a SHA-256 witness.
+- `file_list` is deterministic and bounded; all read/discovery tools enforce
+  canonical workspace containment and blocked paths by default.
+- `file_glob` provides sorted, bounded `**/*.ext`-style discovery without
+  following directory symlinks or traversing blocked trees.
+- `file_update` applies ambiguity-safe text edits atomically and detects races.
+- `file_patch` applies one or more hash-anchored 1-based line-range patches;
+  stale, overlapping, out-of-range, binary, or invalid-Clojure patches make
+  zero writes.
+- `file_write` accepts `expected-sha256` to reject stale full-file replacements.
+- `file_create` is create-only; it never silently overwrites an existing file.
+
+All mutations use canonical workspace containment (including symlink
+resolution), blocked-path checks, per-path locks, size/omission guards, atomic
+moves, and write verification. Replacement writes also create timestamped
+backups. These tools enter through the same `Tool` dispatch interceptor as
+every other agent capability.
+
+The `clojure_*` structured-edit tools use the same mutation guarantees while
+preserving comments and whitespace through rewrite-clj. They reject non-
+Clojure targets, workspace/symlink escapes, blocked paths, and stale
+read-transform-write attempts with structured JSON errors.
+`clojure_lint` provides bounded, read-only clj-kondo findings after edits and
+returns a structured optional-capability error when clj-kondo is unavailable.
+
+## Runtime introspection
+
+`runtime_describe` exposes the active runtime as redacted structured data. It
+can return the session summary and loop policy, registered tool contracts, the
+ordered interceptor chain, or all three. API keys and live implementation
+objects are never serialized. The tool reads the immutable per-exchange
+context; it does not bypass the transition/state-delta model.
 
 ## MCP client tools
 
@@ -260,6 +309,16 @@ For deterministic assertions without a real LLM, use the bundled fake server:
 ```bash
 LATERALUS_E2E_FAKE=true clojure -M:e2e
 ```
+
+The interceptor/runtime/file harness has a deterministic offline scenario:
+
+```bash
+clojure -M:e2e:workbench -n kschltz.agent.runtime-harness-e2e-test
+```
+
+It initializes the production Integrant graph, then drives runtime
+introspection, policy/tool transitions, deferred reload, `file_read`, and a
+hash-anchored `file_patch` through the real ReAct interceptor chain.
 
 The default `clojure -M:test` and `clojure -T:build test` exclude these
 slow integration tests.

@@ -6,7 +6,9 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.filesystem :as tools.filesystem])
-  (:import [java.io File]))
+  (:import [java.io File]
+           [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
 
 (def ^:private tmp-dir
   "Temporary directory for filesystem tool tests."
@@ -36,15 +38,17 @@
 
 (def ^:private dummy-ctx {})
 
-(deftest filesystem-registry-contains-seven-tools
+(deftest filesystem-registry-contains-nine-tools
   (testing "filesystem-registry returns the filesystem tools"
     (let [registry (tools.filesystem/filesystem-registry)]
-      (is (= 7 (count registry)))
+      (is (= 9 (count registry)))
       (is (contains? registry "file_read"))
       (is (contains? registry "file_list"))
       (is (contains? registry "file_info"))
       (is (contains? registry "file_create"))
       (is (contains? registry "file_search"))
+      (is (contains? registry "file_glob"))
+      (is (contains? registry "file_patch"))
       (is (contains? registry "file_write"))
       (is (contains? registry "file_update"))
       (is (every? tool/tool? (vals registry))))))
@@ -59,6 +63,36 @@
       (is (:created parsed))
       (is (= "created" (slurp (io/file @tmp-dir "nested/dir/test.txt")))))))
 
+(deftest file-create-is-safe-and-create-only
+  (testing "file_create refuses to overwrite an existing file"
+    (let [target (temp-file "existing.txt" "original")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file_create")
+                                   {:path "existing.txt" :content "replacement"}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "file-exists" (:error parsed)))
+      (is (= "original" (slurp target)))))
+  (testing "file_create refuses blocked paths"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file_create")
+                                   {:path ".git/config" :content "nope"}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "blocked-path" (:error parsed)))
+      (is (not (.exists (io/file @tmp-dir ".git/config"))))))
+  (testing "file_create refuses paths outside the workspace"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          outside (File/createTempFile "lateralus-create-outside-" ".txt")
+          path (.getAbsolutePath outside)
+          _ (.delete outside)
+          result (tool/invoke-tool (get reg "file_create")
+                                   {:path path :content "nope"}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "outside-write-dir" (:error parsed)))
+      (is (not (.exists outside))))))
+
 (deftest file-read-returns-content
   (testing "file_read returns the UTF-8 content of a text file with line numbers"
     (let [f    (temp-file "hello.txt" "hello world")
@@ -69,6 +103,8 @@
       (is (= "     1\thello world" (:content parsed)))
       (is (str/includes? (:content parsed) "hello world"))
       (is (= 11 (:size parsed)))
+      (is (= "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+             (:sha256 parsed)))
       (is (= 1 (:total-lines parsed)))
       (is (= 1 (:offset parsed)))
       (is (= 2000 (:limit parsed)))
@@ -107,9 +143,13 @@
 (deftest file-read-errors-on-missing-file
   (testing "file_read returns a model-visible error for a missing file"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file_read") {:path "does-not-exist.txt"} dummy-ctx)]
-      (is (string? result))
-      (is (str/starts-with? result "Filesystem tool error:")))))
+          result (-> (tool/invoke-tool (get reg "file_read")
+                                       {:path "does-not-exist.txt"}
+                                       dummy-ctx)
+                     (json/parse-string true))]
+      (is (false? (:ok result)))
+      (is (= "filesystem-error" (:error result)))
+      (is (string? (:message result))))))
 
 (deftest file-read-reports-binary-file
   (testing "file_read reports a binary file as a structured :error rather than throwing"
@@ -198,8 +238,24 @@
           entries (:entries parsed)]
       (is (vector? entries))
       (is (= 2 (count entries)))
+      (is (= 2 (:total-entries parsed)))
+      (is (false? (:truncated parsed)))
       (is (some #(and (= "a.txt" (:name %)) (= "file" (:type %))) entries))
       (is (some #(and (= "sub" (:name %)) (= "directory" (:type %))) entries)))))
+
+(deftest file-list-is-bounded-and-deterministic
+  (doseq [name ["z.txt" "a.txt" "m.txt"]]
+    (temp-file name name))
+  (let [reg (tools.filesystem/filesystem-registry
+             {:workspace-root (str @tmp-dir)
+              :max-list-entries 2})
+        parsed (-> (tool/invoke-tool (get reg "file_list")
+                                     {:path "."}
+                                     dummy-ctx)
+                   (json/parse-string true))]
+    (is (= ["a.txt" "m.txt"] (mapv :name (:entries parsed))))
+    (is (= 3 (:total-entries parsed)))
+    (is (true? (:truncated parsed)))))
 
 (deftest file-info-describes-path
   (testing "file_info returns metadata"
@@ -246,9 +302,67 @@
 (deftest file-search-errors-on-invalid-regex
   (testing "file_search returns an error for an invalid pattern"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file_search") {:path "."
-                                                              :pattern "[invalid"} dummy-ctx)]
-      (is (str/starts-with? result "Filesystem tool error:")))))
+          result (-> (tool/invoke-tool (get reg "file_search")
+                                       {:path "." :pattern "[invalid"}
+                                       dummy-ctx)
+                     (json/parse-string true))]
+      (is (= "invalid-pattern" (:error result)))
+      (is (string? (:message result))))))
+
+(deftest read-tools-enforce-workspace-and-blocked-paths
+  (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})]
+    (testing "absolute paths outside the workspace are rejected"
+      (let [outside (File/createTempFile "lateralus-read-outside-" ".txt")
+            _ (spit outside "secret")
+            parsed (-> (tool/invoke-tool (get reg "file_read")
+                                         {:path (.getAbsolutePath outside)}
+                                         dummy-ctx)
+                       (json/parse-string true))]
+        (is (= "outside-workspace" (:error parsed)))
+        (.delete outside)))
+    (testing "blocked paths are not readable or searchable"
+      (temp-file ".git/secret.txt" "needle")
+      (temp-file "src/visible.txt" "needle")
+      (let [blocked (-> (tool/invoke-tool (get reg "file_read")
+                                          {:path ".git/secret.txt"}
+                                          dummy-ctx)
+                        (json/parse-string true))
+            hits (-> (tool/invoke-tool (get reg "file_search")
+                                       {:path "." :pattern "needle"}
+                                       dummy-ctx)
+                     (json/parse-string true))]
+        (is (= "blocked-path" (:error blocked)))
+        (is (= 1 (count hits)))
+        (is (str/ends-with? (:file (first hits)) "src/visible.txt"))))))
+
+(deftest read-tools-reject-symlink-escape-unless-operator-allows-it
+  (let [outside-dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                                   (str "lateralus-read-link-" (random-uuid)))
+                      (.mkdirs))
+        outside-file (io/file outside-dir "outside.txt")
+        _ (spit outside-file "visible only by policy")
+        link (io/file @tmp-dir "escape")
+        _ (Files/createSymbolicLink (.toPath link)
+                                    (.toPath outside-dir)
+                                    (make-array FileAttribute 0))
+        safe-reg (tools.filesystem/filesystem-registry
+                  {:workspace-root (str @tmp-dir)})
+        open-reg (tools.filesystem/filesystem-registry
+                  {:workspace-root (str @tmp-dir)
+                   :allow-read-outside-workspace? true})
+        rejected (-> (tool/invoke-tool (get safe-reg "file_info")
+                                       {:path "escape/outside.txt"}
+                                       dummy-ctx)
+                     (json/parse-string true))
+        allowed (-> (tool/invoke-tool (get open-reg "file_read")
+                                      {:path "escape/outside.txt"}
+                                      dummy-ctx)
+                    (json/parse-string true))]
+    (is (= "outside-workspace" (:error rejected)))
+    (is (str/includes? (:content allowed) "visible only by policy"))
+    (.delete link)
+    (.delete outside-file)
+    (.delete outside-dir)))
 
 (deftest custom-max-read-bytes-truncates-large-files
   (testing "a configured :max-read-bytes budget truncates a large file rather than erroring"
@@ -336,6 +450,27 @@
       (is (= "blocked-path" (:error parsed)))
       (is (not (.exists (io/file @tmp-dir ".git")))))))
 
+(deftest generic-mutations-route-clojure-files-to-structured-tools
+  (let [target (temp-file "routed.clj" "(ns routed)\n")
+        reg (tools.filesystem/filesystem-registry
+             {:workspace-root (str @tmp-dir)})
+        write-result (-> (tool/invoke-tool
+                          (get reg "file_write")
+                          {:path "routed.clj" :content "(ns replaced)\n"}
+                          dummy-ctx)
+                         (json/parse-string true))
+        update-result (-> (tool/invoke-tool
+                           (get reg "file_update")
+                           {:path "routed.clj"
+                            :edits [{:old-text "routed"
+                                     :new-text "replaced"}]}
+                           dummy-ctx)
+                          (json/parse-string true))]
+    (is (= "use-clj-edit" (:error write-result)))
+    (is (= "clojure_*" (:use-tool write-result)))
+    (is (= "use-clj-edit" (:error update-result)))
+    (is (= "(ns routed)\n" (slurp target)))))
+
 (deftest file-write-rejects-outside-workspace-without-force
   (testing "file_write refuses paths outside the workspace root"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
@@ -349,15 +484,64 @@
       (is (= "outside-write-dir" (:error parsed)))
       (is (not (.exists outside))))))
 
+(deftest file-write-rejects-symlink-escape
+  (testing "canonical containment prevents writes through a workspace symlink"
+    (let [outside (doto (io/file (System/getProperty "java.io.tmpdir")
+                                 (str "lateralus-symlink-outside-" (random-uuid)))
+                    (.mkdirs))
+          link (io/file @tmp-dir "escape")
+          _ (Files/createSymbolicLink (.toPath link)
+                                      (.toPath outside)
+                                      (make-array FileAttribute 0))
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file_write")
+                                   {:path "escape/pwned.txt"
+                                    :content "nope"
+                                    :create-dirs true}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "outside-write-dir" (:error parsed)))
+      (is (not (.exists (io/file outside "pwned.txt"))))
+      (.delete link)
+      (.delete outside))))
+
+(deftest file-read-digest-fences-follow-up-write
+  (testing "the read digest permits a fresh write and rejects a stale one"
+    (let [target (temp-file "digest.txt" "v1\n")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          read-result (-> (tool/invoke-tool (get reg "file_read")
+                                            {:path "digest.txt"}
+                                            dummy-ctx)
+                          (json/parse-string true))
+          digest (:sha256 read-result)
+          fresh (-> (tool/invoke-tool (get reg "file_write")
+                                      {:path "digest.txt"
+                                       :content "v2\n"
+                                       :expected-sha256 digest}
+                                      dummy-ctx)
+                    (json/parse-string true))]
+      (is (true? (:changed fresh)))
+      (spit target "external\n")
+      (let [stale (-> (tool/invoke-tool (get reg "file_write")
+                                        {:path "digest.txt"
+                                         :content "v3\n"
+                                         :expected-sha256 digest}
+                                        dummy-ctx)
+                      (json/parse-string true))]
+        (is (= "stale-file" (:error stale)))
+        (is (= digest (:expected-sha256 stale)))
+        (is (string? (:actual-sha256 stale)))
+        (is (= "external\n" (slurp target)))))))
+
 (deftest file-write-honors-create-dirs-false
   (testing "file_write errors (does not silently mkdir) when :create-dirs is omitted"
     (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
-          result (tool/invoke-tool (get reg "file_write")
-                                  {:path "missing-dir/x.txt" :content "x"}
-                                  dummy-ctx)]
-      (is (string? result))
-      (is (str/starts-with? result "Filesystem tool error:")
-          "missing parent dir + no :create-dirs must surface as a tool error")
+          result (-> (tool/invoke-tool (get reg "file_write")
+                                       {:path "missing-dir/x.txt" :content "x"}
+                                       dummy-ctx)
+                     (json/parse-string true))]
+      (is (= "filesystem-error" (:error result)))
+      (is (string? (:message result)))
       (is (not (.exists (io/file @tmp-dir "missing-dir")))
           "no parent directory should have been created"))))
 

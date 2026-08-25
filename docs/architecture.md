@@ -1,6 +1,6 @@
 # Lateralus v2 Architecture
 
-This document describes the current Integrant + plugin/interceptor architecture of `lateralus-v2`. For the original thesis and historical context, see [`docs/interceptor-loop-design-note.md`](docs/interceptor-loop-design-note.md). For the memory subsystem, see [`docs/memory-v2.md`](docs/memory-v2.md).
+This document describes the current Integrant + plugin/interceptor architecture of `lateralus-v2`. For the original thesis and historical context, see [`docs/interceptor-loop-design-note.md`](docs/interceptor-loop-design-note.md). For the memory subsystem, see [`docs/memory-v2.md`](docs/memory-v2.md). Outbound protocol and Malli requirements are indexed in [`docs/network-boundaries.md`](network-boundaries.md).
 
 ## Overview
 
@@ -118,6 +118,8 @@ The context is an open map. Engine state (`::chain/queue`, `::chain/stack`, `::c
 | `:exchange/assistant-msg-id` | runtime | all stages | UUID for the assistant response |
 | `:exchange/user-text` | runtime | compose-context, memory plugin | the user's prompt |
 | `:agent/state` | runtime | compose-context | persistent state (LLM config, system message, history) |
+| `:agent/agent-map` | runtime | runtime inspection, sub-agent tools | active redacted-by-consumer runtime descriptor source |
+| `:agent/exchange-chain` | runtime | runtime inspection | exact ordered interceptor vector executing this exchange |
 | `:llm/client` | runtime | llm-call | Integrant-configured LlmClient (pre-wired from agent-map) |
 | `:embedder` | runtime | (available to interceptors) | Integrant-configured Embedder (pre-wired from agent-map) |
 | `:memory/backend` | runtime | (available to interceptors) | Integrant-configured MemoryBackend (pre-wired from agent-map) |
@@ -137,7 +139,64 @@ The `Ctx` Malli schema in `kschltz.agent.interceptors.schema` is intentionally o
 
 Only the outer runtime loop holds a mutable reference — an atom seeded with `:initial-state` from the agent-map. Interceptors never mutate shared refs; instead they emit `:agent/state-delta`. The runtime merges this delta into the atom using `kschltz.agent.runtime/merge-state`, which performs a deep merge for known nested keys (e.g. `:agent/state`) and last-write-wins for top-level keys.
 
-Tools may propose allowlisted **transitions** (JSON envelope key `:transition`) that are harvested onto `:agent/transitions` and applied in the `:tools` slot before the next LLM call — including mid-ReAct follow-ups. See [`docs/transitions.md`](transitions.md).
+Tools may propose allowlisted **transitions** (JSON envelope key `:transition`) that are harvested onto `:agent/transitions` and applied in the `:tools` slot before the next LLM call — including mid-ReAct follow-ups. Current pure-data transitions cover LLM knobs, the system message, loop policy, memory policy, and the session tool overlay; lifecycle-bearing MCP changes add a protocol reconcile step. See [`docs/transitions.md`](transitions.md).
+
+## Filesystem harness
+
+`:lateralus/file-tools` exposes bounded, model-oriented reads and safe
+mutations through the normal `Tool` dispatch interceptor. `file_read` returns
+line-numbered windows plus the SHA-256 of the exact bytes consumed. Callers can
+carry that digest into `file_write` as `expected-sha256`; the writer returns a
+structured `stale-file` conflict instead of overwriting a changed file.
+Read, list, info, and search operations resolve canonical paths under the
+workspace, reject blocked segments, and never follow a workspace symlink to an
+outside target unless the operator explicitly enables outside-workspace reads.
+Directory listings are sorted and capped with total/truncation metadata.
+`file_glob` adds sorted, bounded file discovery using portable glob patterns;
+it excludes blocked trees and does not follow directory symlinks.
+`file_patch` consumes the SHA-256 witness from `file_read` and applies
+inclusive 1-based line-range replacements (or insertion ranges) to that exact
+snapshot. It validates all ranges before a locked, backed-up, atomic commit;
+stale hashes, overlap, invalid UTF-8, size/omission violations, and malformed
+Clojure output leave the target unchanged.
+
+`file_write`, `file_update`, and `file_create` share one mutation boundary:
+canonical workspace containment (including symlink resolution), unskippable
+blocked paths, per-path locking, size and omission checks, optional Clojure
+round-trip validation, backups for replacements, atomic moves, and post-write
+verification. `file_create` is strictly create-only and refuses an existing
+path. `file_update` validates all edits before taking the lock and rechecks a
+staleness sentinel at commit, so failed or racing edits produce zero writes.
+
+The rewrite-clj-backed `clojure_*` tools share the same canonical containment,
+blocked-path, per-path lock, timestamped backup, atomic-landing, optimistic
+concurrency, and verification primitives. Their additional round-trip parse
+guard runs before commit, and non-Clojure targets receive a structured routing
+error instead of being edited as source.
+The adjacent `clojure_lint` tool runs a bounded local clj-kondo subprocess
+against policy-validated paths and returns structured findings without
+modifying files. It introduces no network boundary and degrades explicitly
+when the optional executable is unavailable.
+
+## Runtime introspection
+
+The `runtime_describe` tool reads the current immutable interceptor context and
+returns a redacted descriptor of the session summary, loop policy, state keys,
+registered tool contracts, and ordered interceptor chain. The outer runtime
+injects `:agent/agent-map` and `:agent/exchange-chain` into each exchange
+context; the tool selects safe data from those values and never returns API
+keys or live implementation objects. Its `section` input (`summary`, `tools`,
+`chain`, or `all`) lets the model bound output to the information it needs.
+
+This is inspection only. Runtime changes still use allowlisted transition
+envelopes harvested and applied in the `:tools` interceptor slot.
+
+After source edits, `reload_runtime` can stage a deferred namespace reload.
+The current exchange completes normally; only the outer runtime consumes the
+request, reloads allowlisted project namespaces, invokes the rebuild metadata
+on Integrant-assembled built-in plugins, and swaps the next exchange's chain.
+Core engine/protocol namespace changes remain process-restart boundaries
+because JVM protocol/class identity cannot be replaced safely in place.
 
 ## Extension points
 

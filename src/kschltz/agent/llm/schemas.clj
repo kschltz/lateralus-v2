@@ -79,15 +79,16 @@
    [:index           {:optional true} :int]
    [:message         [:map
                       [:role    [:= "assistant"]]
-                      [:content {:optional true} :string]
+                      [:content {:optional true} [:maybe :string]]
                       [:tool_calls {:optional true}
-                       [:vector [:map
-                                 [:id   :string]
-                                 [:type [:= "function"]]
-                                 [:function [:map
-                                            [:name PortableToolName]
-                                            [:arguments :string]]]]]]]]
-   [:finish_reason  {:optional true} :string]])
+                       [:maybe
+                        [:vector [:map
+                                  [:id   :string]
+                                  [:type [:= "function"]]
+                                  [:function [:map
+                                             [:name PortableToolName]
+                                             [:arguments :string]]]]]]]]]
+   [:finish_reason  {:optional true} [:maybe :string]]])
 
 ;; Usage is inlined as a closed map of optional fields. Malli
 ;; does not resolve `{:optional true} Usage` by name in the

@@ -34,14 +34,18 @@
   "Build the :enter fn for the recall interceptor."
   [backend embedder top-y last-n]
   (fn [ctx]
-    (let [session-id (:exchange/session-id ctx)
+    (let [policy (or (get-in ctx [:agent/state :agent/memory-policy]) {})
+          recall-enabled? (not (false? (:recall-enabled policy)))
+          effective-top-y (or (:top-y policy) top-y)
+          effective-last-n (or (:last-n policy) last-n)
+          session-id (:exchange/session-id ctx)
           user-text  (:exchange/user-text ctx)
-          embedding  (when (and embedder (seq user-text))
+          embedding  (when (and recall-enabled? embedder (seq user-text))
                        (embedding/-embed embedder user-text))
-          recalled   (if (and backend session-id)
+          recalled   (if (and recall-enabled? backend session-id)
                        (mem/-recall-hybrid backend session-id
-                                           {:top-y          top-y
-                                            :last-n         last-n
+                                           {:top-y          effective-top-y
+                                            :last-n         effective-last-n
                                             :query-text     user-text
                                             :query-embedding embedding})
                        [])]
@@ -55,10 +59,15 @@
    embedder with 'text cannot be null or blank'."
   [backend]
   (fn [ctx]
-    (let [session-id (:exchange/session-id ctx)
+    (let [persist-enabled? (not (false?
+                                 (get-in ctx
+                                         [:agent/state
+                                          :agent/memory-policy
+                                          :persist-enabled])))
+          session-id (:exchange/session-id ctx)
           user-text  (:exchange/user-text ctx)
           response   (:exchange/response ctx)]
-      (when (and backend session-id)
+      (when (and persist-enabled? backend session-id)
         (when (seq user-text)
           (mem/-store-message
            backend session-id
@@ -93,4 +102,9 @@
      {:name  ::persist
       :slot  :persist
       :leave (persist-leave backend)}]
-    {:plugin/name :memory}))
+    {:plugin/name :memory
+     :plugin/rebuild (fn []
+                       (memory-plugin {:backend backend
+                                       :embedder embedder
+                                       :top-y top-y
+                                       :last-n last-n}))}))
