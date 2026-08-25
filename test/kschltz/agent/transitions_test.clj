@@ -15,6 +15,41 @@
     (is (not (tr/valid-transition? {:op :set-llm :model "m" :extra 1})))
     (is (not (tr/valid-transition? {:op :other :model "m"})))))
 
+(deftest runtime-policy-transition-validation
+  (testing "system message and loop policy ops are closed and bounded"
+    (is (tr/valid-transition? {:op :set-system-message :message "new policy"}))
+    (is (not (tr/valid-transition? {:op :set-system-message :message ""})))
+    (is (tr/valid-transition? {:op :set-loop-opts :max-loop-depth 8}))
+    (is (tr/valid-transition?
+         {:op :set-loop-opts
+          :tool-content-caps {"file_read" 4096}}))
+    (is (not (tr/valid-transition? {:op :set-loop-opts})))
+    (is (not (tr/valid-transition?
+              {:op :set-loop-opts :max-loop-depth 0})))
+    (is (not (tr/valid-transition?
+              {:op :set-loop-opts :arbitrary true})))))
+
+(deftest runtime-policy-transitions-produce-durable-delta
+  (let [ops [{:op :set-system-message :message "interceptors all the way down"}
+             {:op :set-loop-opts
+              :max-loop-depth 9
+              :max-tool-calls-per-turn 4}]
+        {:keys [state applied]}
+        (tr/apply-transitions
+         {:agent/loop-opts {:max-tool-calls-per-exchange 20}}
+         ops)
+        delta (tr/durable-delta {} state applied)]
+    (is (= "interceptors all the way down"
+           (:agent/system-message state)))
+    (is (= {:max-tool-calls-per-exchange 20
+            :max-loop-depth 9
+            :max-tool-calls-per-turn 4}
+           (:agent/loop-opts state)))
+    (is (= (:agent/system-message state)
+           (:agent/system-message delta)))
+    (is (= (:agent/loop-opts state)
+           (:agent/loop-opts delta)))))
+
 (deftest apply-transitions-folds-left-to-right
   (let [{:keys [state applied]}
         (tr/apply-transitions {:model "a" :base-url "http://old"}
@@ -112,6 +147,24 @@
            (:agent/transitions-applied out)))
     ;; history delta preserved
     (is (= [] (get-in out [:agent/state-delta :agent/history])))))
+
+(deftest apply-queued-patches-loop-policy-on-current-context
+  (let [ctx {:agent/state {:agent/system-message "old"
+                           :agent/loop-opts {:max-loop-depth 3}}
+             :agent/loop-opts {:max-loop-depth 3
+                               :max-tool-calls-per-exchange 10}
+             :agent/transitions
+             [{:op :set-system-message :message "new"}
+              {:op :set-loop-opts :max-loop-depth 6}]
+             :agent/state-delta {}}
+        out (tr.ix/apply-queued-transitions ctx)]
+    (is (= "new" (get-in out [:agent/state :agent/system-message])))
+    (is (= "new" (get-in out [:agent/state-delta :agent/system-message])))
+    (is (= {:max-loop-depth 6
+            :max-tool-calls-per-exchange 10}
+           (:agent/loop-opts out)))
+    (is (= {:max-loop-depth 6}
+           (get-in out [:agent/state-delta :agent/loop-opts])))))
 
 (deftest harvest-interceptor-rewrites-all-tool-results
   (let [envelope (tr/encode-result

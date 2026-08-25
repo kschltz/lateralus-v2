@@ -18,9 +18,11 @@
   ([] (tools.config/config-registry {:catalog (catalog/stub-catalog ["stub/a" "stub/b"])}))
   ([cat] (tools.config/config-registry {:catalog cat})))
 
-(deftest config-registry-has-both-tools
+(deftest config-registry-has-session-configuration-tools
   (let [reg (cfg-registry)]
-    (is (= #{"set_llm_config" "list_llm_models"} (set (keys reg))))
+    (is (= #{"set_llm_config" "set_system_message"
+             "set_loop_policy" "list_llm_models"}
+           (set (keys reg))))
     (is (every? tool/tool? (vals reg)))))
 
 (deftest set-llm-config-emits-transition
@@ -50,6 +52,43 @@
     (is (= "super-secret" (:api-key (first transitions))))
     (is (nil? (get-in visible [:transition :api-key])))
     (is (true? (get-in visible [:transition :api-key-set])))))
+
+(deftest runtime-policy-tools-emit-allowlisted-transitions
+  (let [reg (cfg-registry)
+        msg-result
+        (-> (tool/invoke-tool
+             (get reg "set_system_message")
+             {:message "new system"}
+             {:agent/state {:agent/system-message "old"}})
+            (json/parse-string true))
+        loop-result
+        (-> (tool/invoke-tool
+             (get reg "set_loop_policy")
+             {:max-loop-depth 8
+              :tool-content-caps {"file_read" 8192}}
+             {:agent/loop-opts {:max-loop-depth 3}})
+            (json/parse-string true))]
+    (is (= "set-system-message"
+           (name (keyword (get-in msg-result [:transition :op])))))
+    (is (= "new system" (get-in msg-result [:after :message])))
+    (is (= "set-loop-opts"
+           (name (keyword (get-in loop-result [:transition :op])))))
+    (is (= 3 (get-in loop-result [:before :max-loop-depth])))
+    (is (= 8 (get-in loop-result [:after :max-loop-depth])))))
+
+(deftest runtime-policy-tools-reject-empty-or-unknown-input
+  (let [reg (cfg-registry)]
+    (is (str/includes?
+         (tool/invoke-tool (get reg "set_system_message")
+                           {:message ""} {})
+         "input validation failed"))
+    (is (str/includes?
+         (tool/invoke-tool (get reg "set_loop_policy") {} {})
+         "input validation failed"))
+    (is (str/includes?
+         (tool/invoke-tool (get reg "set_loop_policy")
+                           {:unknown 1} {})
+         "input validation failed"))))
 
 (deftest list-llm-models-uses-catalog
   (let [t (get (cfg-registry) "list_llm_models")

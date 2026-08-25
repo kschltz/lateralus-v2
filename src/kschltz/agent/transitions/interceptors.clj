@@ -224,6 +224,9 @@
             n (count (or (:tool/results ctx) []))
             ctx' (-> ctx
                      (assoc :agent/state state
+                            :agent/loop-opts
+                            (merge (or (:agent/loop-opts ctx) {})
+                                   (or (:agent/loop-opts state) {}))
                             :agent/transitions []
                             :agent/transitions-applied
                             (mapv tr/redact-transition applied)

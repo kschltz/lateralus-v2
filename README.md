@@ -103,6 +103,10 @@ The agent can change its own LLM session knobs mid-run via staged
 - `set_llm_config` — update `:model`, `:base-url`, and/or `:api-key` for the
   rest of the session; applies before the next LLM call (including ReAct
   follow-ups in the same exchange).
+- `set_system_message` — replace the durable system instruction through the
+  transition/state-delta path.
+- `set_loop_policy` — update allowlisted loop depth, tool-call, and
+  per-tool-content limits for the current and later exchanges.
 - `list_llm_models` — list models at the current (or overridden) endpoint
   behind the `ModelCatalog` protocol.
 

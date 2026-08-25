@@ -39,6 +39,15 @@ before the next ReAct LLM call.
 
 {:op :mcp-refresh-server
  :server-id "…"}
+
+{:op :set-system-message
+ :message "…"}
+
+{:op :set-loop-opts
+ :max-loop-depth 8
+ :max-tool-calls-per-exchange 40
+ :max-tool-calls-per-turn 10
+ :tool-content-caps {"file_read" 65536}}
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -79,6 +88,21 @@ Integrant:
 ```clojure
 :lateralus/config-tools {:catalog :http}  ; or :stub for offline
 ```
+
+### `set_system_message`
+
+Replaces `:agent/system-message` through the transition queue. The apply
+interceptor updates the working state immediately, and `:agent/state-delta`
+makes it durable for later exchanges. The tool cannot mutate the session atom.
+
+### `set_loop_policy`
+
+Merges an allowlisted loop-policy patch into `:agent/loop-opts`. Positive
+limits are accepted for loop depth, per-exchange calls, per-turn calls, and
+per-tool content caps. Apply patches the current immutable ctx for same-
+exchange follow-ups and stages the policy in `:agent/state-delta`; the outer
+runtime overlays that session policy on boot defaults for every later
+exchange.
 
 ## Pipeline (`:tools` slot)
 

@@ -70,7 +70,9 @@
                             :memory/backend           (:memory-backend agent-map)
                             :embedder                 (:embedder agent-map)
                             :agent/log-sink           log-sink
-                            :agent/loop-opts          (:agent/loop-opts agent-map)}
+                            :agent/loop-opts          (merge
+                                                       (or (:agent/loop-opts agent-map) {})
+                                                       (or (:agent/loop-opts base-state) {}))}
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
           merged           (merge-state base-state

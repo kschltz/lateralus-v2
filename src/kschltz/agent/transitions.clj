@@ -22,7 +22,17 @@
 (def durable-state-keys
   "Keys written into `:agent/state-delta` from applied transitions.
    `:mcp/servers` is replaced wholesale on merge (see runtime)."
-  (into llm-config-keys #{:mcp/servers}))
+  (into llm-config-keys
+        #{:mcp/servers :agent/system-message :agent/loop-opts}))
+
+(def LoopOptsPatch
+  "Allowlisted per-session loop policy fields."
+  [:map {:closed true}
+   [:max-loop-depth {:optional true} [:int {:min 1}]]
+   [:max-tool-calls-per-exchange {:optional true} [:int {:min 1}]]
+   [:max-tool-calls-per-turn {:optional true} [:int {:min 1}]]
+   [:tool-content-caps {:optional true}
+    [:map-of [:string {:min 1}] [:int {:min 1}]]]])
 
 (def SetLlmOp
   "Transition that updates allowlisted LLM session config keys.
@@ -58,13 +68,38 @@
    [:op [:= :mcp-refresh-server]]
    [:server-id [:string {:min 1}]]])
 
+(def SetSystemMessageOp
+  [:map {:closed true}
+   [:op [:= :set-system-message]]
+   [:message [:string {:min 1}]]])
+
+(def SetLoopOptsOp
+  [:and
+   [:map {:closed true}
+    [:op [:= :set-loop-opts]]
+    [:max-loop-depth {:optional true} [:int {:min 1}]]
+    [:max-tool-calls-per-exchange {:optional true} [:int {:min 1}]]
+    [:max-tool-calls-per-turn {:optional true} [:int {:min 1}]]
+    [:tool-content-caps {:optional true}
+     [:map-of [:string {:min 1}] [:int {:min 1}]]]]
+   [:fn {:error/message "set-loop-opts requires at least one policy field"}
+    (fn [op]
+      (boolean
+       (some #(contains? op %)
+             [:max-loop-depth
+              :max-tool-calls-per-exchange
+              :max-tool-calls-per-turn
+              :tool-content-caps])))]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
    [:set-llm SetLlmOp]
    [:mcp-upsert-server McpUpsertServerOp]
    [:mcp-remove-server McpRemoveServerOp]
-   [:mcp-refresh-server McpRefreshServerOp]])
+   [:mcp-refresh-server McpRefreshServerOp]
+   [:set-system-message SetSystemMessageOp]
+   [:set-loop-opts SetLoopOptsOp]])
 
 (def Transitions
   [:vector Transition])
@@ -109,6 +144,17 @@
               (dissoc (or servers {}) (:server-id op))))
     :mcp-refresh-server
     (or state {})
+    :set-system-message
+    (assoc (or state {}) :agent/system-message (:message op))
+    :set-loop-opts
+    (update (or state {}) :agent/loop-opts
+            (fn [opts]
+              (merge (or opts {})
+                     (select-keys op
+                                  [:max-loop-depth
+                                   :max-tool-calls-per-exchange
+                                   :max-tool-calls-per-turn
+                                   :tool-content-caps]))))
     state))
 
 (defn apply-transitions
@@ -147,10 +193,16 @@
                              (contains? #{:mcp-upsert-server
                                           :mcp-remove-server}
                                         (:op op)))
-                           applied)]
+                           applied)
+        system-message-touched? (some #(= :set-system-message (:op %)) applied)
+        loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)]
     (cond-> llm-patch
       mcp-touched?
-      (assoc :mcp/servers (or (:mcp/servers after) {})))))
+      (assoc :mcp/servers (or (:mcp/servers after) {}))
+      system-message-touched?
+      (assoc :agent/system-message (:agent/system-message after))
+      loop-opts-touched?
+      (assoc :agent/loop-opts (:agent/loop-opts after)))))
 
 (defn redact-transition
   "Return a logging/model-safe copy of `op` with secrets replaced by

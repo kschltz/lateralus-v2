@@ -191,6 +191,27 @@
       (is (= {:n 3 :config {:turn 2 :extra :three}} (user-state runtime))
           "scalar :extra is last-write-wins; nested :turn keeps its prior value"))))
 
+(deftest session-loop-policy-overrides-boot-policy-on-later-exchanges
+  (let [seen (atom [])
+        chain [{:name ::loop-policy
+                :enter (fn [ctx]
+                         (swap! seen conj (:agent/loop-opts ctx))
+                         ctx)
+                :leave (fn [ctx]
+                         (assoc ctx :agent/state-delta
+                                {:agent/loop-opts {:max-loop-depth 7}}))}]
+        r (runtime/start {:exchange-chain chain
+                          :agent/loop-opts {:max-loop-depth 3
+                                            :max-tool-calls-per-turn 2}})]
+    (runtime/send-message r "first")
+    (runtime/send-message r "second")
+    (is (= {:max-loop-depth 3
+            :max-tool-calls-per-turn 2}
+           (first @seen)))
+    (is (= {:max-loop-depth 7
+            :max-tool-calls-per-turn 2}
+           (second @seen)))))
+
 (deftest send-message-uses-custom-chain
   (testing "send-message runs the chain from :exchange-chain in agent-map"
     (let [events  (atom [])

@@ -33,6 +33,16 @@
    [:base-url {:optional true} [:string {:min 1}]]
    [:api-key {:optional true} [:string {:min 1}]]])
 
+(def SetSystemMessageInput
+  [:map {:closed true}
+   [:message [:string {:min 1}]]])
+
+(def SetLoopPolicyInput
+  [:and
+   tr/LoopOptsPatch
+   [:fn {:error/message "provide at least one loop policy field"}
+    (fn [m] (boolean (seq m)))]])
+
 (defn- current-llm-config
   [ctx]
   (let [state (or (:agent/state ctx) {})]
@@ -73,6 +83,41 @@
         :after      (view after)
         :transition op}))))
 
+(defrecord SetSystemMessageTool []
+  tool/Tool
+  (-name [_] "set_system_message")
+  (-description [_]
+    "Replace the durable system message for this session through an allowlisted transition. The updated message is visible to subsequent ReAct composition in this exchange and persists for later exchanges.")
+  (-input-schema [_] SetSystemMessageInput)
+  (-output-schema [_] :string)
+  (-invoke [_ {:keys [message]} ctx]
+    (tr/encode-result
+     {:ok true
+      :tool "set_system_message"
+      :pending "same-exchange"
+      :before {:message (get-in ctx [:agent/state :agent/system-message])}
+      :after {:message message}
+      :transition {:op :set-system-message
+                   :message message}})))
+
+(defrecord SetLoopPolicyTool []
+  tool/Tool
+  (-name [_] "set_loop_policy")
+  (-description [_]
+    "Update allowlisted tool-loop limits for this session: max-loop-depth, max-tool-calls-per-exchange, max-tool-calls-per-turn, and per-tool content caps. The transition patches the current immutable ctx and persists via state-delta; it cannot replace interceptor code.")
+  (-input-schema [_] SetLoopPolicyInput)
+  (-output-schema [_] :string)
+  (-invoke [_ args ctx]
+    (let [before (or (:agent/loop-opts ctx) {})
+          after (merge before args)]
+      (tr/encode-result
+       {:ok true
+        :tool "set_loop_policy"
+        :pending "same-exchange"
+        :before before
+        :after after
+        :transition (assoc args :op :set-loop-opts)}))))
+
 (defrecord ListLlmModelsTool [catalog]
   tool/Tool
   (-name [_] "list_llm_models")
@@ -108,7 +153,7 @@
            {:pretty true}))))))
 
 (defn config-registry
-  "Return a tool registry with `set_llm_config` and `list_llm_models`.
+  "Return the session configuration tool registry.
 
    Opts:
      :catalog — ModelCatalog impl (default stub-catalog for offline safety;
@@ -116,8 +161,10 @@
   ([] (config-registry nil))
   ([{:keys [catalog]}]
    (let [cat (or catalog (catalog/stub-catalog))]
-     {"set_llm_config"  (->SetLlmConfigTool)
-      "list_llm_models" (->ListLlmModelsTool cat)})))
+     {"set_llm_config"   (->SetLlmConfigTool)
+      "set_system_message" (->SetSystemMessageTool)
+      "set_loop_policy"  (->SetLoopPolicyTool)
+      "list_llm_models"  (->ListLlmModelsTool cat)})))
 
 (m/=> config-registry
       [:function
