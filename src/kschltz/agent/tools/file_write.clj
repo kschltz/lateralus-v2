@@ -30,8 +30,7 @@
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-safety :as fs])
-  (:import [java.io File]
-           [java.nio.charset StandardCharsets]
+  (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files Path]))
 
 ;; ---------------------------------------------------------------------------
@@ -56,8 +55,9 @@
    the registry has `:refuse-clojure?` true."
   [:map
    [:path [:string {:min 1}]]
-   [:content [:string {:min 1}]]
+   [:content :string]
    [:create-dirs {:optional true} :boolean]
+   [:create-only {:optional true} :boolean]
    [:expected-sha256 {:optional true} :string]
    [:force {:optional true} :boolean]
    [:clj-override {:optional true} :boolean]])
@@ -111,12 +111,14 @@
                               `:refuse-clojure?` is true without a
                               per-call `:clj-override`."
   [workspace-root ^Path path {:keys [force clj-override refuse-clojure? blocked-paths]}]
-  (let [write-dir (write-dir-path workspace-root)]
+  (let [write-dir (some-> (write-dir-path workspace-root) fs/canonical-path)
+        canonical (fs/canonical-path path)]
     (cond
-      (and (not force) (not (fs/within-write-dir? write-dir path)))
+      (and (not force) (not (fs/within-write-dir? write-dir canonical)))
       {:error :outside-write-dir}
 
-      (fs/blocked-path? path blocked-paths)
+      (or (fs/blocked-path? path blocked-paths)
+          (fs/blocked-path? canonical blocked-paths))
       {:error :blocked-path}
 
       (and refuse-clojure? (not clj-override) (fs/clojure-file? path))
@@ -267,8 +269,16 @@
                 (let [existed (.exists (.toFile path))
                       cur     (try (Files/readAllBytes path)
                                    (catch Throwable _ nil))]
-                  (if (and expected cur (not= expected (fs/sha256 cur)))
-                    (json/generate-string {:error :stale-file})
+                  (if (and (:create-only args) existed)
+                    (json/generate-string {:error :file-exists
+                                           :path (fpath/path->str path)})
+                    (if (and expected
+                             (or (nil? cur)
+                                 (not= expected (fs/sha256 cur))))
+                      (json/generate-string
+                       {:error :stale-file
+                        :expected-sha256 expected
+                        :actual-sha256 (when cur (fs/sha256 cur))})
                     (let [backup (fs/make-backup! path)]
                       (when (:create-dirs args)
                         (let [parent (.getParentFile (.toFile path))]
@@ -285,7 +295,7 @@
                             :bytes-written (count (.getBytes content "UTF-8"))
                             :backup-path   backup
                             :created       (not existed)
-                            :changed       true})))))))))))
+                            :changed       true}))))))))))))
       (catch Throwable t
         (error-result t)))))
 

@@ -119,6 +119,12 @@
   (is (= "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
          (fs/sha256 (.getBytes "abc" "UTF-8")))))
 
+(deftest sha256-file-streams-the-same-digest
+  (let [target (tmp-path "digest.txt")]
+    (spit (.toFile target) "abc")
+    (is (= "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+           (fs/sha256-file target)))))
+
 (deftest staleness-sentinel-and-check-roundtrip
   (let [target (tmp-path "sentinel.txt")]
     (spit (.toFile target) "hello")

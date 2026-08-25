@@ -6,7 +6,9 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.filesystem :as tools.filesystem])
-  (:import [java.io File]))
+  (:import [java.io File]
+           [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
 
 (def ^:private tmp-dir
   "Temporary directory for filesystem tool tests."
@@ -59,6 +61,36 @@
       (is (:created parsed))
       (is (= "created" (slurp (io/file @tmp-dir "nested/dir/test.txt")))))))
 
+(deftest file-create-is-safe-and-create-only
+  (testing "file_create refuses to overwrite an existing file"
+    (let [target (temp-file "existing.txt" "original")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file_create")
+                                   {:path "existing.txt" :content "replacement"}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "file-exists" (:error parsed)))
+      (is (= "original" (slurp target)))))
+  (testing "file_create refuses blocked paths"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file_create")
+                                   {:path ".git/config" :content "nope"}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "blocked-path" (:error parsed)))
+      (is (not (.exists (io/file @tmp-dir ".git/config"))))))
+  (testing "file_create refuses paths outside the workspace"
+    (let [reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          outside (File/createTempFile "lateralus-create-outside-" ".txt")
+          path (.getAbsolutePath outside)
+          _ (.delete outside)
+          result (tool/invoke-tool (get reg "file_create")
+                                   {:path path :content "nope"}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "outside-write-dir" (:error parsed)))
+      (is (not (.exists outside))))))
+
 (deftest file-read-returns-content
   (testing "file_read returns the UTF-8 content of a text file with line numbers"
     (let [f    (temp-file "hello.txt" "hello world")
@@ -69,6 +101,8 @@
       (is (= "     1\thello world" (:content parsed)))
       (is (str/includes? (:content parsed) "hello world"))
       (is (= 11 (:size parsed)))
+      (is (= "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+             (:sha256 parsed)))
       (is (= 1 (:total-lines parsed)))
       (is (= 1 (:offset parsed)))
       (is (= 2000 (:limit parsed)))
@@ -348,6 +382,55 @@
           parsed (json/parse-string result true)]
       (is (= "outside-write-dir" (:error parsed)))
       (is (not (.exists outside))))))
+
+(deftest file-write-rejects-symlink-escape
+  (testing "canonical containment prevents writes through a workspace symlink"
+    (let [outside (doto (io/file (System/getProperty "java.io.tmpdir")
+                                 (str "lateralus-symlink-outside-" (random-uuid)))
+                    (.mkdirs))
+          link (io/file @tmp-dir "escape")
+          _ (Files/createSymbolicLink (.toPath link)
+                                      (.toPath outside)
+                                      (make-array FileAttribute 0))
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          result (tool/invoke-tool (get reg "file_write")
+                                   {:path "escape/pwned.txt"
+                                    :content "nope"
+                                    :create-dirs true}
+                                   dummy-ctx)
+          parsed (json/parse-string result true)]
+      (is (= "outside-write-dir" (:error parsed)))
+      (is (not (.exists (io/file outside "pwned.txt"))))
+      (.delete link)
+      (.delete outside))))
+
+(deftest file-read-digest-fences-follow-up-write
+  (testing "the read digest permits a fresh write and rejects a stale one"
+    (let [target (temp-file "digest.txt" "v1\n")
+          reg (tools.filesystem/filesystem-registry {:workspace-root (str @tmp-dir)})
+          read-result (-> (tool/invoke-tool (get reg "file_read")
+                                            {:path "digest.txt"}
+                                            dummy-ctx)
+                          (json/parse-string true))
+          digest (:sha256 read-result)
+          fresh (-> (tool/invoke-tool (get reg "file_write")
+                                      {:path "digest.txt"
+                                       :content "v2\n"
+                                       :expected-sha256 digest}
+                                      dummy-ctx)
+                    (json/parse-string true))]
+      (is (true? (:changed fresh)))
+      (spit target "external\n")
+      (let [stale (-> (tool/invoke-tool (get reg "file_write")
+                                        {:path "digest.txt"
+                                         :content "v3\n"
+                                         :expected-sha256 digest}
+                                        dummy-ctx)
+                      (json/parse-string true))]
+        (is (= "stale-file" (:error stale)))
+        (is (= digest (:expected-sha256 stale)))
+        (is (string? (:actual-sha256 stale)))
+        (is (= "external\n" (slurp target)))))))
 
 (deftest file-write-honors-create-dirs-false
   (testing "file_write errors (does not silently mkdir) when :create-dirs is omitted"

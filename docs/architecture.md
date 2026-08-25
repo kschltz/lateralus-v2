@@ -139,6 +139,22 @@ Only the outer runtime loop holds a mutable reference — an atom seeded with `:
 
 Tools may propose allowlisted **transitions** (JSON envelope key `:transition`) that are harvested onto `:agent/transitions` and applied in the `:tools` slot before the next LLM call — including mid-ReAct follow-ups. See [`docs/transitions.md`](transitions.md).
 
+## Filesystem harness
+
+`:lateralus/file-tools` exposes bounded, model-oriented reads and safe
+mutations through the normal `Tool` dispatch interceptor. `file_read` returns
+line-numbered windows plus the SHA-256 of the exact bytes consumed. Callers can
+carry that digest into `file_write` as `expected-sha256`; the writer returns a
+structured `stale-file` conflict instead of overwriting a changed file.
+
+`file_write`, `file_update`, and `file_create` share one mutation boundary:
+canonical workspace containment (including symlink resolution), unskippable
+blocked paths, per-path locking, size and omission checks, optional Clojure
+round-trip validation, backups for replacements, atomic moves, and post-write
+verification. `file_create` is strictly create-only and refuses an existing
+path. `file_update` validates all edits before taking the lock and rechecks a
+staleness sentinel at commit, so failed or racing edits produce zero writes.
+
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.

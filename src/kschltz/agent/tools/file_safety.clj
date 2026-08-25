@@ -32,7 +32,7 @@
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files Path StandardCopyOption]
-           [java.security MessageDigest]
+           [java.security DigestInputStream MessageDigest]
            [java.text Normalizer Normalizer$Form]))
 
 (def default-max-write-bytes
@@ -59,6 +59,16 @@
           (empty? (.toString write-dir)))
     true
     (boolean (.startsWith path write-dir))))
+
+(defn canonical-path
+  "Return the canonical absolute path for `path`.
+
+   Canonicalization resolves `..` and existing symbolic links. For a
+   not-yet-created target, `File.getCanonicalFile` still canonicalizes the
+   nearest existing parent, which closes the common `workspace/link -> /tmp`
+   containment bypass."
+  [^Path path]
+  (.toPath (.getCanonicalFile (.toFile path))))
 
 (defn blocked-path?
   "Return true if any segment of `path` appears in `blocked-paths`.
@@ -117,6 +127,19 @@
   (let [md (MessageDigest/getInstance "SHA-256")
         digest (.digest md bytes)]
     (->> digest
+         (map #(format "%02x" (bit-and % 0xff)))
+         (apply str))))
+
+(defn sha256-file
+  "Return the SHA-256 digest of `path` without loading the file into memory."
+  [^Path path]
+  (let [md (MessageDigest/getInstance "SHA-256")
+        buffer (byte-array 8192)]
+    (with-open [in (DigestInputStream. (io/input-stream (.toFile path)) md)]
+      (loop []
+        (when-not (neg? (.read in buffer))
+          (recur))))
+    (->> (.digest md)
          (map #(format "%02x" (bit-and % 0xff)))
          (apply str))))
 

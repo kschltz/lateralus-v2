@@ -8,10 +8,10 @@
    provided, relative paths are resolved against it.
 
    `file_read`, `file_list`, `file_info`, `file_search`, and
-   `file_create` are thin convenience wrappers that live in this
-   namespace. `file_create` is a create-only convenience that
-   silently overwrites and creates parent directories; it does NOT
-   enforce containment, block paths, or back up the previous file.
+   `file_create` are convenience wrappers that live in this namespace.
+   `file_create` delegates to the safe writer in strict create-only mode,
+   so it creates parents but never overwrites and retains all containment,
+   blocked-path, size, omission, atomic-write, and locking guarantees.
 
    `file_write` and `file_update` are the safe mutation tools. Their
    deftypes, schemas, edit-validation helpers, and factory functions
@@ -39,7 +39,8 @@
             [kschltz.agent.tools.file-write :as fw])
   (:import [java.io BufferedReader File InputStream InputStreamReader]
            [java.nio.charset CharsetDecoder CodingErrorAction StandardCharsets]
-           [java.nio.file Files Path]))
+           [java.nio.file Files Path]
+           [java.security DigestInputStream MessageDigest]))
 
 (def default-max-read-bytes
   "Default hard ceiling on the byte length of `file_read`'s line-numbered
@@ -184,8 +185,10 @@
   (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
                   (.onMalformedInput CodingErrorAction/REPORT)
                   (.onUnmappableCharacter CodingErrorAction/REPORT))
-        path-str (fpath/path->str path)]
-    (with-open [is (io/input-stream (.toFile path))
+        path-str (fpath/path->str path)
+        digest (MessageDigest/getInstance "SHA-256")]
+    (with-open [raw (io/input-stream (.toFile path))
+                is (DigestInputStream. raw digest)
                 r (BufferedReader. (InputStreamReader. ^InputStream is ^CharsetDecoder decoder))]
       (loop [line-no 0
              collected 0
@@ -208,6 +211,9 @@
                                   content)]
               {:path path-str
                :size size
+               :sha256 (->> (.digest digest)
+                            (map #(format "%02x" (bit-and % 0xff)))
+                            (apply str))
                :total-lines total-lines
                :offset offset
                :limit limit
@@ -420,27 +426,19 @@
       (catch Throwable t
         (error-result t)))))
 
-(defn- do-create-file [^Path path content]
-  (let [file (.toFile path)]
-    (.mkdirs (.getParentFile file))
-    (spit file (or content "") :encoding "UTF-8")
-    {:path (fpath/path->str path)
-     :created true
-     :size (.length file)}))
-
-(deftype CreateFileTool [workspace-root]
+(deftype CreateFileTool [delegate]
   tool/Tool
   (-name [_] "file_create")
   (-description [_]
-    "Create a new UTF-8 text file (and any missing parent directories) with the given content. Paths are resolved against the configured workspace root.")
+    "Safely create a new UTF-8 text file and missing parent directories. The operation is create-only: it refuses existing files. It enforces workspace containment, blocked-path, size, omission-placeholder, and optional Clojure guards, then lands content atomically.")
   (-input-schema [_] InputSchema:CreateFile)
   (-output-schema [_] OutputSchema:String)
-  (-invoke [_ args _ctx]
-    (try
-      (json/generate-string
-       (do-create-file (fpath/resolve-path workspace-root (:path args)) (:content args)))
-      (catch Throwable t
-        (error-result t)))))
+  (-invoke [_ args ctx]
+    (tool/invoke-tool delegate
+                      (assoc args :content (or (:content args) "")
+                                  :create-dirs true
+                                  :create-only true)
+                      ctx)))
 
 (defn read-file
   "Return a new `file_read` Tool instance."
@@ -470,9 +468,11 @@
 
 (defn create-file
   "Return a new `file_create` Tool instance."
-  ([] (create-file nil))
+  ([] (create-file nil {}))
   ([workspace-root]
-   (->CreateFileTool workspace-root)))
+   (create-file workspace-root {}))
+  ([workspace-root opts]
+   (->CreateFileTool (fw/write-file workspace-root opts))))
 
 (defn write-file
   "Return a new `file_write` Tool instance. Re-exported from
@@ -513,8 +513,8 @@
    When `:workspace-root` is omitted, the current working directory is
    used. `file_write` and `file_update` enforce workspace-root
    containment (per-call `:force` skips it) and always refuse blocked
-   path segments; `file_create` remains a thin create-only wrapper
-   that does not enforce containment."
+   path segments; `file_create` uses the same guardrails and never
+   overwrites an existing path."
   ([] (filesystem-registry {}))
   ([{:keys [workspace-root
             max-read-bytes
@@ -531,7 +531,7 @@
      {"file_read"    (read-file workspace-root (or max-read-bytes default-max-read-bytes))
       "file_list"    (list-directory workspace-root)
       "file_info"    (file-info workspace-root)
-      "file_create"  (create-file workspace-root)
+     "file_create"  (create-file workspace-root write-opts)
       "file_search"  (search-files workspace-root
                                   (or max-search-file-bytes default-max-search-file-bytes)
                                   (or max-search-results default-max-search-results))

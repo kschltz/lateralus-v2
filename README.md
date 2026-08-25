@@ -153,6 +153,22 @@ but block runtime dependency loading. See [`docs/runtime-eval.md`](docs/runtime-
 :lateralus/runtime-tools {:enabled? true :network? true}
 ```
 
+## File harness
+
+The default tool registry includes bounded, line-numbered file reads and safe
+create/write/update operations:
+
+- `file_read` returns a window, continuation metadata, and a SHA-256 witness.
+- `file_update` applies ambiguity-safe text edits atomically and detects races.
+- `file_write` accepts `expected-sha256` to reject stale full-file replacements.
+- `file_create` is create-only; it never silently overwrites an existing file.
+
+All mutations use canonical workspace containment (including symlink
+resolution), blocked-path checks, per-path locks, size/omission guards, atomic
+moves, and write verification. Replacement writes also create timestamped
+backups. These tools enter through the same `Tool` dispatch interceptor as
+every other agent capability.
+
 ## MCP client tools
 
 Lateralus can attach **stdio** MCP servers (Claude Desktop / Cursor
