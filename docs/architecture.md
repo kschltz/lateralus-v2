@@ -152,6 +152,8 @@ Read, list, info, and search operations resolve canonical paths under the
 workspace, reject blocked segments, and never follow a workspace symlink to an
 outside target unless the operator explicitly enables outside-workspace reads.
 Directory listings are sorted and capped with total/truncation metadata.
+`file_glob` adds sorted, bounded file discovery using portable glob patterns;
+it excludes blocked trees and does not follow directory symlinks.
 
 `file_write`, `file_update`, and `file_create` share one mutation boundary:
 canonical workspace containment (including symlink resolution), unskippable

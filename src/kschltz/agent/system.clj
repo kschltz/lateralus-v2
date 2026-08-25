@@ -365,7 +365,8 @@
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
-  registry (`file_read`, `file_list`, `file_info`, `file_search`).
+   registry (`file_read`, `file_list`, `file_info`, `file_glob`,
+   `file_search`, and safe mutation tools).
    Used by the tool-loop example config; not part of the default config
    so production agents start with an empty tool registry."
   (tools.filesystem/filesystem-registry opts))

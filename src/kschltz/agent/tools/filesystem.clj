@@ -36,6 +36,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.file-glob :as file-glob]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-safety :as fs]
             [kschltz.agent.tools.file-write :as fw])
@@ -581,6 +582,7 @@
      :max-search-results      — default hit cap for `file_search`
                                    (default 100)
      :max-list-entries       — cap for `file_list` (default 500)
+     :max-glob-results       — cap for `file_glob` (default 500)
      :max-write-bytes         — cap for `file_write` and `file_update`
                                    (default 10 MiB)
      :refuse-clojure?         — refuse Clojure/EDN targets unless a
@@ -605,6 +607,7 @@
             max-search-file-bytes
             max-search-results
             max-list-entries
+            max-glob-results
             max-write-bytes
             refuse-clojure?
             blocked-paths
@@ -626,6 +629,10 @@
                                      allow-read-outside-workspace?)
       "file_info"    (file-info workspace-root blocked-paths
                                allow-read-outside-workspace?)
+      "file_glob"    (file-glob/file-glob
+                      workspace-root
+                      {:blocked-paths blocked-paths
+                       :max-results max-glob-results})
       "file_create"  (create-file workspace-root write-opts)
       "file_search"  (search-files workspace-root
                                   (or max-search-file-bytes default-max-search-file-bytes)
