@@ -59,7 +59,7 @@
                              :enabled false})
                  (tool-call "reload" "reload_runtime"
                             {:namespaces
-                             ["kschltz.agent.interceptors"]})]})
+                             ["kschltz.agent.tools.filesystem"]})]})
 
               2
               (response
