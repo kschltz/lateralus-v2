@@ -340,6 +340,8 @@
         (try (-> (:body response)
                  (json/parse-string true)
                  schemas/decode-response)
+             (catch clojure.lang.ExceptionInfo e
+               (throw e))
              (catch Throwable t
                (throw (ex-info "LLM HTTP response body is not valid JSON"
                                {:kind   :parse
