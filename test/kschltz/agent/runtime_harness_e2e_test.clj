@@ -30,7 +30,7 @@
   [request]
   (some->> (:messages request)
            reverse
-           (filter #(= "tool" (:role %)))
+           (filter #(= "tool" (some-> (:role %) name)))
            first
            :content
            (json/parse-string true)))
