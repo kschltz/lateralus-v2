@@ -54,8 +54,12 @@
    [:fn {:error/message "provide at least one memory policy field"}
     (fn [m] (boolean (seq m)))]])
 
+(def ReloadRuntimeInput
+  [:map {:closed true}
+   [:namespaces [:vector {:min 1} tr/RuntimeNamespace]]])
+
 (def ^:private protected-runtime-tools
-  #{"set_tool_enabled" "runtime_describe"})
+  #{"set_tool_enabled" "runtime_describe" "reload_runtime"})
 
 (defn- current-llm-config
   [ctx]
@@ -190,6 +194,22 @@
         :after after
         :transition (assoc args :op :set-memory-policy)}))))
 
+(defrecord ReloadRuntimeTool []
+  tool/Tool
+  (-name [_] "reload_runtime")
+  (-description [_]
+    "After the current exchange, reload edited `kschltz.agent.*` namespaces and rebuild all Integrant-assembled built-in plugins for the next exchange. The tool only proposes a transition; the outer runtime performs the reload. Core engine/protocol namespaces report `restart-required` instead of being unsafely replaced in-process.")
+  (-input-schema [_] ReloadRuntimeInput)
+  (-output-schema [_] :string)
+  (-invoke [_ {:keys [namespaces]} _ctx]
+    (tr/encode-result
+     {:ok true
+      :tool "reload_runtime"
+      :pending "next-exchange"
+      :namespaces (vec (distinct namespaces))
+      :transition {:op :reload-runtime
+                   :namespaces (vec (distinct namespaces))}})))
+
 (defrecord ListLlmModelsTool [catalog]
   tool/Tool
   (-name [_] "list_llm_models")
@@ -238,6 +258,7 @@
       "set_loop_policy"  (->SetLoopPolicyTool)
       "set_tool_enabled"  (->SetToolEnabledTool)
       "set_memory_policy" (->SetMemoryPolicyTool)
+      "reload_runtime"    (->ReloadRuntimeTool)
       "list_llm_models"  (->ListLlmModelsTool cat)})))
 
 (m/=> config-registry

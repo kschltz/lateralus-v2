@@ -57,6 +57,7 @@
       (is (contains? agent :agent/llm-client))
       (is (contains? agent :embedder))
       (is (contains? agent :memory-backend))
+      (is (fn? (:agent/rebuild-chain agent)))
       (is (contains? agent :assembled))
       (is (vector? (:assembled agent))
           "assembled chain is a vector of interceptors")
@@ -68,7 +69,10 @@
       (is (some #(= :kschltz.agent.loop/inject-tools (:name %)) (:assembled agent))
           "tool inject is in the assembled chain")
       (is (some #(= :kschltz.agent.loop/dispatch-tools (:name %)) (:assembled agent))
-          "tool dispatch is in the assembled chain"))))
+          "tool dispatch is in the assembled chain")
+      (is (= (mapv :name (:exchange-chain agent))
+             (mapv :name ((:agent/rebuild-chain agent))))
+          "rebuilt built-in plugins preserve the configured chain shape"))))
 
 (deftest complete-plugin-replaces-base-chain
   (testing "a plugin marked :plugin/complete? true is not prepended with base"
@@ -113,7 +117,8 @@
           plugins (:lateralus/plugins s)]
       (is (= :base (-> plugins first meta :plugin/name)))
       (is (= :memory (-> plugins second meta :plugin/name)))
-      (is (= :tools (-> plugins (nth 2) meta :plugin/name))))))
+      (is (= :tools (-> plugins (nth 2) meta :plugin/name)))
+      (is (every? fn? (map #(-> % meta :plugin/rebuild) plugins))))))
 
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"

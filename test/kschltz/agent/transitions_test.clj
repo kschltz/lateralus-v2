@@ -80,6 +80,20 @@
     (is (= (:agent/memory-policy after)
            (:agent/memory-policy delta)))))
 
+(deftest runtime-reload-transition-is-allowlisted-and-durable
+  (let [op {:op :reload-runtime
+            :namespaces ["kschltz.agent.interceptors"
+                         "kschltz.agent.interceptors"]}
+        after (tr/apply-transition {} op)
+        delta (tr/durable-delta {} after [op])]
+    (is (tr/valid-transition? op))
+    (is (not (tr/valid-transition?
+              {:op :reload-runtime :namespaces ["clojure.core"]})))
+    (is (= {:namespaces ["kschltz.agent.interceptors"]}
+           (:agent/runtime-reload after)))
+    (is (= (:agent/runtime-reload after)
+           (:agent/runtime-reload delta)))))
+
 (deftest apply-transitions-folds-left-to-right
   (let [{:keys [state applied]}
         (tr/apply-transitions {:model "a" :base-url "http://old"}

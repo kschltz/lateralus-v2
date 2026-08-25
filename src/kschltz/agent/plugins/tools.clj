@@ -74,4 +74,5 @@
          session (:mcp-session opts)]
      (with-meta
        [(seed-registry-interceptor registry session)]
-       {:plugin/name :tools}))))
+       {:plugin/name :tools
+        :plugin/rebuild (fn [] (tools-plugin registry opts))}))))

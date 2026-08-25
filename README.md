@@ -111,6 +111,9 @@ The agent can change its own LLM session knobs mid-run via staged
   for the session; recovery/introspection tools remain protected.
 - `set_memory_policy` — tune recall breadth or disable recall/persistence
   without replacing the Integrant-managed backend or embedder.
+- `reload_runtime` — after source edits, reload allowlisted agent namespaces
+  and rebuild Integrant-assembled built-in plugins for the next exchange;
+  core engine/protocol changes report `restart-required`.
 - `list_llm_models` — list models at the current (or overridden) endpoint
   behind the `ModelCatalog` protocol.
 

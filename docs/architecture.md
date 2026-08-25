@@ -187,6 +187,13 @@ keys or live implementation objects. Its `section` input (`summary`, `tools`,
 This is inspection only. Runtime changes still use allowlisted transition
 envelopes harvested and applied in the `:tools` interceptor slot.
 
+After source edits, `reload_runtime` can stage a deferred namespace reload.
+The current exchange completes normally; only the outer runtime consumes the
+request, reloads allowlisted project namespaces, invokes the rebuild metadata
+on Integrant-assembled built-in plugins, and swaps the next exchange's chain.
+Core engine/protocol namespace changes remain process-restart boundaries
+because JVM protocol/class identity cannot be replaced safely in place.
+
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.

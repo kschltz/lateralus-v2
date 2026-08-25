@@ -56,7 +56,10 @@
                  (tool-call "loop" "set_loop_policy"
                             {:max-loop-depth 9})
                  (tool-call "memory" "set_memory_policy"
-                            {:recall-enabled false})]})
+                            {:recall-enabled false})
+                 (tool-call "reload" "reload_runtime"
+                            {:namespaces
+                             ["kschltz.agent.interceptors"]})]})
 
               2
               (response
@@ -91,6 +94,11 @@
            {:agent/llm-client client
             :agent/loop-opts {:max-loop-depth 5}
             :exchange-chain chain
+            :agent/rebuild-chain
+            (fn []
+              (plugin/assemble-chain
+               [(plugins.base/base-plugin)
+                (plugins.tools/tools-plugin registry)]))
             :initial-state {:model "offline-harness"
                             :base-url "stub"
                             :agent/system-message "initial"}}
@@ -108,10 +116,14 @@
         (is (= 9 (get-in state [:agent/loop-opts :max-loop-depth])))
         (is (false? (get-in state
                             [:agent/memory-policy :recall-enabled])))
+        (is (= :reloaded
+               (get-in state
+                       [:agent/runtime-reload-status :status])))
         (is (= ["runtime_describe"
                 "set_system_message"
                 "set_loop_policy"
                 "set_memory_policy"
+                "reload_runtime"
                 "file_read"
                 "file_patch"]
                names)))

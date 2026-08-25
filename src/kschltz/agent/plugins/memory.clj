@@ -102,4 +102,9 @@
      {:name  ::persist
       :slot  :persist
       :leave (persist-leave backend)}]
-    {:plugin/name :memory}))
+    {:plugin/name :memory
+     :plugin/rebuild (fn []
+                       (memory-plugin {:backend backend
+                                       :embedder embedder
+                                       :top-y top-y
+                                       :last-n last-n}))}))

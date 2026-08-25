@@ -58,6 +58,10 @@ before the next ReAct LLM call.
  :last-n 12
  :recall-enabled true
  :persist-enabled false}
+
+{:op :reload-runtime
+ :namespaces ["kschltz.agent.interceptors"
+              "kschltz.agent.plugins.base"]}
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -129,6 +133,19 @@ Updates the memory interceptors' session overlay: recall result counts and
 independent recall/persistence switches. The memory plugin reads this policy
 from immutable `:agent/state` on every exchange. Backend and embedder instances
 remain Integrant-managed and are not replaced by this pure-data transition.
+
+### `reload_runtime`
+
+Stages a one-shot reload request. After the current chain finishes and its
+state delta is merged, the outer runtime reloads the named project namespaces,
+asks each Integrant-assembled built-in plugin for a fresh interceptor vector,
+and atomically swaps the chain used by the next exchange. Tool code never
+mutates the chain or runtime atom.
+
+Core engine/protocol namespaces (`runtime`, `chain`, `system`, `tool`, and
+`transitions`) report `restart-required`: replacing their generated
+classes/protocol identities inside a running JVM is unsafe. The request is
+consumed either way, and `runtime_describe` reports the reload status.
 
 ## Pipeline (`:tools` slot)
 

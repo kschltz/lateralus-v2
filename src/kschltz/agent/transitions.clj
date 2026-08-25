@@ -24,7 +24,8 @@
    `:mcp/servers` is replaced wholesale on merge (see runtime)."
   (into llm-config-keys
         #{:mcp/servers :agent/system-message :agent/loop-opts
-          :agent/disabled-tools :agent/memory-policy}))
+          :agent/disabled-tools :agent/memory-policy
+          :agent/runtime-reload}))
 
 (def LoopOptsPatch
   "Allowlisted per-session loop policy fields."
@@ -119,6 +120,14 @@
        (some #(contains? op %)
              [:top-y :last-n :recall-enabled :persist-enabled])))]])
 
+(def RuntimeNamespace
+  [:re #"^kschltz\.(?:agent(?:\..+)?|lateralus)$"])
+
+(def ReloadRuntimeOp
+  [:map {:closed true}
+   [:op [:= :reload-runtime]]
+   [:namespaces [:vector {:min 1} RuntimeNamespace]]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
@@ -129,7 +138,8 @@
    [:set-system-message SetSystemMessageOp]
    [:set-loop-opts SetLoopOptsOp]
    [:set-tool-enabled SetToolEnabledOp]
-   [:set-memory-policy SetMemoryPolicyOp]])
+   [:set-memory-policy SetMemoryPolicyOp]
+   [:reload-runtime ReloadRuntimeOp]])
 
 (def Transitions
   [:vector Transition])
@@ -200,6 +210,10 @@
                      (select-keys op
                                   [:top-y :last-n
                                    :recall-enabled :persist-enabled]))))
+    :reload-runtime
+    (assoc (or state {})
+           :agent/runtime-reload
+           {:namespaces (vec (distinct (:namespaces op)))})
     state))
 
 (defn apply-transitions
@@ -242,7 +256,8 @@
         system-message-touched? (some #(= :set-system-message (:op %)) applied)
         loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)
         tools-touched? (some #(= :set-tool-enabled (:op %)) applied)
-        memory-touched? (some #(= :set-memory-policy (:op %)) applied)]
+        memory-touched? (some #(= :set-memory-policy (:op %)) applied)
+        reload-touched? (some #(= :reload-runtime (:op %)) applied)]
     (cond-> llm-patch
       mcp-touched?
       (assoc :mcp/servers (or (:mcp/servers after) {}))
@@ -253,7 +268,9 @@
       tools-touched?
       (assoc :agent/disabled-tools (or (:agent/disabled-tools after) []))
       memory-touched?
-      (assoc :agent/memory-policy (:agent/memory-policy after)))))
+      (assoc :agent/memory-policy (:agent/memory-policy after))
+      reload-touched?
+      (assoc :agent/runtime-reload (:agent/runtime-reload after)))))
 
 (defn redact-transition
   "Return a logging/model-safe copy of `op` with secrets replaced by

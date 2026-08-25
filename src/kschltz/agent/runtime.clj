@@ -51,14 +51,85 @@
   (send-message [runtime user-text] "Run one exchange.")
   (stop [runtime] "Return the current merged state."))
 
-(defrecord RuntimeRecord [state agent-map session-id log-sink]
+(def ^:private restart-required-namespaces
+  #{"kschltz.agent.runtime"
+    "kschltz.agent.chain"
+    "kschltz.agent.system"
+    "kschltz.agent.tool"
+    "kschltz.agent.transitions"})
+
+(defn- apply-runtime-reload!
+  "Consume a deferred runtime reload after the current exchange finishes."
+  [runtime request]
+  (let [namespaces (vec (distinct (:namespaces request)))
+        restart-required (vec (filter restart-required-namespaces namespaces))
+        rebuild (:agent/rebuild-chain (:agent-map runtime))]
+    (try
+      (cond
+        (seq restart-required)
+        (swap! (:state runtime)
+               (fn [state]
+                 (-> state
+                     (dissoc :agent/runtime-reload)
+                     (assoc :agent/runtime-reload-status
+                            {:ok false
+                             :status :restart-required
+                             :namespaces restart-required}))))
+
+        (not (fn? rebuild))
+        (swap! (:state runtime)
+               (fn [state]
+                 (-> state
+                     (dissoc :agent/runtime-reload)
+                     (assoc :agent/runtime-reload-status
+                            {:ok false
+                             :status :unavailable
+                             :namespaces namespaces}))))
+
+        :else
+        (do
+          (doseq [ns-name namespaces]
+            (require (symbol ns-name) :reload))
+          (let [new-chain (rebuild)]
+            (when-not (vector? new-chain)
+              (throw (ex-info "Runtime chain rebuild did not return a vector"
+                              {:namespaces namespaces})))
+            (reset! (:chain runtime) new-chain)
+            (swap! (:state runtime)
+                   (fn [state]
+                     (let [revision (inc
+                                     (get-in state
+                                             [:agent/runtime-reload-status
+                                              :revision]
+                                             0))]
+                       (-> state
+                           (dissoc :agent/runtime-reload)
+                           (assoc :agent/runtime-reload-status
+                                  {:ok true
+                                   :status :reloaded
+                                   :namespaces namespaces
+                                   :revision revision
+                                   :interceptor-count (count new-chain)}))))))))
+      (catch Throwable t
+        (swap! (:state runtime)
+               (fn [state]
+                 (-> state
+                     (dissoc :agent/runtime-reload)
+                     (assoc :agent/runtime-reload-status
+                            {:ok false
+                             :status :error
+                             :namespaces namespaces
+                             :error (or (ex-message t)
+                                        (.getName (class t)))}))))))))
+
+(defrecord RuntimeRecord [state agent-map session-id log-sink chain]
   AgentRuntime
   (session-id [_] session-id)
   (send-message [this user-text]
     (let [user-msg-id      (str (random-uuid))
           assistant-msg-id (str (random-uuid))
           base-state       @(:state this)
-          chain-to-run     (get agent-map :exchange-chain default-exchange-chain)
+          chain-to-run     @chain
           ctx              {:exchange/session-id       session-id
                             :exchange/user-msg-id      user-msg-id
                             :exchange/assistant-msg-id assistant-msg-id
@@ -79,7 +150,12 @@
                                         (merge-state delta
                                                      (usage-delta base-state (:llm/response result))))]
       (reset! (:state this) merged)
-      result))
+      (when-let [request (:agent/runtime-reload merged)]
+        (apply-runtime-reload! this request))
+      (cond-> result
+        (:agent/runtime-reload-status @(:state this))
+        (assoc :agent/runtime-reload-status
+               (:agent/runtime-reload-status @(:state this))))))
   (stop [_] @state))
 
 (defn start
@@ -91,10 +167,12 @@
   ([agent-map]
    (start agent-map (str (random-uuid))))
   ([agent-map session-id]
-   (let [log-sink (logging/build-sink (:agent/logging agent-map) session-id)]
+   (let [log-sink (logging/build-sink (:agent/logging agent-map) session-id)
+         initial-chain (get agent-map :exchange-chain default-exchange-chain)]
      (map->RuntimeRecord
       {:state      (atom (merge (:initial-state agent-map {})
                                 {:agent/session-id session-id}))
        :agent-map  agent-map
        :session-id session-id
-       :log-sink   log-sink}))))
+       :log-sink   log-sink
+       :chain      (atom initial-chain)}))))

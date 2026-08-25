@@ -22,7 +22,7 @@
   (let [reg (cfg-registry)]
     (is (= #{"set_llm_config" "set_system_message"
              "set_loop_policy" "set_tool_enabled" "set_memory_policy"
-             "list_llm_models"}
+             "reload_runtime" "list_llm_models"}
            (set (keys reg))))
     (is (every? tool/tool? (vals reg)))))
 
@@ -140,6 +140,23 @@
            (name (keyword (get-in result [:transition :op])))))
     (is (str/includes?
          (tool/invoke-tool t {} {})
+         "input validation failed"))))
+
+(deftest reload-runtime-emits-deferred-transition
+  (let [t (get (cfg-registry) "reload_runtime")
+        result (-> (tool/invoke-tool
+                    t
+                    {:namespaces ["kschltz.agent.interceptors"
+                                  "kschltz.agent.interceptors"]}
+                    {})
+                   (json/parse-string true))]
+    (is (true? (:ok result)))
+    (is (= "next-exchange" (:pending result)))
+    (is (= ["kschltz.agent.interceptors"] (:namespaces result)))
+    (is (= "reload-runtime"
+           (name (keyword (get-in result [:transition :op])))))
+    (is (str/includes?
+         (tool/invoke-tool t {:namespaces ["clojure.core"]} {})
          "input validation failed"))))
 
 (deftest list-llm-models-uses-catalog

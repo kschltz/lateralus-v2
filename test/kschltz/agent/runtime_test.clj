@@ -212,6 +212,51 @@
             :max-tool-calls-per-turn 2}
            (second @seen)))))
 
+(deftest deferred-runtime-reload-rebuilds-chain-for-next-exchange
+  (let [rebuilds (atom 0)
+        new-chain [{:name ::reloaded
+                    :enter #(assoc % :reloaded-chain-ran true)}]
+        old-chain [{:name ::request-reload
+                    :leave #(assoc % :agent/state-delta
+                                   {:agent/runtime-reload
+                                    {:namespaces
+                                     ["kschltz.agent.plugins.tools"]}})}]
+        r (runtime/start
+           {:exchange-chain old-chain
+            :agent/rebuild-chain
+            (fn []
+              (swap! rebuilds inc)
+              new-chain)})
+        first-result (runtime/send-message r "reload")
+        second-result (runtime/send-message r "after")]
+    (is (= 1 @rebuilds))
+    (is (= :reloaded
+           (get-in first-result [:agent/runtime-reload-status :status])))
+    (is (nil? (:agent/runtime-reload (runtime/stop r)))
+        "outer runtime consumes the one-shot request")
+    (is (true? (:reloaded-chain-ran second-result))
+        "the next exchange uses the rebuilt chain")))
+
+(deftest core-runtime-namespaces-require-process-restart
+  (let [rebuilds (atom 0)
+        chain [{:name ::request-core-reload
+                :leave #(assoc % :agent/state-delta
+                               {:agent/runtime-reload
+                                {:namespaces ["kschltz.agent.runtime"]}})}]
+        r (runtime/start
+           {:exchange-chain chain
+            :agent/rebuild-chain
+            (fn []
+              (swap! rebuilds inc)
+              chain)})
+        result (runtime/send-message r "reload core")]
+    (is (zero? @rebuilds))
+    (is (= :restart-required
+           (get-in result [:agent/runtime-reload-status :status])))
+    (is (= ["kschltz.agent.runtime"]
+           (get-in result
+                   [:agent/runtime-reload-status :namespaces])))))
+
 (deftest send-message-uses-custom-chain
   (testing "send-message runs the chain from :exchange-chain in agent-map"
     (let [events  (atom [])

@@ -47,4 +47,5 @@
       [(seed-interceptor workbench)
        (guidance-interceptor)]
       [])
-    {:plugin/name :workbench}))
+    {:plugin/name :workbench
+     :plugin/rebuild (fn [] (workbench-plugin workbench))}))

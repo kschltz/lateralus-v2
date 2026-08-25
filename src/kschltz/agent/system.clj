@@ -408,6 +408,12 @@
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session]}]
   (plugins.tools/tools-plugin registry {:mcp-session mcp-session}))
 
+(defn- rebuild-plugin
+  [p]
+  (if-let [rebuild (-> p meta :plugin/rebuild)]
+    (rebuild)
+    p))
+
 (defmethod ig/init-key :lateralus/agent
   [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts cli-ui thinking portal workbench]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
@@ -425,7 +431,11 @@
   ;; `:agent/workbench` is the CHAT|Portal plugin (preferred interactive UI).
   ;; `:agent/portal` is the legacy Portal sticky-composer AgentUi.
   (let [llm-config (or llm-config {})
-        assembled (plugin/assemble-chain (or plugins []))]
+        plugins (vec (or plugins []))
+        rebuild-chain (fn []
+                        (plugin/assemble-chain
+                         (mapv rebuild-plugin plugins)))
+        assembled (plugin/assemble-chain plugins)]
     {:agent/llm-client  llm-client    ; pre-wired into ctx as `:llm/client`
      :embedder          embedder
      :memory-backend    memory-backend
@@ -435,6 +445,8 @@
      :agent/thinking    (or thinking (thinking/normalize {:mode :off}))
      :agent/workbench   workbench
      :agent/portal      portal
+     :agent/plugins     plugins
+     :agent/rebuild-chain rebuild-chain
      :assembled         assembled
      :exchange-chain    assembled
      :initial-state     (merge {:agent/system-message "lateralus-v2 MVP"}

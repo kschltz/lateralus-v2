@@ -81,6 +81,7 @@
                       {})
      :state-keys (->> (keys state) (map display-key) sort vec)
      :history-entries (count (:agent/history state))
+     :runtime-reload-status (:agent/runtime-reload-status state)
      :mcp-server-ids (->> (keys (:mcp/servers state))
                           (map display-key)
                           sort
