@@ -113,7 +113,7 @@
   (testing "binary UTF-8 decoding"
     (let [f (io/file @tmp-dir "binary.dat")]
       (with-open [out (io/output-stream f)]
-        (.write out (byte-array [(byte 0xC3) (byte 0x28)])))
+        (.write out (byte-array [(unchecked-byte 0xC3) (byte 0x28)])))
       (let [result (invoke f
                            {:expected-sha256 (sha f)
                             :patches [{:start-line 1 :end-line 1
