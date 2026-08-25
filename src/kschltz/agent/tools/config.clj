@@ -164,7 +164,7 @@
           :after {:enabled enabled}
           :transition {:op :set-tool-enabled
                        :tool-name tool-name
-                       :enabled enabled}}))))
+                       :enabled enabled}})))))
 
 (defrecord ListLlmModelsTool [catalog]
   tool/Tool
