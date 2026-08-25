@@ -24,6 +24,7 @@
    only handles non-streaming responses."
   (:require [cheshire.core :as json]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [hato.client :as http]
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.llm.schemas :as schemas]
@@ -324,6 +325,26 @@
                    max-tokens  (assoc :max-tokens max-tokens)
                    tools       (assoc :tools tools)
                    tool-choice (assoc :tool_choice tool-choice))
+        patterns (volatile! [])
+        _        (walk/postwalk
+                  (fn [x]
+                    (when (instance? java.util.regex.Pattern x)
+                      (vswap! patterns conj {:class (.getName (class x))
+                                             :value (str x)}))
+                    x)
+                  body)
+        ;; #region agent log
+        _        (spit "/opt/cursor/logs/debug.log"
+                       (str (json/generate-string
+                             {:hypothesisId "A,C,D"
+                              :location "llm/http.clj:post-chat:before-json"
+                              :message "Inspecting HTTP request before JSON encoding"
+                              :data {:tool-count (count tools)
+                                     :patterns @patterns}
+                              :timestamp (System/currentTimeMillis)})
+                            "\n")
+                       :append true)
+        ;; #endregion
         request  {:method              :post
                   :url                url
                   :headers            (->headers api-key)

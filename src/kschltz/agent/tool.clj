@@ -13,6 +13,7 @@
    schema-instrumented."
   (:require [cheshire.core :as json]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [malli.core :as m]
             [malli.error :as me]
             [malli.json-schema :as json-schema]))
@@ -115,8 +116,53 @@
 (defn tool-definition
   "Build an OpenAI-shaped function-tool definition map for `tool`."
   [tool]
+  ;; #region agent log
+  (spit "/opt/cursor/logs/debug.log"
+        (str (json/generate-string
+              {:hypothesisId "A,B"
+               :location "tool.clj:tool-definition:entry"
+               :message "Converting tool input schema"
+               :data {:tool (-name tool)
+                      :schema (pr-str (-input-schema tool))}
+               :timestamp (System/currentTimeMillis)})
+             "\n")
+        :append true)
+  ;; #endregion
   (let [name   (assert-portable-tool-name! (-name tool))
-        params (or (json-schema/transform (-input-schema tool)) {:type "object"})]
+        params (or (json-schema/transform (-input-schema tool)) {:type "object"})
+        patterns (volatile! [])]
+    (walk/postwalk
+     (fn [x]
+       (when (instance? java.util.regex.Pattern x)
+         (vswap! patterns conj {:class (.getName (class x))
+                                :value (str x)}))
+       x)
+     params)
+    ;; #region agent log
+    (spit "/opt/cursor/logs/debug.log"
+          (str (json/generate-string
+                {:hypothesisId "A,B,C"
+                 :location "tool.clj:tool-definition:transformed"
+                 :message "Inspected transformed JSON schema"
+                 :data {:tool name
+                        :patterns @patterns
+                        :parameters (pr-str params)}
+                 :timestamp (System/currentTimeMillis)})
+               "\n")
+          :append true)
+    ;; #endregion
+    ;; #region agent log
+    (spit "/opt/cursor/logs/debug.log"
+          (str (json/generate-string
+                {:hypothesisId "D"
+                 :location "tool.clj:tool-definition:exit"
+                 :message "Built tool definition"
+                 :data {:tool name
+                        :pattern-count (count @patterns)}
+                 :timestamp (System/currentTimeMillis)})
+               "\n")
+          :append true)
+    ;; #endregion
     {:type "function"
      :function {:name        name
                 :description (-description tool)
