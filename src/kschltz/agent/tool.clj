@@ -57,6 +57,18 @@
              :pattern (str portable-tool-name-pattern)})))
   name)
 
+(defn- json-schema-value
+  "Normalize values emitted by Malli's JSON Schema transformer to values
+   accepted by JSON encoders. Malli 0.16.4 preserves `java.util.regex.Pattern`
+   instances in `:pattern`; JSON Schema requires those values to be strings."
+  [schema]
+  (walk/postwalk
+   (fn [x]
+     (if (instance? java.util.regex.Pattern x)
+       (.pattern ^java.util.regex.Pattern x)
+       x))
+   schema))
+
 (defn- parse-arguments
   "Parse the JSON arguments string that the model returned."
   [arguments]
@@ -129,7 +141,8 @@
         :append true)
   ;; #endregion
   (let [name   (assert-portable-tool-name! (-name tool))
-        params (or (json-schema/transform (-input-schema tool)) {:type "object"})
+        params (json-schema-value
+                (or (json-schema/transform (-input-schema tool)) {:type "object"}))
         patterns (volatile! [])]
     (walk/postwalk
      (fn [x]

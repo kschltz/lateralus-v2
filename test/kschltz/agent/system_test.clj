@@ -7,11 +7,13 @@
      - empty plugin list produces empty assembled chain
      - halt policy: only keys with halt-key! are halted"
   (:require [clojure.java.io :as io]
+            [cheshire.core :as json]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [integrant.core :as ig]
             [kschltz.agent.system :as system]
+            [kschltz.agent.tool :as tool]
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.memory.embedding :as embedding]
@@ -131,6 +133,15 @@
                          (get fresh "file_read"))))
     (is (fn? (-> fresh meta :registry/rebuild))
         "rebuilt registries remain rebuildable for later reloads")))
+
+(deftest every-registered-tool-definition-is-json-serializable
+  (let [s (with-system system/default-config)
+        registry (:lateralus/tool-registry s)]
+    (is (seq registry) "the default system registers tools")
+    (doseq [[name registered-tool] registry]
+      (is (string? (json/generate-string
+                    (tool/tool-definition registered-tool)))
+          (str name " definition serializes to JSON")))))
 
 (deftest halt-closes-memory-backend
   (testing "halt! runs without throwing on the noop backend"
