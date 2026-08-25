@@ -305,6 +305,15 @@ For deterministic assertions without a real LLM, use the bundled fake server:
 LATERALUS_E2E_FAKE=true clojure -M:e2e
 ```
 
+The interceptor/runtime/file harness has a deterministic offline scenario:
+
+```bash
+clojure -M:e2e:workbench -n kschltz.agent.runtime-harness-e2e-test
+```
+
+It drives runtime introspection, policy transitions, `file_read`, and a
+hash-anchored `file_patch` through the real ReAct interceptor chain.
+
 The default `clojure -M:test` and `clojure -T:build test` exclude these
 slow integration tests.
 

@@ -43,6 +43,7 @@ clojure -M:test                                 # default suite (excludes ^:e2e)
 clojure -T:build test                           # same suite via tools.build
 clojure -M:e2e                                  # end-to-end memory tests
 LATERALUS_E2E_FAKE=true clojure -M:e2e          # deterministic fake-server e2e (incl. MCP)
+clojure -M:e2e:workbench -n kschltz.agent.runtime-harness-e2e-test # offline runtime/file harness
 LATERALUS_E2E_MCP=live clojure -M:e2e -n kschltz.agent.tools.mcp.mcp-e2e-test
 clojure -T:build uber                           # JVM distributable (includes :workbench)
 ./target/lateralus-v2 -h                        # smoke-test launcher
