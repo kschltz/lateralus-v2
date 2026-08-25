@@ -36,7 +36,9 @@
             [hickory.select :as hs]
             [kschltz.agent.tools.web.guards :as guards]
             [kschltz.agent.tools.web.ssrf :as ssrf]
-            [kschltz.agent.tools.web.protocol :as protocol])
+            [kschltz.agent.tools.web.protocol :as protocol]
+            [malli.core :as m]
+            [malli.instrument :as mi])
   (:import [java.net URL URLEncoder URLDecoder URI]
            [com.github.zhkl0228.impersonator ImpersonatorFactory]
            [okhttp3 OkHttpClientFactory Request Request$Builder]))
@@ -394,3 +396,34 @@
      :max-result-count — cap for -search result count"
   [config]
   (->DdgProvider config))
+
+(def ProviderConfig
+  [:map
+   [:http-fn {:optional true} fn?]
+   [:base-url {:optional true} :string]
+   [:user-agent {:optional true} :string]
+   [:impersonate {:optional true}
+    [:enum :android :macChrome :macSafari :macFirefox :ios]]
+   [:timeout-ms {:optional true} :int]
+   [:max-page-bytes {:optional true} :int]
+   [:max-result-count {:optional true} :int]])
+
+(def HttpRequest
+  [:map
+   [:url :string]
+   [:method {:optional true} :keyword]
+   [:headers {:optional true} [:map-of :string :string]]
+   [:impersonate {:optional true} :keyword]])
+
+(def HttpResponse
+  [:map
+   [:status :int]
+   [:body :string]
+   [:headers :map]])
+
+(m/=> impersonator-request [:=> [:cat HttpRequest] HttpResponse])
+(m/=> default-http-fn [:=> [:cat HttpRequest] HttpResponse])
+(m/=> provider [:=> [:cat ProviderConfig] :any])
+
+(mi/instrument! {:filters [(mi/-filter-ns
+                            'kschltz.agent.tools.web.ddg)]})

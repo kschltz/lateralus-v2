@@ -10,7 +10,7 @@
             [kschltz.agent.cli.profile.store :as store]
             [kschltz.agent.cli.profile.templates :as templates]
             [kschltz.agent.cli.profile.tool-groups :as tool-groups]
-            [kschltz.agent.llm.http :as llm-http]))
+            [kschltz.agent.tools.config.catalog :as catalog]))
 
 (defn- pw
   [out]
@@ -261,7 +261,9 @@
         root (or profile-root (store/default-root))
         list-models-fn (or list-models-fn
                            (fn [base api]
-                             (llm-http/list-models-thorough base api)))
+                             (catalog/list-models
+                              (catalog/http-catalog)
+                              {:base-url base :api-key api})))
         names (store/list-profiles root)
         active (store/active-profile root)]
     (.println out "")

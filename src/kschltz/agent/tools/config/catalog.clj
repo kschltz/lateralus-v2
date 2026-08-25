@@ -32,11 +32,11 @@
        (-list-models [_ _opts] ids*)))))
 
 (defn http-catalog
-  "Live catalog that delegates to `kschltz.agent.llm.http/list-models`.
+  "Live catalog that delegates to `kschltz.agent.llm.http/list-models-thorough`.
    Resolved lazily so native-image / offline classpaths that omit the
    HTTP stack can still load this namespace for the stub."
   []
-  (let [list-fn (requiring-resolve 'kschltz.agent.llm.http/list-models)]
+  (let [list-fn (requiring-resolve 'kschltz.agent.llm.http/list-models-thorough)]
     (reify ModelCatalog
       (-list-models [_ {:keys [base-url api-key]}]
         (vec (list-fn base-url api-key))))))

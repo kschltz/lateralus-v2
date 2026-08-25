@@ -182,6 +182,14 @@
 (m/=> parse-sse-data
       [:=> [:cat [:maybe :string]] [:vector :map]])
 
+(m/=> post-message!
+      [:=> [:cat :string
+            [:map-of :string :string]
+            :map
+            :int
+            [:maybe fn?]]
+       [:vector :map]])
+
 (m/=> connect-http!
       [:=> [:cat :map] :any])
 

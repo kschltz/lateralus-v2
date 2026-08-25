@@ -3,7 +3,8 @@
    config has no `:model`. Also hosts the filterable catalog picker
    used by the profile gate (`?` list, `/term` search)."
   (:require [clojure.string :as str]
-            [kschltz.agent.llm.http :as llm-http]))
+            [kschltz.agent.llm.http :as llm-http]
+            [kschltz.agent.tools.config.catalog :as catalog]))
 
 (defn parse-selection
   "Pure: interpret a user's `input` against a vector of model `ids`.
@@ -159,7 +160,9 @@
         out (pw out)
         ids (try (if list-models-fn
                    (list-models-fn)
-                   (llm-http/list-models-thorough base-url api-key))
+                   (catalog/list-models
+                    (catalog/http-catalog)
+                    {:base-url base-url :api-key api-key}))
                  (catch Throwable t
                    (.println out (str "  (could not list models from "
                                       base-url ": " (ex-message t) ")"))

@@ -32,7 +32,9 @@
             [hato.client :as hato]
             [hickory.core :as hickory]
             [hickory.select :as hs]
-            [kschltz.agent.tools.web.protocol :as protocol])
+            [kschltz.agent.tools.web.protocol :as protocol]
+            [malli.core :as m]
+            [malli.instrument :as mi])
   (:import [java.net URL URLEncoder]))
 
 ;; ---------------------------------------------------------------------------
@@ -387,6 +389,33 @@
    not consulted by this provider."
   [config]
   (->MojeekProvider config))
+
+(def ProviderConfig
+  [:map
+   [:http-fn {:optional true} fn?]
+   [:base-url {:optional true} :string]
+   [:user-agent {:optional true} :string]
+   [:timeout-ms {:optional true} :int]
+   [:max-page-bytes {:optional true} :int]
+   [:max-result-count {:optional true} :int]])
+
+(def HttpRequest
+  [:map
+   [:url :string]
+   [:method {:optional true} :keyword]
+   [:headers {:optional true} [:map-of :string :string]]])
+
+(def HttpResponse
+  [:map
+   [:status :int]
+   [:body :string]
+   [:headers {:optional true} :map]])
+
+(m/=> default-http-fn [:=> [:cat HttpRequest] HttpResponse])
+(m/=> provider [:=> [:cat ProviderConfig] :any])
+
+(mi/instrument! {:filters [(mi/-filter-ns
+                            'kschltz.agent.tools.web.mojeek)]})
 
 ;; ---------------------------------------------------------------------------
 

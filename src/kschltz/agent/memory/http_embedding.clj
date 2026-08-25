@@ -19,7 +19,9 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [hato.client :as http]
-            [kschltz.agent.memory.embedding :as embedding]))
+            [kschltz.agent.memory.embedding :as embedding]
+            [malli.core :as m]
+            [malli.instrument :as mi]))
 
 (def default-connect-timeout-ms
   "Connect timeout (ms). Same default as the LLM HTTP client."
@@ -28,6 +30,24 @@
 (def default-request-timeout-ms
   "Request timeout (ms). Same default as the LLM HTTP client."
   60000)
+
+(def HttpEmbedderOpts
+  [:map
+   [:base-url :string]
+   [:model :string]
+   [:dimensions [:int {:min 1}]]
+   [:api-key {:optional true} [:maybe :string]]
+   [:connect-timeout-ms {:optional true} :int]
+   [:request-timeout-ms {:optional true} :int]])
+
+(def EmbeddingRequest
+  [:map
+   [:base-url :string]
+   [:model :string]
+   [:text :string]
+   [:api-key {:optional true} [:maybe :string]]
+   [:connect-timeout-ms {:optional true} :int]
+   [:request-timeout-ms {:optional true} :int]])
 
 (defn- ->headers
   "Build HTTP headers for an embeddings request."
@@ -110,3 +130,15 @@
                        :connect-timeout-ms connect-timeout-ms
                        :request-timeout-ms request-timeout-ms}))
     (-dimensions [_] dimensions)))
+
+(m/=> post-embedding
+      [:=> [:cat EmbeddingRequest] [:vector number?]])
+(m/=> http-embedder
+      [:=> [:cat HttpEmbedderOpts] :any])
+
+(defn instrument!
+  []
+  (mi/instrument!
+   {:filters [(mi/-filter-ns 'kschltz.agent.memory.http-embedding)]}))
+
+(instrument!)
