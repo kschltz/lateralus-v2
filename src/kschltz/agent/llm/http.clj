@@ -57,7 +57,7 @@
 (def HttpClientOpts
   [:map
    [:base-url :string]
-   [:model :string]
+   [:model {:optional true} :string]
    [:api-key {:optional true} [:maybe :string]]
    [:temperature {:optional true} number?]
    [:max-tokens {:optional true} :int]
