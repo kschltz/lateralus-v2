@@ -228,9 +228,16 @@
         (if overlap overlap {:spans (vec sorted) :fuzzy-fired? @fired-vol})))))
 
 (defn- error-result
-  "Format an exception as a model-readable string."
+  "Format an exception as a structured model-readable JSON envelope."
   [t]
-  (format "Filesystem tool error: %s" (ex-message t)))
+  (let [data (if (instance? clojure.lang.ExceptionInfo t)
+               (ex-data t)
+               {})]
+    (json/generate-string
+     (merge {:ok false
+             :error (or (:error data) :filesystem-error)
+             :message (or (ex-message t) (.getName (class t)))}
+            (dissoc data :error)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Deftypes
