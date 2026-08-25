@@ -29,3 +29,22 @@
     (let [plugin (plugins.tools/tools-plugin)]
       (is (vector? plugin))
       (is (= 1 (count plugin))))))
+
+(deftest session-tool-overlay-filters-seed-and-refresh
+  (let [registry {"fake" (->FakeTool)
+                  "other" (->FakeTool)}
+        state {:agent/disabled-tools ["fake"]}
+        plugin (plugins.tools/tools-plugin registry)
+        chain (plugin/assemble-chain [(plugins.base/base-plugin) plugin])
+        seed (some #(when (= :kschltz.agent.plugins.tools/seed-registry
+                            (:name %))
+                      %)
+                   chain)
+        seeded ((:enter seed) {:agent/state state})
+        refreshed (plugins.tools/refresh-mcp-tools
+                   (assoc seeded :llm/request {:messages []}))]
+    (is (= #{"other"} (set (keys (:agent/tool-registry seeded)))))
+    (is (= #{"fake" "other"}
+           (set (keys (:agent/static-tool-registry seeded)))))
+    (is (= #{"other"} (set (keys (:agent/tool-registry refreshed)))))
+    (is (= 1 (count (get-in refreshed [:llm/request :tools]))))))

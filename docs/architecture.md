@@ -139,7 +139,7 @@ The `Ctx` Malli schema in `kschltz.agent.interceptors.schema` is intentionally o
 
 Only the outer runtime loop holds a mutable reference — an atom seeded with `:initial-state` from the agent-map. Interceptors never mutate shared refs; instead they emit `:agent/state-delta`. The runtime merges this delta into the atom using `kschltz.agent.runtime/merge-state`, which performs a deep merge for known nested keys (e.g. `:agent/state`) and last-write-wins for top-level keys.
 
-Tools may propose allowlisted **transitions** (JSON envelope key `:transition`) that are harvested onto `:agent/transitions` and applied in the `:tools` slot before the next LLM call — including mid-ReAct follow-ups. Current pure-data transitions cover LLM knobs, the system message, and loop policy; lifecycle-bearing MCP changes add a protocol reconcile step. See [`docs/transitions.md`](transitions.md).
+Tools may propose allowlisted **transitions** (JSON envelope key `:transition`) that are harvested onto `:agent/transitions` and applied in the `:tools` slot before the next LLM call — including mid-ReAct follow-ups. Current pure-data transitions cover LLM knobs, the system message, loop policy, and the session tool overlay; lifecycle-bearing MCP changes add a protocol reconcile step. See [`docs/transitions.md`](transitions.md).
 
 ## Filesystem harness
 

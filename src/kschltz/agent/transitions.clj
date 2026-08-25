@@ -23,7 +23,8 @@
   "Keys written into `:agent/state-delta` from applied transitions.
    `:mcp/servers` is replaced wholesale on merge (see runtime)."
   (into llm-config-keys
-        #{:mcp/servers :agent/system-message :agent/loop-opts}))
+        #{:mcp/servers :agent/system-message :agent/loop-opts
+          :agent/disabled-tools}))
 
 (def LoopOptsPatch
   "Allowlisted per-session loop policy fields."
@@ -91,6 +92,12 @@
               :max-tool-calls-per-turn
               :tool-content-caps])))]])
 
+(def SetToolEnabledOp
+  [:map {:closed true}
+   [:op [:= :set-tool-enabled]]
+   [:tool-name [:string {:min 1}]]
+   [:enabled :boolean]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
@@ -99,7 +106,8 @@
    [:mcp-remove-server McpRemoveServerOp]
    [:mcp-refresh-server McpRefreshServerOp]
    [:set-system-message SetSystemMessageOp]
-   [:set-loop-opts SetLoopOptsOp]])
+   [:set-loop-opts SetLoopOptsOp]
+   [:set-tool-enabled SetToolEnabledOp]])
 
 (def Transitions
   [:vector Transition])
@@ -155,6 +163,14 @@
                                    :max-tool-calls-per-exchange
                                    :max-tool-calls-per-turn
                                    :tool-content-caps]))))
+    :set-tool-enabled
+    (update (or state {}) :agent/disabled-tools
+            (fn [disabled]
+              (let [current (set (or disabled []))
+                    updated (if (:enabled op)
+                              (disj current (:tool-name op))
+                              (conj current (:tool-name op)))]
+                (vec (sort updated)))))
     state))
 
 (defn apply-transitions
@@ -195,14 +211,17 @@
                                         (:op op)))
                            applied)
         system-message-touched? (some #(= :set-system-message (:op %)) applied)
-        loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)]
+        loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)
+        tools-touched? (some #(= :set-tool-enabled (:op %)) applied)]
     (cond-> llm-patch
       mcp-touched?
       (assoc :mcp/servers (or (:mcp/servers after) {}))
       system-message-touched?
       (assoc :agent/system-message (:agent/system-message after))
       loop-opts-touched?
-      (assoc :agent/loop-opts (:agent/loop-opts after)))))
+      (assoc :agent/loop-opts (:agent/loop-opts after))
+      tools-touched?
+      (assoc :agent/disabled-tools (or (:agent/disabled-tools after) [])))))
 
 (defn redact-transition
   "Return a logging/model-safe copy of `op` with secrets replaced by

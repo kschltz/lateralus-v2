@@ -43,6 +43,14 @@
    [:fn {:error/message "provide at least one loop policy field"}
     (fn [m] (boolean (seq m)))]])
 
+(def SetToolEnabledInput
+  [:map {:closed true}
+   [:tool-name [:string {:min 1}]]
+   [:enabled :boolean]])
+
+(def ^:private protected-runtime-tools
+  #{"set_tool_enabled" "runtime_describe"})
+
 (defn- current-llm-config
   [ctx]
   (let [state (or (:agent/state ctx) {})]
@@ -118,6 +126,46 @@
         :after after
         :transition (assoc args :op :set-loop-opts)}))))
 
+(defrecord SetToolEnabledTool []
+  tool/Tool
+  (-name [_] "set_tool_enabled")
+  (-description [_]
+    "Enable or disable a pre-registered tool for this session through an allowlisted transition. The effective registry and next ReAct request are refreshed in the transition interceptor. Recovery tools `set_tool_enabled` and `runtime_describe` cannot be disabled.")
+  (-input-schema [_] SetToolEnabledInput)
+  (-output-schema [_] :string)
+  (-invoke [_ {:keys [tool-name enabled]} ctx]
+    (let [known (or (:agent/static-tool-registry ctx)
+                    (:agent/tool-registry ctx)
+                    {})
+          disabled (set (get-in ctx [:agent/state :agent/disabled-tools]))]
+      (cond
+        (not (contains? known tool-name))
+        (tr/encode-result
+         {:ok false
+          :tool "set_tool_enabled"
+          :error "unknown-tool"
+          :tool-name tool-name
+          :known-tools (vec (sort (keys known)))})
+
+        (and (not enabled) (contains? protected-runtime-tools tool-name))
+        (tr/encode-result
+         {:ok false
+          :tool "set_tool_enabled"
+          :error "protected-tool"
+          :tool-name tool-name})
+
+        :else
+        (tr/encode-result
+         {:ok true
+          :tool "set_tool_enabled"
+          :pending "same-exchange"
+          :tool-name tool-name
+          :before {:enabled (not (contains? disabled tool-name))}
+          :after {:enabled enabled}
+          :transition {:op :set-tool-enabled
+                       :tool-name tool-name
+                       :enabled enabled}}))))
+
 (defrecord ListLlmModelsTool [catalog]
   tool/Tool
   (-name [_] "list_llm_models")
@@ -164,6 +212,7 @@
      {"set_llm_config"   (->SetLlmConfigTool)
       "set_system_message" (->SetSystemMessageTool)
       "set_loop_policy"  (->SetLoopPolicyTool)
+      "set_tool_enabled"  (->SetToolEnabledTool)
       "list_llm_models"  (->ListLlmModelsTool cat)})))
 
 (m/=> config-registry

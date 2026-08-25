@@ -33,9 +33,9 @@
  :lateralus/file-tools           {}
  :lateralus/self-awareness-tools {}
  :lateralus/clojure-tools        {}
- ;; Session LLM config tools (set_llm_config, list_llm_models). Transitions
- ;; are harvested/applied in the base :tools slot; :catalog :http lists
- ;; models via the OpenAI-compatible endpoint.
+ ;; Session config tools (LLM, system message, loop policy, tool overlay).
+ ;; Transitions are harvested/applied in the base :tools slot; :catalog :http
+ ;; lists models via the OpenAI-compatible endpoint.
  :lateralus/config-tools         {:catalog :http}
  ;; Runtime-eval tools (clojure_eval, clojure_add_lib, clojure_loaded_libs):
  ;; run Clojure in-process and load Maven deps at runtime (Clojure 1.12

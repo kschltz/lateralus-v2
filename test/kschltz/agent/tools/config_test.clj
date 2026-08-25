@@ -21,7 +21,7 @@
 (deftest config-registry-has-session-configuration-tools
   (let [reg (cfg-registry)]
     (is (= #{"set_llm_config" "set_system_message"
-             "set_loop_policy" "list_llm_models"}
+             "set_loop_policy" "set_tool_enabled" "list_llm_models"}
            (set (keys reg))))
     (is (every? tool/tool? (vals reg)))))
 
@@ -89,6 +89,37 @@
          (tool/invoke-tool (get reg "set_loop_policy")
                            {:unknown 1} {})
          "input validation failed"))))
+
+(deftest set-tool-enabled-validates-registry-and-protects-recovery
+  (let [reg (cfg-registry)
+        t (get reg "set_tool_enabled")
+        known {"file_write" :fake
+               "set_tool_enabled" t
+               "runtime_describe" :fake}
+        ctx {:agent/static-tool-registry known
+             :agent/state {}}
+        disabled (-> (tool/invoke-tool t
+                                       {:tool-name "file_write"
+                                        :enabled false}
+                                       ctx)
+                     (json/parse-string true))
+        unknown (-> (tool/invoke-tool t
+                                      {:tool-name "missing"
+                                       :enabled false}
+                                      ctx)
+                    (json/parse-string true))
+        protected (-> (tool/invoke-tool t
+                                        {:tool-name "runtime_describe"
+                                         :enabled false}
+                                        ctx)
+                      (json/parse-string true))]
+    (is (true? (:ok disabled)))
+    (is (= "set-tool-enabled"
+           (name (keyword (get-in disabled [:transition :op])))))
+    (is (false? (get-in disabled [:after :enabled])))
+    (is (= "unknown-tool" (:error unknown)))
+    (is (= "protected-tool" (:error protected)))
+    (is (nil? (:transition protected)))))
 
 (deftest list-llm-models-uses-catalog
   (let [t (get (cfg-registry) "list_llm_models")

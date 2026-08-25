@@ -48,6 +48,10 @@ before the next ReAct LLM call.
  :max-tool-calls-per-exchange 40
  :max-tool-calls-per-turn 10
  :tool-content-caps {"file_read" 65536}}
+
+{:op :set-tool-enabled
+ :tool-name "file_write"
+ :enabled false}
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -103,6 +107,15 @@ per-tool content caps. Apply patches the current immutable ctx for same-
 exchange follow-ups and stages the policy in `:agent/state-delta`; the outer
 runtime overlays that session policy on boot defaults for every later
 exchange.
+
+### `set_tool_enabled`
+
+Adds or removes a tool name from the durable session overlay. The tools plugin
+recomputes `static ∪ MCP − disabled` during transition apply and patches the
+in-flight request, so changes affect the next same-exchange LLM call and later
+exchanges. Only tools pre-registered by Integrant or discovered through the
+MCP session can be selected; arbitrary Tool instances cannot be injected.
+`set_tool_enabled` and `runtime_describe` are protected recovery tools.
 
 ## Pipeline (`:tools` slot)
 

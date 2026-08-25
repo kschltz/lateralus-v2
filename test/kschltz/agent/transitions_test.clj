@@ -50,6 +50,19 @@
     (is (= (:agent/loop-opts state)
            (:agent/loop-opts delta)))))
 
+(deftest tool-overlay-transition-is-durable-and-reversible
+  (let [disable {:op :set-tool-enabled :tool-name "file_write" :enabled false}
+        enable {:op :set-tool-enabled :tool-name "file_write" :enabled true}
+        disabled (tr/apply-transition {} disable)
+        enabled (tr/apply-transition disabled enable)
+        delta (tr/durable-delta {}
+                                disabled
+                                [disable])]
+    (is (tr/valid-transition? disable))
+    (is (= ["file_write"] (:agent/disabled-tools disabled)))
+    (is (= [] (:agent/disabled-tools enabled)))
+    (is (= ["file_write"] (:agent/disabled-tools delta)))))
+
 (deftest apply-transitions-folds-left-to-right
   (let [{:keys [state applied]}
         (tr/apply-transitions {:model "a" :base-url "http://old"}

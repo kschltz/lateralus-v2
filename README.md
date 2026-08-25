@@ -107,6 +107,8 @@ The agent can change its own LLM session knobs mid-run via staged
   transition/state-delta path.
 - `set_loop_policy` — update allowlisted loop depth, tool-call, and
   per-tool-content limits for the current and later exchanges.
+- `set_tool_enabled` — enable or disable any pre-registered static or MCP tool
+  for the session; recovery/introspection tools remain protected.
 - `list_llm_models` — list models at the current (or overridden) endpoint
   behind the `ModelCatalog` protocol.
 

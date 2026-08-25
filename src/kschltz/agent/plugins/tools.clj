@@ -20,21 +20,25 @@
     (merge (or static-registry {}) (mcp-proto/-registry mcp-session))
     (or static-registry {})))
 
+(defn apply-tool-overlay
+  "Remove session-disabled tool names from `registry`."
+  [registry state]
+  (apply dissoc (or registry {}) (or (:agent/disabled-tools state) [])))
+
 (defn refresh-mcp-tools
   "Re-merge static ∪ session registries onto ctx and patch in-flight
    `:llm/request :tools` so the next LLM call (including ReAct
    follow-ups that skip :compose) sees newly upserted MCP tools.
    No-op when no `:agent/mcp-session` is present."
   [ctx]
-  (let [session (:agent/mcp-session ctx)]
-    (if-not (mcp-proto/mcp-session? session)
-      ctx
-      (let [static (or (:agent/static-tool-registry ctx) {})
-            reg (live-registry static session)
-            req (:llm/request ctx)]
-        (cond-> (assoc ctx :agent/tool-registry reg)
-          req (assoc :llm/request
-                     (assoc req :tools (mapv tool/tool-definition (vals reg)))))))))
+  (let [session (:agent/mcp-session ctx)
+        static (or (:agent/static-tool-registry ctx) {})
+        reg (-> (live-registry static session)
+                (apply-tool-overlay (:agent/state ctx)))
+        req (:llm/request ctx)]
+    (cond-> (assoc ctx :agent/tool-registry reg)
+      req (assoc :llm/request
+                 (assoc req :tools (mapv tool/tool-definition (vals reg)))))))
 
 (defn- seed-registry-interceptor
   ":guard interceptor that attaches the effective tool registry to
@@ -43,11 +47,13 @@
   {:name ::seed-registry
    :slot :guard
    :enter (fn [ctx]
-            (cond-> (assoc ctx
-                           :agent/static-tool-registry (or registry {})
-                           :agent/tool-registry (live-registry registry mcp-session))
+            (let [effective (-> (live-registry registry mcp-session)
+                                (apply-tool-overlay (:agent/state ctx)))]
+              (cond-> (assoc ctx
+                             :agent/static-tool-registry (or registry {})
+                             :agent/tool-registry effective)
               (mcp-proto/mcp-session? mcp-session)
-              (assoc :agent/mcp-session mcp-session)))})
+              (assoc :agent/mcp-session mcp-session))))})
 
 (defn tools-plugin
   "Build a partial plugin that seeds tools on the context.
