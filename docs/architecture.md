@@ -154,6 +154,11 @@ outside target unless the operator explicitly enables outside-workspace reads.
 Directory listings are sorted and capped with total/truncation metadata.
 `file_glob` adds sorted, bounded file discovery using portable glob patterns;
 it excludes blocked trees and does not follow directory symlinks.
+`file_patch` consumes the SHA-256 witness from `file_read` and applies
+inclusive 1-based line-range replacements (or insertion ranges) to that exact
+snapshot. It validates all ranges before a locked, backed-up, atomic commit;
+stale hashes, overlap, invalid UTF-8, size/omission violations, and malformed
+Clojure output leave the target unchanged.
 
 `file_write`, `file_update`, and `file_create` share one mutation boundary:
 canonical workspace containment (including symlink resolution), unskippable

@@ -38,16 +38,17 @@
 
 (def ^:private dummy-ctx {})
 
-(deftest filesystem-registry-contains-eight-tools
+(deftest filesystem-registry-contains-nine-tools
   (testing "filesystem-registry returns the filesystem tools"
     (let [registry (tools.filesystem/filesystem-registry)]
-      (is (= 8 (count registry)))
+      (is (= 9 (count registry)))
       (is (contains? registry "file_read"))
       (is (contains? registry "file_list"))
       (is (contains? registry "file_info"))
       (is (contains? registry "file_create"))
       (is (contains? registry "file_search"))
       (is (contains? registry "file_glob"))
+      (is (contains? registry "file_patch"))
       (is (contains? registry "file_write"))
       (is (contains? registry "file_update"))
       (is (every? tool/tool? (vals registry))))))

@@ -168,6 +168,9 @@ create/write/update operations:
 - `file_glob` provides sorted, bounded `**/*.ext`-style discovery without
   following directory symlinks or traversing blocked trees.
 - `file_update` applies ambiguity-safe text edits atomically and detects races.
+- `file_patch` applies one or more hash-anchored 1-based line-range patches;
+  stale, overlapping, out-of-range, binary, or invalid-Clojure patches make
+  zero writes.
 - `file_write` accepts `expected-sha256` to reject stale full-file replacements.
 - `file_create` is create-only; it never silently overwrites an existing file.
 
