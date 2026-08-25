@@ -337,7 +337,9 @@
     (let [status (:status response)]
       (cond
         (<= 200 status 299)
-        (try (json/parse-string (:body response) true)
+        (try (-> (:body response)
+                 (json/parse-string true)
+                 schemas/decode-response)
              (catch Throwable t
                (throw (ex-info "LLM HTTP response body is not valid JSON"
                                {:kind   :parse
@@ -370,11 +372,6 @@
       (let [merged (merge opts req)
             _      (schemas/decode-request merged)
             resp   (post-chat merged)]
-        ;; Note: we don't call decode-response here because real
-        ;; providers routinely return extra fields the strict
-        ;; ChatResponse schema doesn't list. extract-* helpers
-        ;; tolerate that; the schema is for the *request* side
-        ;; and for tests that want strict shape enforcement.
         resp))))
 
 (m/=> get-json
@@ -388,7 +385,7 @@
        [:=> [:cat :string] [:vector :string]]
        [:=> [:cat :string [:maybe :string]] [:vector :string]]])
 (m/=> post-chat
-      [:=> [:cat HttpCallOpts] :map])
+      [:=> [:cat HttpCallOpts] schemas/ChatResponse])
 (m/=> http-client
       [:=> [:cat HttpClientOpts] :any])
 

@@ -24,7 +24,8 @@
    The tool record in `web.clj` catches these and emits a JSON error
    envelope so the model sees a structured failure rather than an
    opaque exception."
-  (:require [clojure.string :as str]))
+  (:require [malli.core :as m]
+            [malli.instrument :as mi]))
 
 (defprotocol WebProvider
   "Pluggable backend for the `web_*` tool operations.
@@ -59,3 +60,48 @@
      `{:search? bool :fetch? bool :extract? bool :live? bool}`.
      This method MUST NOT raise. The tool layer and CLI summary
      rely on a successful return to branch on provider support."))
+
+(def SearchResult
+  [:map
+   [:results
+    [:vector
+     [:map
+      [:title :string]
+      [:url :string]
+      [:snippet :string]]]]
+   [:provider :keyword]])
+
+(def FetchResult
+  [:map
+   [:url :string]
+   [:body :string]
+   [:bytes :int]
+   [:status :int]])
+
+(def ExtractResult
+  [:map
+   [:text :string]
+   [:title {:optional true} [:maybe :string]]
+   [:selectors-hit [:vector :string]]])
+
+(defn search
+  "Instrumented WebProvider search boundary."
+  [provider query opts]
+  (-search provider query opts))
+
+(defn fetch
+  "Instrumented WebProvider fetch boundary."
+  [provider url opts]
+  (-fetch provider url opts))
+
+(defn extract
+  "Instrumented WebProvider extraction boundary."
+  [provider html opts]
+  (-extract provider html opts))
+
+(m/=> search [:=> [:cat :any :string :map] SearchResult])
+(m/=> fetch [:=> [:cat :any :string :map] FetchResult])
+(m/=> extract [:=> [:cat :any :string :map] ExtractResult])
+
+(mi/instrument!
+ {:filters [(mi/-filter-ns 'kschltz.agent.tools.web.protocol)]})

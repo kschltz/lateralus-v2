@@ -162,7 +162,7 @@
                 (let [result-count (min (:max-result-count cfg)
                                         (max 1 (or (:result-count args) 5)))
                       opts       (assoc cfg :result-count result-count)
-                      raw        (protocol/-search provider cleaned opts)
+                      raw        (protocol/search provider cleaned opts)
                       guarded    (guards/guard-results (:results raw) cfg)]
                   (json/generate-string
                    (cond-> {:provider (or (:provider raw) provider-name)
@@ -199,7 +199,7 @@
                 override    (:max-bytes args)
                 opts        (cond-> cfg
                              (some? override) (assoc :max-bytes override))
-                raw         (protocol/-fetch provider allowed-url opts)]
+                raw         (protocol/fetch provider allowed-url opts)]
             (json/generate-string
              {:url    (:url raw)
               :title  (:title raw)
@@ -229,7 +229,7 @@
           opts          (cond-> cfg
                          (some? (:selector args)) (assoc :selector (:selector args)))]
       (try
-        (let [raw (protocol/-extract provider (:html args) opts)]
+        (let [raw (protocol/extract provider (:html args) opts)]
           (json/generate-string
            (cond-> {:text           (:text raw)
                     :title          (:title raw)
