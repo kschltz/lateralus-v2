@@ -34,7 +34,8 @@
    [:max-tool-calls-per-exchange {:optional true} [:int {:min 1}]]
    [:max-tool-calls-per-turn {:optional true} [:int {:min 1}]]
    [:tool-content-caps {:optional true}
-    [:map-of [:string {:min 1}] [:int {:min 1}]]]])
+    [:map-of [:string {:min 1}] [:int {:min 1}]]]
+   [:tool-schema-mode {:optional true} [:enum :full :compact]]])
 
 (def SetLlmOp
   "Transition that updates allowlisted LLM session config keys.
@@ -124,9 +125,15 @@
   [:re #"^kschltz\.(?:agent(?:\..+)?|lateralus)$"])
 
 (def ReloadRuntimeOp
-  [:map {:closed true}
-   [:op [:= :reload-runtime]]
-   [:namespaces [:vector {:min 1} RuntimeNamespace]]])
+  [:and
+   [:map {:closed true}
+    [:op [:= :reload-runtime]]
+    [:namespaces {:optional true} [:vector {:min 1} RuntimeNamespace]]
+    [:from-edits {:optional true} :boolean]]
+   [:fn {:error/message "reload-runtime needs :namespaces or :from-edits true"}
+    (fn [op]
+      (or (seq (:namespaces op))
+          (true? (:from-edits op))))]])
 
 (def Transition
   "Closed union of supported transition ops."
@@ -194,7 +201,8 @@
                                   [:max-loop-depth
                                    :max-tool-calls-per-exchange
                                    :max-tool-calls-per-turn
-                                   :tool-content-caps]))))
+                                   :tool-content-caps
+                                   :tool-schema-mode]))))
     :set-tool-enabled
     (update (or state {}) :agent/disabled-tools
             (fn [disabled]
@@ -211,9 +219,11 @@
                                   [:top-y :last-n
                                    :recall-enabled :persist-enabled]))))
     :reload-runtime
-    (assoc (or state {})
-           :agent/runtime-reload
-           {:namespaces (vec (distinct (:namespaces op)))})
+    (let [nses (or (seq (:namespaces op))
+                   (seq (:agent/edited-namespaces (or state {}))))]
+      (assoc (or state {})
+             :agent/runtime-reload
+             {:namespaces (vec (distinct (or nses [])))}))
     state))
 
 (defn apply-transitions

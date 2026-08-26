@@ -55,6 +55,8 @@
       (is (re-find #"base-sys" sys))
       (is (re-find #"portal_submit" sys))
       (is (re-find #"PORTAL IS THE RICH" sys))
-      (is (= guidance/portal-system-guidance
+      (is (= (str guidance/portal-system-guidance
+                  "\n\n"
+                  guidance/self-update-system-guidance)
              (when (string? (:agent/system-append ctx))
                (:agent/system-append ctx)))))))

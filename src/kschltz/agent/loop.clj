@@ -10,11 +10,13 @@
    results; `:finalize` loops or ensures a textual response. Provider-
    neutral tool data lives on ctx; OpenAI-shaped messages are built only
    when composing the follow-up request."
-  (:require [cheshire.core :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.schemas :as schemas]
+            [kschltz.agent.loop.edits :as edits]
+            [kschltz.agent.loop.stall :as stall]
+            [kschltz.agent.loop.summary :as summary]
             [kschltz.agent.loop.trim :as trim]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.transitions.interceptors :as tr.ix]
@@ -144,7 +146,9 @@
    :enter (fn [ctx]
             (let [req      (:llm/request ctx)
                   registry (or (:agent/tool-registry ctx) {})
-                  defs     (mapv tool/tool-definition (vals registry))]
+                  compact? (= :compact (get-in ctx [:agent/loop-opts :tool-schema-mode]))
+                  define   (if compact? tool/compact-definition tool/tool-definition)
+                  defs     (mapv define (vals registry))]
               (assoc ctx :llm/request (assoc req :tools defs))))})
 
 (defn- tool-call-limit
@@ -238,6 +242,7 @@
                                    result-msgs))
                    eff-caps (or caps (get-in ctx [:agent/loop-opts :tool-content-caps]))]
                (-> ctx
+                   (edits/merge-edited results)
                    (update :agent/tool-transcript (fnil into []) new-msgs)
                    (update-in [:llm/request :messages]
                               (fn [msgs] (trim/trim-in-flight-messages (into msgs new-msgs) eff-caps))))))}))
@@ -249,85 +254,23 @@
    :enter (fn [ctx]
             (update ctx :agent/tool-loop-depth (fnil inc 0)))})
 
-(defn- tool-call-sig
-  "A stable signature for the current set of tool calls, used for
-   stall detection. Compares tool name + raw arguments JSON (the FAST
-   path — catches the model emitting the IDENTICAL tool call twice)."
-  [calls]
-  (mapv (fn [c] {(get-in c [:function :name])
-                 (get-in c [:function :arguments])})
-        calls))
-
-(def ^:private tool-primary-arg-keys
-  "Map of tool-name -> arg keys identifying the *target* of a call (the
-   'primary arg'). Repeated calls with the SAME primary arg but differing
-  secondary args (e.g. `clojure_add_lib` same `:lib`, variant `:require`)
-   are treated as the same SHAPE for arg-shape stall detection
-   (verify-round-3 FIX 3). Tools not listed fall back to the full args
-   string (no behavior change)."
- {"clojure_add_lib" [:lib :coords]})
-
-(defn- tool-call-shape
-  "Coarser signature for arg-shape stall detection: tool name + the
-  primary-arg subset of the arguments JSON. Returns `[name primary-arg-str]`.
-  Tools without a known primary-arg key set use the whole args string (shape
-  = exact signature, no new behavior). Parses the OpenAI args JSON with
-  cheshire; on parse failure falls back to the raw string."
-  [call]
-  (let [name      (get-in call [:function :name])
-        args-str   (get-in call [:function :arguments])
-        pkeys      (get tool-primary-arg-keys name)]
-    (if pkeys
-      (let [parsed (try (json/parse-string args-str true)
-                         (catch Throwable _ nil))]
-        [name (if (map? parsed)
-                (pr-str (select-keys parsed pkeys))
-                args-str)])
-      [name args-str])))
-
-(defn- error-status?
-  "True when a parsed JSON `:status` is an error/timeout shape.
-   Cheshire serializes Clojure keywords as JSON strings and parses them
-   back as strings, so real tool envelopes carry `\"error\"` / `\"timeout\"`
-   rather than `:error` / `:timeout`. Accept both so stall detection
-   works on live envelopes (not only on in-process keyword maps)."
-  [status]
-  (contains? #{:error :timeout "error" "timeout"} status))
-
-(defn- result-error-shape?
-  "True when a tool result envelope indicates a FAILURE shape worth counting
-   toward arg-shape stall detection: a JSON envelope with status
-   error/timeout or `:loaded? false` (the verify-round-3 add-lib re-spam
-   produced `loaded? false` every turn), OR the unavailable-tool marker.
-   A non-JSON string that is NOT the marker (a plain success value) does
-   NOT count."
-  [result-map]
-  (let [r (:result result-map)]
-    (if (string? r)
-      (if-let [parsed (try (json/parse-string r true) (catch Throwable _ nil))]
-        (or (error-status? (:status parsed))
-            (false? (:loaded? parsed)))
-        (str/includes? (str r) "is not available in this session"))
-      false)))
-
 (defn tool-loop-interceptor
   "`:finalize` interceptor that asks the `loop` strategy whether to
    continue and, if so, enqueues the follow-up chain. The registry is
    read from `:agent/tool-registry` on each turn so the same loop works
-   even if the registry is injected late. Stall detection has two layers:
-   (1) FAST — the model emits the IDENTICAL tool-call set (name + raw args)
-   as last turn → do not enqueue; (2) ARG-SHAPE (verify-round-3 FIX 3) —
-  the SAME tool + same PRIMARY arg (e.g. `:lib` for `clojure_add_lib`)
-   with differing secondary args for N>=2 all-error turns → trip
-   `:agent/shape-stall-hit` (the round-2 re-spam of add-lib with variant
-   `:require` bypassed the exact guard). Either stall →
-   `ensure-text-response-interceptor` coaxes a summary. Sets
-   `:agent/loop-continuing?` for the adjacent interceptor."
+   even if the registry is injected late. Stall detection lives in
+   `kschltz.agent.loop.stall`: (1) FAST — identical name+args set as last
+   turn; (2) ARG-SHAPE — same primary arg (e.g. add-lib `:lib`) failing
+   N>=2 times, even when sibling tools succeed. Counters persist on
+   `:agent/state-delta` and are seeded from `:agent/state` so a rebuilt
+   exchange ctx cannot drop them. Either stall →
+   `ensure-text-response-interceptor` coaxes a summary."
   [loop]
   {:name ::tool-loop
    :slot :finalize
    :enter (fn [ctx]
-            (let [loop-opts   (:agent/loop-opts ctx)
+            (let [ctx         (stall/seed-from-state ctx)
+                  loop-opts   (:agent/loop-opts ctx)
                   ctx-max-depth (:max-loop-depth loop-opts)
                   total-cap    (:max-tool-calls-per-exchange loop-opts)
                   depth        (get ctx :agent/tool-loop-depth 0)
@@ -347,44 +290,24 @@
                                      :else (-continue? loop ctx))]
               (cond
                 over-total?
-                (assoc ctx :agent/loop-continuing? false :agent/tool-cap-hit true)
+                (stall/persist ctx {:agent/loop-continuing? false
+                                    :agent/tool-cap-hit true})
 
                 (not should-continue?)
                 (assoc ctx :agent/loop-continuing? false)
 
                 :else
-                (let [calls      (or (:tool/calls ctx) [])
-                      sig        (tool-call-sig calls)
-                      last-sig   (:agent/last-tool-call-sig ctx)
-                      ;; verify-round-3 FIX 3: arg-shape stall guard.
-                      ;; exact-sig fast path catches IDENTICAL calls; this
-                      ;; catches same tool + same primary arg with differing
-                      ;; secondary args (add-lib same :lib, variant :require)
-                      ;; when every result is an error shape. Same shape for
-                      ;; N>=2 all-error turns → trip :agent/shape-stall-hit.
-                      ;; A turn with any non-error result resets the counter.
-                      shape        (set (mapv tool-call-shape calls))
-                      last-shape   (:agent/last-tool-shape ctx)
-                      prev-count   (get ctx :agent/shape-err-count 0)
-                      turn-error?  (and (seq results)
-                                        (every? result-error-shape? results))
-                      same-shape?  (and (some? last-shape) (= shape last-shape))
-                      new-count    (cond (not turn-error?) 0
-                                         same-shape?      (inc prev-count)
-                                         :else            1)
-                      shape-stall? (and turn-error? same-shape?
-                                         (>= new-count 2))]
-                  (cond
-                    (= sig last-sig)
-                    (assoc ctx :agent/loop-continuing? false :agent/stall-hit true)
-                    shape-stall?
-                    (assoc ctx :agent/loop-continuing? false :agent/shape-stall-hit true)
-                    :else
-                    (-> ctx
-                        (assoc :agent/last-tool-call-sig sig
-                               :agent/last-tool-shape  shape
-                               :agent/shape-err-count  new-count
-                               :agent/loop-continuing?  true)
+                (let [{:keys [action patch]} (stall/decide ctx)]
+                  (case action
+                    :exact-stall
+                    (stall/persist ctx (assoc patch
+                                              :agent/loop-continuing? false
+                                              :agent/stall-hit true))
+                    :shape-stall
+                    (stall/persist ctx (assoc patch
+                                              :agent/loop-continuing? false
+                                              :agent/shape-stall-hit true))
+                    (-> (stall/persist ctx (assoc patch :agent/loop-continuing? true))
                         (chain/enqueue (-follow-up-chain loop
                                                          (or (:agent/tool-registry ctx) {})))))))))})
 
@@ -451,55 +374,19 @@
    neither text nor tool calls on the first turn."
   2)
 
-(defn- strip-tool-call-scaffold
-  "For the summary turn, remove the structural tool-call scaffolding from
-  `messages` so a tool-happy model cannot echo prior assistant
-  `:tool_calls` (verify-round-3 FIX 2 — the real criterion-3 blocker:
-  glm-5.2 / kimi-k2.6 emitted empty-content `tool_calls` on the summary
-  turn because the history still carried prior assistant `:tool_calls` to
-  echo, even with `:tool_choice` none and `:tools` stripped). Assistant
-  messages keep their prose `:content` (dropped entirely when the only
-  payload was `:tool_calls` with blank prose) and lose their `:tool_calls`;
-  `:role` `\"tool\"` result messages are rewritten to `:role` `\"system\"`
-  with a 'Tool <name> returned: <content>' prefix so the model still sees
-  the results as context but there is no `tool_call`/`tool` pairing to echo
-  (and no orphan-`tool` OpenAI 400). Other messages pass through unchanged."
-  [messages]
-  (into []
-        (keep (fn [m]
-                (cond
-                  (and (= "assistant" (:role m)) (seq (:tool_calls m)))
-                  (let [c (:content m)]
-                    (when (and (string? c) (not (str/blank? c)))
-                      (dissoc m :tool_calls)))
-
-                  (= "tool" (:role m))
-                  {:role "system"
-                   :content (str "Tool " (or (:name m) "?") " returned: " (:content m))}
-
-                  :else m)))
-        messages))
-
 (defn compose-summary-request-interceptor
-  "Append a system message telling the model to produce the final answer
-   from the tool results, STRIP :tools, set :tool-choice \"none\", AND
-   strip the prior tool-call scaffolding from history
-   (`strip-tool-call-scaffold`) so a tool-happy model cannot echo prior
-   assistant :tool_calls (verify-round-3 FIX 2 — the real criterion-3
-   blocker; :tool_choice none + stripped :tools alone was insufficient for
-   glm-5.2 / kimi-k2.6 which echoed the history's :tool_calls). Used by
-   ensure-text-response-interceptor when the loop stopped blank but tool
-   results exist."
+  "Strip tool-call scaffold (attempt 1) or replace history with a
+   condensed digest (attempt 2+), then force a text-only request."
   []
   {:name ::compose-summary-request
-   :enter (fn [ctx]
-            (-> ctx
-                (update-in [:llm/request :messages] strip-tool-call-scaffold)
-                (update-in [:llm/request :messages]
-                           conj {:role "system"
-                                 :content "You have finished calling tools. Using the tool results above, produce the final answer for the user."})
-                (update :llm/request
-                        #(-> % (dissoc :tools) (assoc :tool-choice "none")))))})
+   :enter summary/apply-summary-request})
+
+(defn coerce-malformed-summary-interceptor
+  "After parse-response on the summary mini-chain: empty-content
+   tool_calls despite stripped tools are treated as a blank answer."
+  []
+  {:name ::coerce-malformed-summary
+   :enter summary/coerce-malformed-summary})
 
 (defn compose-empty-retry-interceptor
   "Append a system message nudging the model to reply after it returned
@@ -561,9 +448,10 @@
                                     (llm-call-with-self-heal)
                                     ix/llm-call
                                     ix/parse-response
+                                    (coerce-malformed-summary-interceptor)
                                     (ensure-text-response-interceptor loop)]))
                 (and tools-ran? (>= summary-attempts max-summary-attempts))
-                (assoc ctx :agent/summary-failed? true)
+                (summary/apply-fallback ctx)
                 ;; empty-retry path: no tools ran, response blank
                 (< retry-attempts max-empty-retry-attempts)
                 (-> ctx

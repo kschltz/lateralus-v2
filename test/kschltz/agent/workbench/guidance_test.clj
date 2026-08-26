@@ -13,6 +13,10 @@
   (is (re-find #"(?i)HTML/SVG|:cite|optimistically" guidance/portal-system-guidance))
   (is (re-find #"(?i)Never invent|exact `:cite`" guidance/portal-system-guidance)))
 
+(deftest guidance-mentions-self-update-playbook
+  (is (re-find #"reload_runtime" guidance/self-update-system-guidance))
+  (is (re-find #"clojure_add_lib" guidance/self-update-system-guidance)))
+
 (deftest submit-tool-description-stresses-portal-channel
   (let [wb (reify proto/Workbench
              (-url [_] "")

@@ -7,6 +7,7 @@
             [kschltz.agent.logging :as logging]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.loop.stall :as stall]
             [kschltz.agent.runtime-reload :as runtime-reload]))
 
 (def ^:private default-exchange-chain
@@ -74,6 +75,7 @@
                             :agent/loop-opts          (merge
                                                        (or (:agent/loop-opts agent-map) {})
                                                        (or (:agent/loop-opts base-state) {}))}
+          ctx              (stall/seed-from-state ctx)
           result           (chain/execute ctx chain-to-run)
           delta            (:agent/state-delta result)
           merged           (merge-state base-state

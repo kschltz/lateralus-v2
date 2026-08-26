@@ -25,7 +25,9 @@
    :slot :enrich
    :enter (fn [ctx]
             (let [prior (:agent/system-append ctx)
-                  block guidance/portal-system-guidance
+                  block (str guidance/portal-system-guidance
+                             "\n\n"
+                             guidance/self-update-system-guidance)
                   merged (cond
                            (string? prior)
                            (str prior "\n\n" block)

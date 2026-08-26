@@ -94,6 +94,14 @@
     (is (= (:agent/runtime-reload after)
            (:agent/runtime-reload delta)))))
 
+(deftest runtime-reload-from-edits-uses-session-namespaces
+  (is (tr/valid-transition? {:op :reload-runtime :from-edits true}))
+  (let [after (tr/apply-transition
+               {:agent/edited-namespaces ["kschltz.agent.loop"]}
+               {:op :reload-runtime :from-edits true})]
+    (is (= {:namespaces ["kschltz.agent.loop"]}
+           (:agent/runtime-reload after)))))
+
 (deftest apply-transitions-folds-left-to-right
   (let [{:keys [state applied]}
         (tr/apply-transitions {:model "a" :base-url "http://old"}

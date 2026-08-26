@@ -1,0 +1,45 @@
+;; Lean one-shot config for ./scripts/verify-local-self-update.sh
+;; HTTP LLM + runtime-eval; no workbench, no MCP (avoids boot hangs).
+{:lateralus/llm-client     {:impl     :http
+                            :base-url "http://127.0.0.1:8888/v1"
+                            :model    "local"}
+ :lateralus/llm-config     {:base-url "http://127.0.0.1:8888/v1"
+                            :model    "local"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/file-tools           {:workspace-root "."}
+ :lateralus/self-awareness-tools {:workspace-root "."}
+ :lateralus/config-tools         {:catalog :http}
+ :lateralus/clojure-tools        {:workspace-root "."}
+ :lateralus/runtime-tools        {:enabled? true :network? true}
+ :lateralus/logging              {:enabled true :dir "logs" :sink :file}
+ :lateralus/cli-ui               {:enabled? false :theme :default}
+ :lateralus/thinking             {:mode :off}
+ :lateralus/loop-opts            {:max-loop-depth 3
+                                  :max-tool-calls-per-turn 8
+                                  :max-tool-calls-per-exchange 12
+                                  :tool-schema-mode :compact
+                                  :tool-content-caps {"clojure_eval" 8000
+                                                      "clojure_add_lib" 8000}}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/runtime-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :logging        #ig/ref :lateralus/logging
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}

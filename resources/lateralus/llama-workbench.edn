@@ -1,0 +1,87 @@
+;; Lateralus workbench on a local llama.cpp OpenAI-compatible server.
+;; Full tooling: files, self, config (list/set models), clojure, web (ddg),
+;; runtime, workbench/Portal, Open Design MCP (+ dynamic MCP upsert).
+;;
+;; Prefer the launcher (expects llama already up; wires OD HTTP or tools-dev IPC):
+;;   ./scripts/start-llama-workbench.sh
+;;
+;; Or manually:
+;;   clojure -M:workbench:run -i --config resources/lateralus/llama-workbench.edn \
+;;     --base-url http://127.0.0.1:8888/v1 --model '<id-from-/v1/models>'
+{:lateralus/llm-client     {:impl     :http
+                            :base-url "http://127.0.0.1:8888/v1"
+                            :model    "local"}
+ :lateralus/llm-config     {:base-url "http://127.0.0.1:8888/v1"
+                            :model    "local"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/file-tools           {:workspace-root "."}
+ :lateralus/self-awareness-tools {:workspace-root "."}
+ :lateralus/config-tools         {:catalog :http}
+ :lateralus/clojure-tools        {:workspace-root "."}
+ :lateralus/logging              {}
+ :lateralus/cli-ui               {:enabled? :auto :theme :default}
+ :lateralus/thinking             {:mode :preview}
+ :lateralus/workbench            {:enabled? true
+                                  :host "127.0.0.1"
+                                  :port 7860
+                                  :portal? true
+                                  :open-browser? false
+                                  :app false
+                                  :window-title "lateralus-llama"}
+ :lateralus/workbench-plugin     {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/workbench-tools      {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/web-tools            {:provider :ddg}
+ :lateralus/runtime-tools        {:enabled? true :network? true}
+ :lateralus/loop-opts            {:max-loop-depth 3
+                                  :max-tool-calls-per-turn 8
+                                  :max-tool-calls-per-exchange 12
+                                  :tool-schema-mode :compact
+                                  :tool-content-caps {"clojure_eval" 8000
+                                                      "clojure_add_lib" 8000}}
+ ;; Open Design MCP via tools-dev IPC (stdio). Dynamic upsert still on so
+ ;; the agent can replace/repoint mid-session. Blank OD_DAEMON_URL clears
+ ;; any inherited dead :7456 URL that would bypass the IPC sock.
+ :lateralus/mcp-tools
+ {:servers
+  {"open-design"
+   {:transport :stdio
+    :command "/Users/schltzk/.nvm/versions/node/v24.18.0/bin/node"
+    :args ["/Users/schltzk/projects/open-design/apps/daemon/dist/cli.js"
+           "mcp"]
+    :env {"OD_DATA_DIR" "/Users/schltzk/projects/open-design/.od"
+          "OD_SIDECAR_IPC_PATH" "/tmp/open-design/ipc/default/daemon.sock"
+          "OD_DAEMON_URL" ""}
+    :startup-timeout-ms 30000
+    :request-timeout-ms 30000
+    :max-result-bytes 2097152}}
+  :dynamic {:enabled? true}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/workbench-tools
+                                  #ig/ref :lateralus/mcp-session-tools]
+ :lateralus/tools-plugin         {:registry    #ig/ref :lateralus/tool-registry
+                                  :mcp-session #ig/ref :lateralus/mcp-tools}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/workbench-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :logging        #ig/ref :lateralus/logging
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :workbench      #ig/ref :lateralus/workbench
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}

@@ -21,6 +21,7 @@
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.runtime.convergence :as conv]
             [kschltz.agent.tools.runtime.jvm :as jvm]
             [kschltz.agent.tools.runtime.paren-repair :as paren-repair]
             [kschltz.agent.tools.runtime.protocol :as proto]
@@ -191,12 +192,12 @@
              :required-reload    reload-form)
       (and retried? still-fail?)
       (assoc :hint
-             (str "The dependency jars were added to the classpath but the "
-                  "namespace could not be required even after a :reload retry "
-                  "(likely classloader/AOT staleness, not a missing dependency). "
-                  "Do NOT enumerate jar entries. Options: (1) retry the require "
-                 "with :reload via clojure_eval, (2) require a sub-namespace, "
-                  "or (3) summarize the partial result.")))))
+             (str "The dependency jars were added but the namespace still "
+                  "failed to require. Report this load failure to the user. "
+                  "Do NOT enumerate jar entries, retry the same :lib with a "
+                  "different :require, or spelunk transitives. If the envelope "
+                  "includes :convergence, add a direct deps.edn override for "
+                  "the listed conflict (or an exclusion) and restart.")))))
 
 (deftype EvalTool [runtime config]
   tool/Tool
@@ -254,10 +255,22 @@
               retry-info    (when retry?
                               {:retried?      true
                                :reload-form   reload-form
-                               :reload-result reload-result})]
-          (json-envelope (add-lib-result-with-require
-                          added-result req-form eval-result coords
-                          retry-info))))
+                               :reload-result reload-result})
+              conv-hit      (conv/preflight (:lib args))
+              envelope      (add-lib-result-with-require
+                             added-result req-form eval-result coords
+                             retry-info)]
+          (json-envelope
+           (cond-> envelope
+             conv-hit
+             (assoc :convergence conv-hit
+                    :hint (or (:hint envelope)
+                              (str "Classpath already has an older version of a "
+                                   "required transitive. add-lib cannot replace "
+                                   "it (parent-first). Add a deps.edn override "
+                                   "for " (pr-str (:conflicts conv-hit))
+                                   " and restart. Report the failure; do not "
+                                   "retry the same lib.")))))))
       (catch Throwable t
         (error-envelope t)))))
 

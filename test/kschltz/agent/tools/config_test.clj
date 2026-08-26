@@ -159,6 +159,18 @@
          (tool/invoke-tool t {:namespaces ["clojure.core"]} {})
          "input validation failed"))))
 
+(deftest reload-runtime-from-edits-reads-session-namespaces
+  (let [t (get (cfg-registry) "reload_runtime")
+        result (-> (tool/invoke-tool
+                    t
+                    {:from-edits true}
+                    {:agent/state {:agent/edited-namespaces
+                                   ["kschltz.agent.loop"]}})
+                   (json/parse-string true))]
+    (is (true? (:ok result)))
+    (is (= ["kschltz.agent.loop"] (:namespaces result)))
+    (is (true? (:from-edits result)))))
+
 (deftest list-llm-models-uses-catalog
   (let [t (get (cfg-registry) "list_llm_models")
         result (tool/invoke-tool t {} {:agent/state {:base-url "http://x"}})

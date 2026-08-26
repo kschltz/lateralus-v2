@@ -182,11 +182,11 @@ when the optional executable is unavailable.
 
 The `runtime_describe` tool reads the current immutable interceptor context and
 returns a redacted descriptor of the session summary, loop policy, state keys,
-registered tool contracts, and ordered interceptor chain. The outer runtime
-injects `:agent/agent-map` and `:agent/exchange-chain` into each exchange
-context; the tool selects safe data from those values and never returns API
-keys or live implementation objects. Its `section` input (`summary`, `tools`,
-`chain`, or `all`) lets the model bound output to the information it needs.
+registered tool contracts, ordered interceptor chain, and a self-update
+playbook. The outer runtime injects `:agent/agent-map` and `:agent/exchange-chain`
+into each exchange context; the tool selects safe data from those values and
+never returns API keys or live implementation objects. Its `section` input
+(`summary`, `tools`, `chain`, `playbook`, or `all`) lets the model bound output.
 
 This is inspection only. Runtime changes still use allowlisted transition
 envelopes harvested and applied in the `:tools` interceptor slot.
@@ -337,7 +337,7 @@ session...`) is detected by the loop via that exact phrase, not the looser
 | `src/kschltz/agent/plugins/summarizer.clj` | history-summarizer plugin (`:history-summarize` slot, overrides the summarizer `LlmClient`) |
 | `src/kschltz/agent/loop.clj` | ReAct tool-calling loop interceptors |
 | `src/kschltz/agent/tools/filesystem.clj` | read-only filesystem `Tool` implementations |
-| `src/kschltz/agent/tools/self.clj` | self-awareness `Tool` (`self_status`) |
+| `src/kschltz/agent/tools/self.clj` | self-awareness tools (`self_status`, `runtime_describe` + playbook) |
 | `src/kschltz/agent/tools/clojure.clj` | clojure structured-editing `Tool` implementations |
 | `src/kschltz/agent/tools/runtime/protocol.clj` | `ClojureRuntime` protocol (runtime-eval boundary) |
 | `src/kschltz/agent/tools/runtime/schemas.clj` | runtime-eval Malli schemas + config |

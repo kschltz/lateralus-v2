@@ -137,6 +137,39 @@
                 :description (-description tool)
                 :parameters  params}}))
 
+(defn- first-sentence
+  [s]
+  (let [s (str s)
+        cut (or (some-> (re-find #"(?s)^(.+?[.!?])(?:\s|\z)" s) second)
+                s)]
+    (if (> (count cut) 180)
+      (str (subs cut 0 177) "...")
+      cut)))
+
+(defn- compact-parameters
+  "Keep JSON Schema type + property names/types; drop prose and nested extras."
+  [params]
+  (let [props (get params :properties)]
+    (cond-> {:type (or (:type params) "object")}
+      (seq (:required params)) (assoc :required (:required params))
+      (map? props)
+      (assoc :properties
+             (into {}
+                   (map (fn [[k v]]
+                          [k (select-keys (or v {})
+                                          [:type :enum :items])]))
+                   props)))))
+
+(defn compact-definition
+  "Local-model tool schema: short description + slim parameters.
+   Same name/type contract as `tool-definition`."
+  [tool]
+  (let [full (tool-definition tool)]
+    (-> full
+        (assoc-in [:function :description]
+                  (first-sentence (get-in full [:function :description])))
+        (update-in [:function :parameters] compact-parameters))))
+
 (defn execute-tools
   "Execute a seq of `calls` against a `registry` (map name -> Tool).
    Each call is expected to be OpenAI-shaped: `:function` with `:name`

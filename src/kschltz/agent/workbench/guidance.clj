@@ -12,3 +12,10 @@
 - portal_focus — resolve an @portal/<id> chip the human attached; then derive follow-ups with portal_submit.
 - Chat stays thin: 1–3 sentences of prose + the exact `:cite` from the tool. If portal_submit was not called, do not claim anything is in Portal.
 - When unsure whether chat or Portal is enough, choose Portal.")
+
+(def self-update-system-guidance
+  "SELF-UPDATE (local models: keep this short and sequential):
+- Edit project source with file_update / clojure_edit_def / file_patch. Then call reload_runtime on the changed kschltz.agent.* namespace (or :from-edits true). Do not treat clojure_eval as a lasting source change.
+- Use clojure_add_lib only to pull a new Maven/Git dependency. Always pass :require and stop if loaded? is false — report the failure; do not retry the same :lib with variant args.
+- After a successful reload, call runtime_describe section=playbook (or self_status) before the next edit.
+- Prefer clerk/table and clerk/vl over hand-written hiccup if you load Clerk.")

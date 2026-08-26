@@ -1,0 +1,75 @@
+;; Lateralus workbench on local ds4-server (DeepSeek V4 Flash 0731).
+;; Full tooling: files, self, config, clojure, web (ddg), runtime, workbench,
+;; memory (kg-bm25), Open Design MCP (+ dynamic MCP upsert), Portal CHAT.
+;;
+;; Prefer the one-shot launcher (starts ds4-server + OD daemon + this config):
+;;   ./scripts/start-ds4-workbench.sh
+;;
+;; Or, with ds4-server already listening:
+;;   clojure -M:workbench:run -i --config resources/lateralus/ds4-workbench.edn \
+;;     --base-url http://127.0.0.1:8010/v1 --model deepseek-v4-flash
+{:lateralus/llm-client     {:impl     :http
+                            :base-url "http://127.0.0.1:8010/v1"
+                            :model    "deepseek-v4-flash"}
+ :lateralus/llm-config     {:base-url "http://127.0.0.1:8010/v1"
+                            :model    "deepseek-v4-flash"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/file-tools           {:workspace-root "."}
+ :lateralus/self-awareness-tools {:workspace-root "."}
+ :lateralus/config-tools         {:catalog :http}
+ :lateralus/clojure-tools        {:workspace-root "."}
+ :lateralus/logging              {}
+ :lateralus/cli-ui               {:enabled? :auto :theme :default}
+ :lateralus/thinking             {:mode :preview}
+ :lateralus/workbench            {:enabled? true
+                                  :host "127.0.0.1"
+                                  :port 7860
+                                  :portal? true
+                                  :open-browser? false
+                                  :app false
+                                  :window-title "lateralus-ds4"}
+ :lateralus/workbench-plugin     {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/workbench-tools      {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/web-tools            {:provider :ddg}
+ :lateralus/runtime-tools        {:enabled? true :network? true}
+ :lateralus/loop-opts            {:max-loop-depth 3
+                                  :max-tool-calls-per-turn 8
+                                  :max-tool-calls-per-exchange 12
+                                  :tool-schema-mode :compact
+                                  :tool-content-caps {"clojure_eval" 8000
+                                                      "clojure_add_lib" 8000}}
+ ;; MCP: empty boot servers — agent attaches via mcp_upsert_server
+ ;; (dynamic on). See mcp_upsert_server description for Open Design IPC.
+ :lateralus/mcp-tools
+ {:servers {}
+  :dynamic {:enabled? true}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/workbench-tools
+                                  #ig/ref :lateralus/mcp-session-tools]
+ :lateralus/tools-plugin         {:registry    #ig/ref :lateralus/tool-registry
+                                  :mcp-session #ig/ref :lateralus/mcp-tools}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/workbench-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :logging        #ig/ref :lateralus/logging
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :workbench      #ig/ref :lateralus/workbench
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}

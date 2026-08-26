@@ -7,6 +7,7 @@
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.loop :as loop]
+            [kschltz.agent.loop.stall :as stall]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.tools :as plugins.tools]
@@ -89,6 +90,22 @@
           out (run-exchange varying-tool "loop" {"echo" (->EchoTool)})]
       (is (= 5 (:agent/tool-loop-depth out))
           "loop stops at default max depth"))))
+
+(deftest inject-tools-compact-mode-shortens-descriptions
+  (let [enter (:enter (loop/inject-tools-interceptor))
+        t (reify tool/Tool
+            (-name [_] "echo")
+            (-description [_] "Echoes a message. Extra recovery prose the local model should not pay tokens for.")
+            (-input-schema [_] [:map [:msg :string]])
+            (-output-schema [_] :string)
+            (-invoke [_ _ _] "ok"))
+        ctx {:llm/request {:model "m" :messages []}
+             :agent/tool-registry {"echo" t}
+             :agent/loop-opts {:tool-schema-mode :compact}}
+        out (enter ctx)
+        desc (get-in out [:llm/request :tools 0 :function :description])]
+    (is (str/starts-with? desc "Echoes a message"))
+    (is (< (count desc) (count (tool/-description t))))))
 
 (deftest loop-interceptors-validate-self-heal
   (testing "llm-call-with-self-heal passes a valid request through"
@@ -320,7 +337,47 @@
           "the exact-sig fast path did NOT fire (the args differed each turn)")
       (is (= "FINAL ANSWER" (:exchange/response out))
           "ensure-text-response coerced a summary after the stall")
-      (is (pos? (:agent/summary-attempts out 0))))))
+      (is (pos? (:agent/summary-attempts out 0)))
+      (is (contains? (or (get-in out [:agent/state-delta :agent/shape-err-counts])
+                         (:agent/shape-err-counts out))
+                     ["clojure_add_lib" "{:lib \"com.taoensso/nippy\"}"])
+          "shape counts persist on ctx / state-delta"))))
+
+(defn- addlib-plus-echo-rut-llm
+  "Like addlib-rut-llm, but each tool turn also calls echo successfully.
+   The old whole-turn `every?` error guard would reset; primary-arg
+   counts must still stall."
+  [n]
+  (let [turn (atom 0)]
+    (reify LlmClient
+      (-call [_ req]
+        (if (contains? req :tools)
+          (let [t (swap! turn inc)]
+            (if (<= t n)
+              {:choices [{:message {:role "assistant" :content ""
+                                    :tool_calls [{:id (str "add" t) :type "function"
+                                                  :function {:name "clojure_add_lib"
+                                                             :arguments (str "{\"lib\":\"com.taoensso/nippy\",\"require\":\"ns" t "\"}")}}
+                                                 {:id (str "echo" t) :type "function"
+                                                  :function {:name "echo"
+                                                             :arguments "{\"msg\":\"ok\"}"}}]}}]
+               :model "fake/v0"}
+              {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
+               :model "fake/v0"}))
+          {:choices [{:message {:role "assistant" :content "FINAL ANSWER"}}]
+           :model "fake/v0"})))))
+
+(deftest arg-shape-stall-trips-when-sibling-tool-succeeds
+  (testing "add-lib loaded?=false twice stalls even when echo succeeds each turn"
+    (let [out (run-exchange (addlib-plus-echo-rut-llm 4) "add nippy"
+                            {"clojure_add_lib" (->FailAddLibTool)
+                             "echo" (->EchoTool)})]
+      (is (true? (:agent/shape-stall-hit out))
+          (str "primary-arg stall must trip despite mixed success; got "
+               (pr-str (select-keys out [:agent/shape-stall-hit
+                                         :agent/tool-loop-depth
+                                         :agent/stall-hit]))))
+      (is (= "FINAL ANSWER" (:exchange/response out))))))
 
 ;; ---- empty-summary-call fix (2026-06-22 investigation) ----
 ;;
@@ -406,7 +463,7 @@
   (testing "when the summary call STILL returns tool_calls (an
             adversarial provider that ignores the absent :tools key),
             the retry cap kicks in, sets :agent/summary-failed?, and
-            the response stays blank so the CLI fallback engages."
+            a synthesized fallback is filled from the tool results."
     (let [out (run-with-queue
                [(tool-call-choice (tool-call "tc1" "echo" "{\"msg\":\"x\"}"))
                 (text-choice "")
@@ -424,8 +481,35 @@
                                          :agent/summary-attempts]))))
       (is (= 2 (:agent/summary-attempts out 0))
           "summary must attempt exactly 2 times before giving up")
-      (is (str/blank? (:exchange/response out))
-          "response stays blank when summary exhausts its cap"))))
+      (is (true? (:agent/summary-synthesized? out))
+          "exhausted summary fills a synthesized fallback from tool results")
+      (is (str/includes? (or (:exchange/response out) "") "echo")
+          "synthesized fallback must mention the tool that ran"))))
+
+(deftest second-summary-attempt-uses-condensed-digest
+  (testing "summary attempt 2 replaces history with a digest so the model
+            has no tool-call pattern to echo"
+    (let [req-views (atom [])
+          observer (reify LlmClient
+                     (-call [_ req]
+                       (swap! req-views conj req)
+                       (condp = (count @req-views)
+                         1 {:choices [{:message {:role "assistant" :content ""
+                                                 :tool_calls [(tool-call "tc1" "echo" "{\"msg\":\"hi\"}")]}}]
+                            :model "fake/v0"}
+                         2 {:choices [{:message {:role "assistant" :content ""}}]
+                            :model "fake/v0"}
+                         {:choices [{:message {:role "assistant" :content ""
+                                               :tool_calls [(tool-call "tcX" "echo" "{\"msg\":\"x\"}")]}}]
+                          :model "fake/v0"})))
+          out (run-exchange observer "call echo" {"echo" (->EchoTool)})
+          second-summary (get @req-views 3)]
+      (is (>= (count @req-views) 4) "tool + empty + two summaries")
+      (is (true? (:agent/summary-failed? out)))
+      (is (some #(and (string? (:content %))
+                      (str/includes? (:content %) "digest"))
+                (:messages second-summary)))
+      (is (not-any? #(seq (:tool_calls %)) (:messages second-summary))))))
 
 ;; ---- configurable tool-call caps (2026-06-22) ----
 
@@ -539,13 +623,13 @@
 (deftest result-error-shape-detects-json-string-status
   (testing "Cheshire-serialized status \"error\"/\"timeout\" count as error
             shapes for arg-shape stall (keywords do not survive JSON)"
-    (is (true? (#'loop/result-error-shape?
+    (is (true? (stall/result-error-shape?
                 {:result (json/generate-string {:status :error :error "boom"})}))
         "status :error → JSON \"error\" is detected")
-    (is (true? (#'loop/result-error-shape?
+    (is (true? (stall/result-error-shape?
                 {:result (json/generate-string {:status :timeout :error "t"})}))
         "status :timeout → JSON \"timeout\" is detected")
-    (is (false? (#'loop/result-error-shape?
+    (is (false? (stall/result-error-shape?
                  {:result (json/generate-string {:status :ok :value "1"})}))
         "status ok is not an error shape")))
 

@@ -55,8 +55,14 @@
     (fn [m] (boolean (seq m)))]])
 
 (def ReloadRuntimeInput
-  [:map {:closed true}
-   [:namespaces [:vector {:min 1} tr/RuntimeNamespace]]])
+  [:and
+   [:map {:closed true}
+    [:namespaces {:optional true} [:vector {:min 1} tr/RuntimeNamespace]]
+    [:from-edits {:optional true} :boolean]]
+   [:fn {:error/message "provide :namespaces or :from-edits true"}
+    (fn [m]
+      (or (seq (:namespaces m))
+          (true? (:from-edits m))))]])
 
 (def ^:private protected-runtime-tools
   #{"set_tool_enabled" "runtime_describe" "reload_runtime"})
@@ -198,17 +204,26 @@
   tool/Tool
   (-name [_] "reload_runtime")
   (-description [_]
-    "After the current exchange, reload edited `kschltz.agent.*` namespaces and rebuild all Integrant-assembled built-in plugins for the next exchange. The tool only proposes a transition; the outer runtime performs the reload. Core engine/protocol namespaces report `restart-required` instead of being unsafely replaced in-process.")
+    "After the current exchange, reload edited `kschltz.agent.*` namespaces and rebuild Integrant-assembled built-in plugins. Pass `namespaces` explicitly, or `from-edits` true to reload namespaces recorded from this session's file_update/file_patch/file_create results. Core engine/protocol namespaces report `restart-required`.")
   (-input-schema [_] ReloadRuntimeInput)
   (-output-schema [_] :string)
-  (-invoke [_ {:keys [namespaces]} _ctx]
-    (tr/encode-result
-     {:ok true
-      :tool "reload_runtime"
-      :pending "next-exchange"
-      :namespaces (vec (distinct namespaces))
-      :transition {:op :reload-runtime
-                   :namespaces (vec (distinct namespaces))}})))
+  (-invoke [_ {:keys [namespaces from-edits]} ctx]
+    (let [from-state (get-in ctx [:agent/state :agent/edited-namespaces])
+          nses (vec (distinct (or (seq namespaces) from-state [])))]
+      (if (and from-edits (empty? nses))
+        (tr/encode-result
+         {:ok false
+          :tool "reload_runtime"
+          :error "no edited namespaces recorded this session; pass :namespaces"})
+        (tr/encode-result
+         {:ok true
+          :tool "reload_runtime"
+          :pending "next-exchange"
+          :namespaces nses
+          :from-edits (boolean from-edits)
+          :transition (cond-> {:op :reload-runtime}
+                        (seq nses) (assoc :namespaces nses)
+                        from-edits (assoc :from-edits true))})))))
 
 (defrecord ListLlmModelsTool [catalog]
   tool/Tool

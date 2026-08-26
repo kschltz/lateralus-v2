@@ -142,6 +142,21 @@ in `error` rather than raised.
 No arguments. Returns `{"libs": ["clojure.string", ...]}` — handy for
 checking whether an added dependency is available before requiring it.
 
+## JDK matrix
+
+`clojure_eval` / `clojure_add_lib` run in the agent JVM.
+
+| JDK | Notes |
+|-----|--------|
+| 22–23 | Supported. Vector API flags required for Proximum + LangChain4j ONNX. |
+| 24+ | Clerk 0.16.x pulls Graal JS / Truffle, which call `sun.misc.Unsafe.ensureClassInitialized` (removed in JDK 24). `self_status` reports `:jdk :clerk-graaljs-safe? false`. Nippy-only add-lib still works once `com.taoensso/encore` is ≥ 3.148.0 on the basis. |
+
+`self_status` and `runtime_describe` section `playbook` surface the running feature version and this Clerk warning.
+
+## Dependency convergence
+
+`clojure_add_lib` preflights the Clojure CLI basis (`clojure.basis`). If a known transitive is already loaded at an older version (e.g. `com.taoensso/encore` 3.31.0 vs nippy 3.4.2's 3.148.0), the envelope includes `:convergence` and a terminal `:hint`: report the failure, do not retry the same `:lib` or enumerate jar entries. Parent-first classloading will not replace the stale jar; fix `deps.edn` and restart.
+
 ## Safety
 
 `clojure_eval` runs **arbitrary Clojure in-process** with the agent's full

@@ -100,6 +100,22 @@
       (is (str/includes? (tool/invoke-tool t {:name "forbidden"} {})
                          "input validation failed")))))
 
+(deftest compact-definition-shortens-description-and-params
+  (let [t (reify tool/Tool
+            (-name [_] "calc_add")
+            (-description [_] "Adds two integers. Also documents a long recovery path the local model does not need in the schema.")
+            (-input-schema [_] [:map [:a :int] [:b {:optional true} :int]])
+            (-output-schema [_] :string)
+            (-invoke [_ _ _] ""))
+        full (tool/tool-definition t)
+        compact (tool/compact-definition t)]
+    (is (= "calc_add" (get-in compact [:function :name])))
+    (is (< (count (get-in compact [:function :description]))
+           (count (get-in full [:function :description]))))
+    (is (str/starts-with? (get-in compact [:function :description]) "Adds two integers"))
+    (is (contains? (get-in compact [:function :parameters :properties]) :a))
+    (is (not (contains? (get-in compact [:function :parameters :properties :a]) :description)))))
+
 (deftest tool-definition-rejects-non-portable-name
   (let [t (reify tool/Tool
             (-name [_] "calc/add")

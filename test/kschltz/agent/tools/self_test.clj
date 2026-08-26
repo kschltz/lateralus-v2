@@ -48,7 +48,9 @@
       (is (= 1 (get-in parsed [:context :message-count])))
       (is (= 10 (get-in parsed [:tokens-used :prompt_tokens])))
       (is (= 5 (get-in parsed [:tokens-used :completion_tokens])))
-      (is (= 15 (get-in parsed [:tokens-used :total_tokens]))))))
+      (is (= 15 (get-in parsed [:tokens-used :total_tokens])))
+      (is (int? (get-in parsed [:jdk :feature])))
+      (is (boolean? (get-in parsed [:jdk :clerk-graaljs-safe?]))))))
 
 (deftest self-status-uses-workspace-root
   (testing "self_status reports the configured workspace-root"
@@ -123,6 +125,12 @@
         (is (contains? parsed :summary))
         (is (not (contains? parsed :tools)))
         (is (not (contains? parsed :chain)))))
+    (testing "playbook section is self-update guidance"
+      (let [parsed (json/parse-string
+                    (tool/invoke-tool t {:section "playbook"} c)
+                    true)]
+        (is (contains? parsed :playbook))
+        (is (string? (get-in parsed [:playbook :use-file-then-reload])))))
     (testing "unknown sections fail Malli validation"
       (let [result (tool/invoke-tool t {:section "secrets"} c)]
         (is (str/includes? result "input validation failed"))

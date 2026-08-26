@@ -62,6 +62,9 @@ before the next ReAct LLM call.
 {:op :reload-runtime
  :namespaces ["kschltz.agent.interceptors"
               "kschltz.agent.plugins.base"]}
+
+{:op :reload-runtime
+ :from-edits true}   ; uses :agent/edited-namespaces from file_* results
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -140,7 +143,9 @@ Stages a one-shot reload request. After the current chain finishes and its
 state delta is merged, the outer runtime reloads the named project namespaces,
 asks each Integrant-assembled built-in plugin for a fresh interceptor vector,
 and atomically swaps the chain used by the next exchange. Tool code never
-mutates the chain or runtime atom.
+mutates the chain or runtime atom. Pass `:from-edits true` to reload
+`:agent/edited-namespaces` recorded from successful `file_update` /
+`file_patch` / `file_create` results in this session.
 
 Core engine/protocol namespaces (`runtime`, `chain`, `system`, `tool`, and
 `transitions`) report `restart-required`: replacing their generated
