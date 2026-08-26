@@ -15,7 +15,8 @@
 
 (deftest guidance-mentions-self-update-playbook
   (is (re-find #"reload_runtime" guidance/self-update-system-guidance))
-  (is (re-find #"clojure_add_lib" guidance/self-update-system-guidance)))
+  (is (re-find #"clojure_add_lib" guidance/self-update-system-guidance))
+  (is (re-find #"Do not announce a plan" guidance/self-update-system-guidance)))
 
 (deftest submit-tool-description-stresses-portal-channel
   (let [wb (reify proto/Workbench

@@ -10,7 +10,8 @@
   session.registry. The session is also stashed on ctx so transition
   apply can refresh :llm/request :tools mid-ReAct (follow-up chains skip
   :guard/:compose)."
-  (:require [kschltz.agent.tool :as tool]
+  (:require [kschltz.agent.loop.act :as act]
+            [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]))
 
 (defn live-registry
@@ -52,8 +53,10 @@
               (cond-> (assoc ctx
                              :agent/static-tool-registry (or registry {})
                              :agent/tool-registry effective)
-              (mcp-proto/mcp-session? mcp-session)
-              (assoc :agent/mcp-session mcp-session))))})
+                (seq effective)
+                (update :agent/system-append act/merge-system-guidance)
+                (mcp-proto/mcp-session? mcp-session)
+                (assoc :agent/mcp-session mcp-session))))})
 
 (defn tools-plugin
   "Build a partial plugin that seeds tools on the context.

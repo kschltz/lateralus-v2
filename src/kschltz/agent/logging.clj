@@ -180,6 +180,7 @@
              :agent/loop-continuing?      (:agent/loop-continuing? ctx)
              :agent/summary-attempted     (:agent/summary-attempted ctx)
              :agent/empty-retry-attempted (:agent/empty-retry-attempted ctx)
+             :agent/act-nudge-attempts    (:agent/act-nudge-attempts ctx)
              :agent/self-heal-attempts   (:agent/self-heal-attempts ctx)
              :llm/request                (redact-request (:llm/request ctx))
              :llm/response               (redact-response (:llm/response ctx))

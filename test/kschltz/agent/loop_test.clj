@@ -7,6 +7,7 @@
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.client :refer [LlmClient]]
             [kschltz.agent.loop :as loop]
+            [kschltz.agent.loop.act :as loop.act]
             [kschltz.agent.loop.stall :as stall]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
@@ -248,7 +249,42 @@
                {"echo" (->EchoTool)})]
       (is (= "immediate answer" (:exchange/response out)))
       (is (zero? (:agent/summary-attempts out 0)))
-      (is (zero? (:agent/empty-retry-attempts out 0))))))
+      (is (zero? (:agent/empty-retry-attempts out 0)))
+      (is (zero? (:agent/act-nudge-attempts out 0))))))
+
+(deftest planning-only-reply-continues-into-tools
+  (testing "announce-then-yield text is not a final answer: the loop nudges
+            and the next turn can call tools in the same exchange"
+    (let [out (run-with-queue
+               [(text-choice "I'll call echo to send the message.")
+                (tool-call-choice (tool-call "tc1" "echo" "{\"msg\":\"hi\"}"))
+                (text-choice "echoed hi")]
+               "please echo hi"
+               {"echo" (->EchoTool)})]
+      (is (= "echoed hi" (:exchange/response out)))
+      (is (= 1 (count (:agent/all-tool-results out))))
+      (is (pos? (:agent/act-nudge-attempts out 0)))
+      (is (true? (:agent/act-nudged? out))))))
+
+(deftest planning-only-nudge-keeps-tools-on-follow-up
+  (testing "the act-nudge request still carries :tools (unlike empty-retry)"
+    (let [seen (atom [])
+          llm (reify LlmClient
+                (-call [_ req]
+                  (swap! seen conj req)
+                  (if (= 1 (count @seen))
+                    {:choices [{:message {:role "assistant"
+                                          :content "I'll call echo next."}}]
+                     :model "fake/v0"}
+                    {:choices [{:message {:role "assistant"
+                                          :content "ok"}}]
+                     :model "fake/v0"})))
+          _ (run-exchange llm "do the work" {"echo" (->EchoTool)})
+          second (second @seen)]
+      (is (seq (:tools second)))
+      (is (not= "none" (:tool-choice second)))
+      (is (some #(= loop.act/nudge-content (:content %))
+                (:messages second))))))
 
 (deftest loop-stall-detection-stops-repeated-calls
   (testing "when the model emits the SAME tool call twice in a row, the loop

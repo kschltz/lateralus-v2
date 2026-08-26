@@ -47,4 +47,6 @@
     (is (= #{"fake" "other"}
            (set (keys (:agent/static-tool-registry seeded)))))
     (is (= #{"other"} (set (keys (:agent/tool-registry refreshed)))))
-    (is (= 1 (count (get-in refreshed [:llm/request :tools]))))))
+    (is (= 1 (count (get-in refreshed [:llm/request :tools]))))
+    (is (string? (:agent/system-append seeded))
+        "non-empty registry appends act-now system guidance")))

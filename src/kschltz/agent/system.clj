@@ -199,7 +199,8 @@
    [:max-tool-calls-per-turn   {:optional true} :int]
    [:tool-content-caps         {:optional true}
     [:map-of :string :int]]
-   [:tool-schema-mode          {:optional true} [:enum :full :compact]]])
+   [:tool-schema-mode          {:optional true} [:enum :full :compact]]
+   [:act-nudge?                {:optional true} :boolean]])
 
 (defmethod ig/assert-key :lateralus/loop-opts [_ config]
   (assert-malli! :lateralus/loop-opts LoopOpts config))

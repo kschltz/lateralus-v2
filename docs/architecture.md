@@ -98,7 +98,7 @@ leaves after it, so its `:leave` sees the freshly-written
 | `:llm` | enter | call the LLM, parse response | base plugin (`llm-call-with-self-heal`, `llm-call`, `parse-response`) |
 | `:dispatch` | enter | reserved slot (no interceptor wired) | — |
 | `:tools` | enter | dispatch tools; harvest/apply staged state transitions (incl. MCP reconcile); compose tool results | base plugin (`dispatch-tools`, `harvest-transitions`, `apply-transitions`, `compose-tool-results`) |
-| `:finalize` | enter | tool loop termination / post-tool | base plugin (`tool-loop-interceptor`) |
+| `:finalize` | enter | tool loop, act-nudge on plan-only replies, ensure-text | base plugin (`tool-loop`, `ensure-text-response`) |
 | `:history-summarize` | leave | compact long `:agent/history` into one summary + protected window | base plugin (`summarize-history`); optional `summarizer-plugin` overrides the LlmClient |
 | `:history` | leave | record exchange history | base plugin (`store-exchange`) |
 | `:persist` | leave | memory / state persistence | memory plugin |
@@ -132,6 +132,8 @@ The context is an open map. Engine state (`::chain/queue`, `::chain/stack`, `::c
 | `:tool/calls` | parse-response / loop | dispatch-tools-interceptor | tool calls parsed from the LLM response |
 | `:tool/results` | dispatch-tools-interceptor | compose-tool-results-interceptor, tool-loop-interceptor | tool execution results |
 | `:agent/all-tool-results` | compose-tool-results-interceptor | compose-context | accumulated tool results for follow-up turns |
+
+A non-blank assistant reply with **no** `tool_calls` used to end the exchange (the workbench then parks on the next human message). When that text is a planning announcement (`I'll implement…`, `here's the plan`), `loop.act` nudges and re-enters the ReAct follow-up **with tools still attached**, so the model can implement in the same user turn.
 
 The `Ctx` Malli schema in `kschltz.agent.interceptors.schema` is intentionally open: it validates only a few instrumentation and traceability keys, leaving domain keys free for plugins to extend without a schema migration.
 
@@ -336,6 +338,7 @@ session...`) is detected by the loop via that exact phrase, not the looser
 | `src/kschltz/agent/plugins/tools.clj` | tool plugin: seeds `:agent/tool-registry` |
 | `src/kschltz/agent/plugins/summarizer.clj` | history-summarizer plugin (`:history-summarize` slot, overrides the summarizer `LlmClient`) |
 | `src/kschltz/agent/loop.clj` | ReAct tool-calling loop interceptors |
+| `src/kschltz/agent/loop/act.clj` | plan-then-yield detector + act-nudge (keep tools, continue the exchange) |
 | `src/kschltz/agent/tools/filesystem.clj` | read-only filesystem `Tool` implementations |
 | `src/kschltz/agent/tools/self.clj` | self-awareness tools (`self_status`, `runtime_describe` + playbook) |
 | `src/kschltz/agent/tools/clojure.clj` | clojure structured-editing `Tool` implementations |

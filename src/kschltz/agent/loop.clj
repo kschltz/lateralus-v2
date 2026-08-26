@@ -14,6 +14,7 @@
             [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.schemas :as schemas]
+            [kschltz.agent.loop.act :as act]
             [kschltz.agent.loop.edits :as edits]
             [kschltz.agent.loop.stall :as stall]
             [kschltz.agent.loop.summary :as summary]
@@ -45,7 +46,7 @@
 (declare bump-loop-depth-interceptor compose-tool-results-interceptor
          llm-call-with-self-heal dispatch-tools-interceptor tool-loop-interceptor
          compose-summary-request-interceptor compose-empty-retry-interceptor
-         ensure-text-response-interceptor)
+         compose-act-nudge-interceptor ensure-text-response-interceptor)
 
 ;; ---- ReAct loop implementation ----
 
@@ -404,6 +405,13 @@
                 (update :llm/request
                         #(-> % (dissoc :tools) (assoc :tool-choice "none")))))})
 
+(defn compose-act-nudge-interceptor
+  "Keep tools on the request and append the planning reply + a system
+   nudge so the follow-up turn can implement instead of yielding."
+  []
+  {:name ::compose-act-nudge
+   :enter act/apply-nudge})
+
 (defn ensure-text-response-interceptor
   "`:finalize` interceptor placed AFTER `tool-loop-interceptor`. When the
    loop is NOT continuing and :exchange/response is blank, enqueue a
@@ -413,18 +421,24 @@
    :agent/empty-retry-attempts (max max-empty-retry-attempts). When the
    cap is exhausted, sets :agent/summary-failed? / :agent/empty-retry-failed?
    and returns ctx unchanged so the CLI fallback surfaces a clear message.
-   When a response is already present or the loop is still continuing, this
-   interceptor is a no-op. `loop` is accepted for symmetry with
-   tool-loop-interceptor and ignored."
+   A planning-only reply (\"I'll implement X\") with no tool_calls is
+   NOT treated as a final answer: the interceptor nudges and re-enters
+   the ReAct follow-up chain so the model can call tools in this
+   exchange. Cap: `act/max-act-nudge-attempts`. When a genuine final
+   answer is present or the loop is still continuing, this interceptor
+   is a no-op. `loop` is used to enqueue the same follow-up chain as
+   `tool-loop-interceptor`."
   [loop]
   {:name ::ensure-text-response
    :slot :finalize
    :enter (fn [ctx]
             (let [summary-attempts (get ctx :agent/summary-attempts 0)
                   retry-attempts   (get ctx :agent/empty-retry-attempts 0)
+                  act-attempts     (get ctx :agent/act-nudge-attempts 0)
                   response         (:exchange/response ctx)
                   continuing?      (:agent/loop-continuing? ctx)
                   tools-ran?       (seq (:agent/all-tool-results ctx))
+                  registry         (or (:agent/tool-registry ctx) {})
                   ;; `:tool/calls` holds the CURRENT turn's calls (set by
                   ;; parse-response, trimmed by dispatch-tools). When the
                   ;; loop stopped (continuing? false) AND the last turn
@@ -432,11 +446,22 @@
                   ;; possibly with non-blank preamble text. That preamble
                   ;; is NOT a final answer; force a summary so the model
                   ;; digests the tool results into real text. A non-blank
-                  ;; response with NO tool_calls is a clean final answer —
-                  ;; deliver it as-is.
-                  last-turn-called-tools? (seq (:tool/calls ctx))]
+                  ;; response with NO tool_calls is a clean final answer
+                  ;; unless it is a planning-only announcement.
+                  last-turn-called-tools? (seq (:tool/calls ctx))
+                  planning? (act/planning-only?
+                             response
+                             {:tool-calls (:tool/calls ctx)
+                              :registry   registry
+                              :loop-opts  (:agent/loop-opts ctx)})]
               (cond
                 continuing? ctx
+                (and planning? (< act-attempts act/max-act-nudge-attempts))
+                (-> ctx
+                    (update :agent/act-nudge-attempts (fnil inc 0))
+                    (assoc :agent/loop-continuing? true)
+                    (chain/enqueue (into [(compose-act-nudge-interceptor)]
+                                         (-follow-up-chain loop registry))))
                 (and (not (str/blank? response)) (not last-turn-called-tools?)) ctx
                 ;; summary path: tools ran this exchange AND the loop
                 ;; stopped (either blank response, or non-blank preamble

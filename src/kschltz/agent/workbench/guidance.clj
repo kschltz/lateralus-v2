@@ -15,6 +15,7 @@
 
 (def self-update-system-guidance
   "SELF-UPDATE (local models: keep this short and sequential):
+- Do not announce a plan and stop. Call the tools that do the work in this turn.
 - Edit project source with file_update / clojure_edit_def / file_patch. Then call reload_runtime on the changed kschltz.agent.* namespace (or :from-edits true). Do not treat clojure_eval as a lasting source change.
 - Use clojure_add_lib only to pull a new Maven/Git dependency. Always pass :require and stop if loaded? is false — report the failure; do not retry the same :lib with variant args.
 - After a successful reload, call runtime_describe section=playbook (or self_status) before the next edit.
