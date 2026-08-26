@@ -14,9 +14,10 @@ Windows PowerShell: `.\scripts\start-workbench.ps1`
 
 `start-workbench` will:
 
-1. Stop compose `ollama` if it was stealing `:11434`
-2. Point the lateralus container at `http://host.docker.internal:11434/v1`
-3. Run with `--no-deps` (no in-Docker model store)
+1. `docker compose build lateralus` from the current tree (uberjar; layer-cached)
+2. Stop compose `ollama` if it was stealing `:11434`
+3. Point the lateralus container at `http://host.docker.internal:11434/v1`
+4. Run with `--no-deps` (no in-Docker model store)
 
 Your Desktop pulls (`laguna-s-2.1`, `ornith:35b`, …) appear in Model `?`.
 
@@ -56,6 +57,9 @@ Huge local weights can OOM inside Docker Desktop’s memory limit; host Ollama
 + Metal is the intended path for 35B+ models.
 
 ## Build only
+
+`./scripts/start-workbench` already rebuilds `lateralus` before each run.
+Use this only when you want the image without starting the workbench:
 
 ```bash
 docker compose build lateralus

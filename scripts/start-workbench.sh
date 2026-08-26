@@ -54,6 +54,9 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "==> building lateralus image from current tree"
+"${COMPOSE[@]}" build lateralus
+
 USE_HOST_OLLAMA=0
 # Build run argv explicitly so empty extras don't trip `set -u`.
 RUN_ARGS=(run --rm --service-ports)

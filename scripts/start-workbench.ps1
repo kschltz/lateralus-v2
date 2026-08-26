@@ -41,6 +41,9 @@ if ($LASTEXITCODE -ne 0) {
   throw "Docker is not running. Start Docker Desktop and retry."
 }
 
+Write-Host "==> building lateralus image from current tree"
+Invoke-Compose build lateralus
+
 $useHost = $false
 $runArgs = @("run", "--rm", "--service-ports")
 
