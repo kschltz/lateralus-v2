@@ -136,6 +136,18 @@
 
 ;; ---- Interceptors ----
 
+(def ^:private full-schema-in-compact
+  "Factory control tools keep full JSON Schema under `:compact` so a
+   local model can actually author a Tool instead of falling back to
+   clojure_eval."
+  #{"tool_define" "tool_promote" "tool_forget" "tool_list_runtime"})
+
+(defn- outgoing-tool-definition
+  [compact? t]
+  (if (and compact? (not (contains? full-schema-in-compact (tool/-name t))))
+    (tool/compact-definition t)
+    (tool/tool-definition t)))
+
 (defn inject-tools-interceptor
   "`:compose` interceptor that adds tool definitions to the outgoing
    `:llm/request`. Reads the registry from `:agent/tool-registry` on the
@@ -148,8 +160,8 @@
             (let [req      (:llm/request ctx)
                   registry (or (:agent/tool-registry ctx) {})
                   compact? (= :compact (get-in ctx [:agent/loop-opts :tool-schema-mode]))
-                  define   (if compact? tool/compact-definition tool/tool-definition)
-                  defs     (mapv define (vals registry))]
+                  defs     (mapv #(outgoing-tool-definition compact? %)
+                                 (vals registry))]
               (assoc ctx :llm/request (assoc req :tools defs))))})
 
 (defn- tool-call-limit

@@ -83,8 +83,8 @@
                         (reverse messages))
         recalls   (->> messages
                        (keep #(when (= "system" (:role %)) (:content %)))
-                       (filter #(str/starts-with? % "[recall] "))
-                       (map #(subs % (count "[recall] "))))
+                       (mapcat #(re-seq #"(?m)^\[recall\] (.+)$" (str %)))
+                       (map second))
         answer    (if (seq recalls)
                     (str "I remember: " (first recalls))
                     (str "No memory yet: " last-user))]

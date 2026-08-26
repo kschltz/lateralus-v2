@@ -17,6 +17,8 @@
    mid-loop config / MCP changes take effect on the next LLM call and
    composed tool messages reflect reconcile success or failure."
   (:require [kschltz.agent.plugins.tools :as tools.plugin]
+            [kschltz.agent.tools.factory.apply :as factory.apply]
+            [kschltz.agent.tools.factory.protocol :as factory.proto]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
             [kschltz.agent.tools.mcp.schemas :as mcp.schemas]
             [kschltz.agent.transitions :as tr]))
@@ -32,7 +34,14 @@
                (keyword? (:server-id raw)) (update :server-id name))]
       (cond-> op
         (and (= :mcp-upsert-server (:op op)) (map? (:config op)))
-        (update :config mcp.schemas/normalize-server-config)))))
+        (update :config mcp.schemas/normalize-server-config)
+        (and (= :register-runtime-tool (:op op)) (map? (:spec op)))
+        (update :spec (fn [spec]
+                        (cond-> spec
+                          (string? (:interceptor-slot spec))
+                          (update :interceptor-slot keyword))))
+        (and (= :promote-runtime-tool (:op op)) (string? (:target op)))
+        (update :target keyword)))))
 
 (defn- harvest-one
   "Process a single `{:call :result}` entry. Returns
@@ -185,25 +194,26 @@
 (defn apply-queued-transitions
   "Apply `:agent/transitions` on `ctx`. Returns updated ctx.
 
-   Non-MCP ops (`:set-llm`) fold into state immediately. MCP ops run
-   live `McpSession` reconcile first; only successful reconciles join
-   the durable state fold. Tool results for MCP ops are rewritten with
-   discovered tools or reconcile errors before compose. Always refreshes
-   the MCP tool overlay when a session is present."
+   Non-MCP / non-factory ops (`:set-llm`) fold into state immediately.
+   MCP and factory ops run live session reconcile first; only successful
+   reconciles join the durable state fold. Tool results are rewritten
+   with discovered tools or reconcile errors before compose. Always
+   refreshes the live tool overlay when a session is present."
   [ctx]
   (let [ops (or (:agent/transitions ctx) [])
         session (:agent/mcp-session ctx)
-        has-session? (mcp-proto/mcp-session? session)]
+        factory (:agent/factory-session ctx)
+        has-session? (mcp-proto/mcp-session? session)
+        has-factory? (factory.proto/runtime-tool-store? factory)]
     (if (empty? ops)
-      (tools.plugin/refresh-mcp-tools ctx)
-      (let [{:keys [applied outcomes]}
+      (tools.plugin/refresh-live-tools ctx)
+      (let [{:keys [applied outcomes factory-outcomes]}
             (reduce
-             (fn [{:keys [applied outcomes] :as acc} op]
+             (fn [{:keys [applied outcomes factory-outcomes] :as acc} op]
                (if-not (tr/valid-transition? op)
                  acc
-                 (if-not (mcp-op? op)
-                   {:applied (conj applied op)
-                    :outcomes outcomes}
+                 (cond
+                   (mcp-op? op)
                    (if-not has-session?
                      {:applied applied
                       :outcomes (conj outcomes
@@ -211,16 +221,42 @@
                                        :outcome {:ok false
                                                  :error "No McpSession on context"
                                                  :phase "tool"
-                                                 :class "clojure.lang.ExceptionInfo"}})}
+                                                 :class "clojure.lang.ExceptionInfo"}})
+                      :factory-outcomes factory-outcomes}
                      (let [outcome (reconcile-mcp-op session ctx op)]
                        {:applied (cond-> applied (:ok outcome) (conj op))
-                        :outcomes (conj outcomes {:op op :outcome outcome})})))))
-             {:applied [] :outcomes []}
+                        :outcomes (conj outcomes {:op op :outcome outcome})
+                        :factory-outcomes factory-outcomes}))
+
+                   (factory.apply/factory-op? op)
+                   (if-not has-factory?
+                     {:applied applied
+                      :outcomes outcomes
+                      :factory-outcomes
+                      (conj factory-outcomes
+                            {:op op
+                             :outcome {:ok false
+                                       :error "No factory session on context"
+                                       :phase "tool"
+                                       :class "clojure.lang.ExceptionInfo"}})}
+                     (let [outcome (factory.apply/reconcile-op factory ctx op)]
+                       {:applied (cond-> applied (:ok outcome) (conj op))
+                        :outcomes outcomes
+                        :factory-outcomes (conj factory-outcomes
+                                                {:op op :outcome outcome})}))
+
+                   :else
+                   {:applied (conj applied op)
+                    :outcomes outcomes
+                    :factory-outcomes factory-outcomes})))
+             {:applied [] :outcomes [] :factory-outcomes []}
              ops)
             base-state (or (:agent/state ctx) {})
             {:keys [state]} (tr/apply-transitions base-state applied)
             durable (tr/durable-delta base-state state applied)
-            results (rewrite-results-for-outcomes (:tool/results ctx) outcomes)
+            results (-> (:tool/results ctx)
+                        (rewrite-results-for-outcomes outcomes)
+                        (factory.apply/rewrite-results factory-outcomes))
             n (count (or (:tool/results ctx) []))
             ctx' (-> ctx
                      (assoc :agent/state state
@@ -236,7 +272,7 @@
                      (update :agent/state-delta
                              (fn [d] (merge (or d {}) durable)))
                      (update :llm/request tr/patch-llm-request state))]
-        (tools.plugin/refresh-mcp-tools ctx')))))
+        (tools.plugin/refresh-live-tools ctx')))))
 
 (defn harvest-transitions-interceptor
   "`:tools` interceptor — run immediately after `dispatch-tools`."

@@ -27,6 +27,7 @@
             [hato.client :as http]
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.llm.schemas :as schemas]
+            [kschltz.agent.tool :as tool]
             [malli.core :as m]
             [malli.instrument :as mi]))
 
@@ -110,6 +111,60 @@
               (re-find #"(?i)(?:localhost|127\.0\.0\.1):11434" base))
        docker-ollama
        base))))
+
+(defn- merge-assistant-pair
+  "Join two adjacent assistant messages: concatenate content, concat
+   tool_calls. Used so providers that reject two trailing assistants
+   (Ollama: 'Cannot have 2 or more assistant messages at the end')
+   still see one model turn."
+  [a b]
+  (let [content (->> [(:content a) (:content b)]
+                     (map str)
+                     (remove str/blank?)
+                     (str/join "\n\n"))
+        calls   (vec (concat (or (:tool_calls a) [])
+                             (or (:tool_calls b) [])))]
+    (cond-> {:role "assistant" :content content}
+      (seq calls) (assoc :tool_calls calls))))
+
+(defn merge-adjacent-assistant-messages
+  "Collapse consecutive `:role assistant` messages into one."
+  [messages]
+  (vec
+   (reduce (fn [acc m]
+             (let [prev (peek acc)]
+               (if (and prev
+                        (= "assistant" (:role prev))
+                        (= "assistant" (:role m)))
+                 (conj (pop acc) (merge-assistant-pair prev m))
+                 (conj acc m))))
+           []
+           messages)))
+
+(defn coalesce-system-messages
+  "Qwen/Ollama chat templates raise `System message must be at the
+   beginning` when any later message has `:role system` (recall, act-nudge,
+   empty-retry, unavailable-tool). Fold every system message into a single
+   leading system and keep non-system messages in order."
+  [messages]
+  (let [msgs     (vec messages)
+        systems  (filterv #(= "system" (:role %)) msgs)
+        others   (filterv #(not= "system" (:role %)) msgs)
+        content  (->> systems
+                      (map #(str (:content %)))
+                      (remove str/blank?)
+                      (str/join "\n\n"))]
+    (if (str/blank? content)
+      others
+      (into [{:role "system" :content content}] others))))
+
+(defn normalize-chat-messages
+  "Wire-shape messages for strict local templates: one leading system,
+   no two assistants in a row."
+  [messages]
+  (-> messages
+      coalesce-system-messages
+      merge-adjacent-assistant-messages))
 
 (defn- chat-completions-url
   "Build the chat completions URL from the base URL. Accepts both
@@ -319,7 +374,7 @@
            request-timeout-ms  default-request-timeout-ms}}]
   (let [url      (chat-completions-url (resolve-base-url base-url))
         body     (cond-> {:model    model
-                          :messages (vec messages)}
+                          :messages (normalize-chat-messages messages)}
                    temperature (assoc :temperature temperature)
                    max-tokens  (assoc :max-tokens max-tokens)
                    tools       (assoc :tools tools)
@@ -327,7 +382,7 @@
         request  {:method              :post
                   :url                url
                   :headers            (->headers api-key)
-                  :body               (json/generate-string body)
+                  :body               (json/generate-string (tool/json-safe body))
                   :as                 :string
                   :connect-timeout    connect-timeout-ms
                   :request-timeout    request-timeout-ms
@@ -376,6 +431,12 @@
             resp   (post-chat merged)]
         resp))))
 
+(m/=> coalesce-system-messages
+      [:=> [:cat [:sequential :map]] [:vector :map]])
+(m/=> merge-adjacent-assistant-messages
+      [:=> [:cat [:sequential :map]] [:vector :map]])
+(m/=> normalize-chat-messages
+      [:=> [:cat [:sequential :map]] [:vector :map]])
 (m/=> get-json
       [:=> [:cat :string [:maybe :string]] :map])
 (m/=> list-models

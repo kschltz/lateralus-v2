@@ -16,7 +16,9 @@
 (def self-update-system-guidance
   "SELF-UPDATE (local models: keep this short and sequential):
 - Do not announce a plan and stop. Call the tools that do the work in this turn.
-- Edit project source with file_update / clojure_edit_def / file_patch. Then call reload_runtime on the changed kschltz.agent.* namespace (or :from-edits true). Do not treat clojure_eval as a lasting source change.
+- Edit project source with file_update / clojure_edit_def / file_patch. Then call reload_runtime on the changed kschltz.agent.* namespace (or :from-edits true). Do not treat clojure_eval as a lasting source change. A failed health probe rolls the edit and chain back — tell the human; do not reload the same patch.
 - Use clojure_add_lib only to pull a new Maven/Git dependency. Always pass :require and stop if loaded? is false — report the failure; do not retry the same :lib with variant args.
 - After a successful reload, call runtime_describe section=playbook (or self_status) before the next edit.
-- Prefer clerk/table and clerk/vl over hand-written hiccup if you load Clerk.")
+- Prefer clerk/table and clerk/vl over hand-written hiccup if you load Clerk.
+- TOOL AUTHORING (do this, not clojure_eval): tool_define is registered. Call it with name, description, EDN Malli input-schema string, invoke string `(fn [args ctx] result)`. The new name is callable on the next LLM call this exchange. tool_promote persists it; defining a tool does not write files.
+- Artifact workflows: workflow_register_action, workflow_seed, workflow_run, workflow_status, workflow_clear. The engine schedules from :needs/:produces — do not invent a step order.")

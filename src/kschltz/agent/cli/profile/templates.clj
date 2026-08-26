@@ -139,7 +139,8 @@
 (defn- plugins
   [workbench?]
   (cond-> [(ig/ref :lateralus/memory-plugin)
-           (ig/ref :lateralus/tools-plugin)]
+           (ig/ref :lateralus/tools-plugin)
+           (ig/ref :lateralus/factory-plugin)]
     workbench? (conj (ig/ref :lateralus/workbench-plugin))))
 
 (defn- agent-map
@@ -191,10 +192,18 @@
                                                :tool-content-caps {"clojure_eval" 12000
                                                                    "clojure_add_lib" 12000}}
               :lateralus/mcp-session-tools    {:session (ig/ref :lateralus/mcp-tools)}
+              :lateralus/factory-session      {:workspace-root "."
+                                               :dynamic {:enabled? true}}
+              :lateralus/factory-tools        {:session (ig/ref :lateralus/factory-session)}
+              :lateralus/factory-plugin       {:session (ig/ref :lateralus/factory-session)}
+              :lateralus/workflow-tools       {}
               :lateralus/tool-registry        (conj (tool-registry groups)
-                                                    (ig/ref :lateralus/mcp-session-tools))
+                                                    (ig/ref :lateralus/mcp-session-tools)
+                                                    (ig/ref :lateralus/factory-tools)
+                                                    (ig/ref :lateralus/workflow-tools))
               :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)
-                                    :mcp-session (ig/ref :lateralus/mcp-tools)}
+                                    :mcp-session (ig/ref :lateralus/mcp-tools)
+                                    :factory-session (ig/ref :lateralus/factory-session)}
               :lateralus/plugins              (plugins wb?)
               :lateralus/agent                (agent-map wb?)})
       wb? (merge

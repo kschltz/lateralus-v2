@@ -65,6 +65,19 @@ before the next ReAct LLM call.
 
 {:op :reload-runtime
  :from-edits true}   ; uses :agent/edited-namespaces from file_* results
+
+{:op :register-runtime-tool
+ :spec {:name "add_two" :description "…"
+        :input-schema "[:map [:a :int] [:b :int]]"
+        :invoke "(fn [args _ctx] (str (+ (:a args) (:b args))))"}}
+
+{:op :forget-runtime-tool
+ :tool-name "add_two"}
+
+{:op :promote-runtime-tool
+ :tool-name "add_two"
+ :as-plugin true
+ :target :workspace}   ; or :project
 ```
 
 Unknown keys are rejected by the closed Malli schema. Integrant client
@@ -124,11 +137,16 @@ exchange.
 ### `set_tool_enabled`
 
 Adds or removes a tool name from the durable session overlay. The tools plugin
-recomputes `static ∪ MCP − disabled` during transition apply and patches the
+recomputes `static ∪ MCP ∪ factory − disabled` during transition apply and patches the
 in-flight request, so changes affect the next same-exchange LLM call and later
-exchanges. Only tools pre-registered by Integrant or discovered through the
-MCP session can be selected; arbitrary Tool instances cannot be injected.
-`set_tool_enabled` and `runtime_describe` are protected recovery tools.
+exchanges. Integrant tools, MCP session tools, and `tool_define` overlays can be
+selected. `set_tool_enabled`, `runtime_describe`, and factory control tools
+are protected recovery tools.
+
+### `tool_define` / `tool_forget` / `tool_promote`
+
+Define a real in-process `Tool` from a persistable spec, drop it, or write it
+to disk as a reusable plugin. See [`docs/runtime-tools.md`](runtime-tools.md).
 
 ### `set_memory_policy`
 
@@ -205,3 +223,6 @@ Config: `resources/lateralus/demo-ollama-cloud-mcp-dynamic.edn`.
 
 Implemented. See [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md)
 and the `mcp_*` control tools under `:lateralus/mcp-session-tools`.
+
+In-process tools (not MCP) use `tool_define` / `tool_promote` —
+[`docs/runtime-tools.md`](runtime-tools.md).

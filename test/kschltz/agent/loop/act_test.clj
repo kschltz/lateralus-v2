@@ -1,5 +1,6 @@
 (ns kschltz.agent.loop.act-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [kschltz.agent.loop.act :as act]))
 
 (def ^:private echo-reg {"echo" :tool})
@@ -36,6 +37,18 @@
   (is (not (act/planning-only?
             "I'll implement that next."
             {:tool-calls [] :registry echo-reg :loop-opts {:act-nudge? false}}))))
+
+(deftest apply-nudge-merges-when-last-message-is-assistant
+  (let [ctx {:exchange/response "I'll call echo."
+             :llm/request {:messages [{:role "user" :content "do it"}
+                                      {:role "assistant" :content "thinking aloud"}]
+                           :tools [{:type "function"}]}}
+        out (act/apply-nudge ctx)
+        msgs (get-in out [:llm/request :messages])
+        asst (filter #(= "assistant" (:role %)) msgs)]
+    (is (= 1 (count asst)))
+    (is (str/includes? (:content (first asst)) "thinking aloud"))
+    (is (str/includes? (:content (first asst)) "I'll call echo."))))
 
 (deftest apply-nudge-appends-plan-and-keeps-tools
   (let [ctx {:exchange/response "I'll call echo."

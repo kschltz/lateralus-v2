@@ -141,6 +141,21 @@
              :server-id "fs"
              :config {:command "npx" :bearer-token "secret"}})))))
 
+(deftest runtime-tool-transitions-are-durable
+  (let [spec {:name "add_two"
+              :description "Add two integers"
+              :input-schema "[:map [:a :int] [:b :int]]"
+              :invoke "(fn [args _ctx] (str (+ (:a args) (:b args))))"}
+        register {:op :register-runtime-tool :spec spec}
+        promote {:op :promote-runtime-tool :tool-name "add_two" :target :workspace}
+        {:keys [state applied]} (tr/apply-transitions {} [register promote])
+        delta (tr/durable-delta {} state applied)]
+    (is (tr/valid-transition? register))
+    (is (tr/valid-transition? promote))
+    (is (not (contains? (:agent/runtime-tools state) "add_two")))
+    (is (= ["add_two"] (:agent/promoted-tools state)))
+    (is (= ["add_two"] (:agent/promoted-tools delta)))))
+
 (deftest durable-delta-replaces-mcp-servers
   (let [before {}
         after {:mcp/servers {"a" {:command "x"}}}

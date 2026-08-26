@@ -52,6 +52,8 @@
             [kschltz.agent.tools.mcp.tools :as tools.mcp]
             [kschltz.agent.tools.mcp.schemas :as mcp.schemas]
             [kschltz.agent.tools.mcp.session-tools :as mcp.session-tools]
+            [kschltz.agent.tools.factory.wiring]
+            [kschltz.agent.tools.workflow.wiring]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.cli.ui :as ui]
@@ -479,8 +481,9 @@
    (tools.runtime/runtime-registry opts)
    #(tools.runtime/runtime-registry opts)))
 
-(defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session]}]
-  (plugins.tools/tools-plugin registry {:mcp-session mcp-session}))
+(defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session factory-session]}]
+  (plugins.tools/tools-plugin registry {:mcp-session mcp-session
+                                        :factory-session factory-session}))
 
 (defn- rebuild-plugin
   [p]
@@ -570,17 +573,21 @@
    :lateralus/mcp-tools            {:servers {}
                                     :dynamic {:enabled? true}}
    :lateralus/mcp-session-tools    {:session (ig/ref :lateralus/mcp-tools)}
-   :lateralus/tool-registry        [(ig/ref :lateralus/file-tools)
-                                    (ig/ref :lateralus/self-awareness-tools)
-                                    (ig/ref :lateralus/config-tools)
-                                    (ig/ref :lateralus/clojure-tools)
-                                    (ig/ref :lateralus/runtime-tools)
-                                    (ig/ref :lateralus/web-tools)
-                                    (ig/ref :lateralus/mcp-session-tools)]
+   :lateralus/factory-session      {:workspace-root "." :dynamic {:enabled? true}}
+   :lateralus/factory-tools        {:session (ig/ref :lateralus/factory-session)}
+   :lateralus/factory-plugin       {:session (ig/ref :lateralus/factory-session)}
+   :lateralus/workflow-tools       {}
+   :lateralus/tool-registry        [(ig/ref :lateralus/file-tools) (ig/ref :lateralus/self-awareness-tools)
+                                    (ig/ref :lateralus/config-tools) (ig/ref :lateralus/clojure-tools)
+                                    (ig/ref :lateralus/runtime-tools) (ig/ref :lateralus/web-tools)
+                                    (ig/ref :lateralus/mcp-session-tools)
+                                    (ig/ref :lateralus/factory-tools) (ig/ref :lateralus/workflow-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)
-                                    :mcp-session (ig/ref :lateralus/mcp-tools)}
+                                    :mcp-session (ig/ref :lateralus/mcp-tools)
+                                    :factory-session (ig/ref :lateralus/factory-session)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
-                                    (ig/ref :lateralus/tools-plugin)]
+                                    (ig/ref :lateralus/tools-plugin)
+                                    (ig/ref :lateralus/factory-plugin)]
    :lateralus/agent                {:plugins        (ig/ref :lateralus/plugins)
                                     :llm-client     (ig/ref :lateralus/llm-client)
                                     :llm-config     (ig/ref :lateralus/llm-config)

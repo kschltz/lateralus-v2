@@ -34,6 +34,8 @@
      "Use clojure_add_lib only for new Maven/Git deps. Always pass :require and check loaded? before calling the ns."
      :use-eval
      "Use clojure_eval for REPL prototypes, not as a substitute for source edits you intend to keep."
+     :use-tool-define
+     "Use tool_define to compile a real Tool (name, EDN Malli input-schema string, invoke string). Do not clojure_eval a substitute. Call the new name on the next LLM call this exchange. Use tool_promote to persist it."
      :last-reload reload
      :edited-namespaces (vec (:agent/edited-namespaces state))
      :jdk jdk

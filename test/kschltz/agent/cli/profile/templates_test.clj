@@ -12,7 +12,10 @@
 (deftest build-workbench-includes-keys
   (let [edn (t/build {:backend :ollama-local :workbench? true})]
     (is (some? (:lateralus/workbench edn)))
-    (is (some? (:lateralus/workbench-plugin edn)))))
+    (is (some? (:lateralus/workbench-plugin edn)))
+    (is (contains? edn :lateralus/workflow-tools))
+    (is (some #(= :lateralus/workflow-tools (:key %))
+              (:lateralus/tool-registry edn)))))
 
 (deftest build-cloud-url
   (is (= t/cloud-base-url

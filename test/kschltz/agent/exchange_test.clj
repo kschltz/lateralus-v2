@@ -52,6 +52,7 @@
     (is (= [::logging/logging
             ::ix/error-boundary
             :kschltz.agent.plugins.tools/seed-registry
+            :kschltz.agent.runtime-reload/reload-notice
             ::ix/compose-context
             ::loop/inject-tools
             ::loop/llm-call-with-self-heal
@@ -118,8 +119,8 @@
   (let [calls [{:id "tc1" :type "function" :function {:name "echo" :arguments "{\"msg\":\"hi\"}"}}
                {:id "tc2" :type "function" :function {:name "echo" :arguments "{\"msg\":\"bye\"}"}}]
         out   (run-exchange "ping" (tool-calling-llm calls))]
-    (is (= calls (:tool/calls out))
-        "parse-response extracted the tool calls from the fake LLM response")
+    (is (= calls (get-in out [:llm/response :choices 0 :message :tool_calls]))
+        "the LLM response still carries the tool calls after finalize")
     (is (vector? (:tool/results out)))
     (is (= 2 (count (:tool/results out)))
         "dispatch recorded one result per call through the full chain")

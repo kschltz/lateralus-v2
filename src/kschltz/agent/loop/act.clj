@@ -54,12 +54,25 @@
 
 (defn apply-nudge
   "Record the planning reply in messages and append a system nudge.
-   Leaves `:tools` on the request so the follow-up can implement."
+   Leaves `:tools` on the request so the follow-up can implement.
+   If the last message is already assistant (thinking + answer, or a
+   prior nudge), merge into it so the wire request does not end with
+   two assistant turns."
   [ctx]
   (let [plan (str (or (:exchange/response ctx) ""))]
     (-> ctx
-        (update-in [:llm/request :messages] (fnil conj [])
-                   {:role "assistant" :content plan})
+        (update-in [:llm/request :messages]
+                   (fn [msgs]
+                     (let [msgs (vec (or msgs []))
+                           last (peek msgs)]
+                       (if (and last (= "assistant" (:role last)))
+                         (let [prev (str (:content last))]
+                           (conj (pop msgs)
+                                 (assoc last :content
+                                        (if (or (str/blank? prev) (= prev plan))
+                                          plan
+                                          (str prev "\n\n" plan)))))
+                         (conj msgs {:role "assistant" :content plan})))))
         (update-in [:llm/request :messages] conj
                    {:role "system" :content nudge-content})
         (assoc :agent/act-nudged? true))))

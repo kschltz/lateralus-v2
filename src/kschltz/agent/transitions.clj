@@ -11,6 +11,7 @@
    This namespace owns the algebra only — no interceptor wiring, no
    Tool protocol, no Integrant keys."
   (:require [cheshire.core :as json]
+            [kschltz.agent.tools.factory.protocol :as factory.proto]
             [malli.core :as m]
             [malli.error :as me]
             [malli.instrument :as mi]))
@@ -25,7 +26,8 @@
   (into llm-config-keys
         #{:mcp/servers :agent/system-message :agent/loop-opts
           :agent/disabled-tools :agent/memory-policy
-          :agent/runtime-reload}))
+          :agent/runtime-reload
+          :agent/runtime-tools :agent/promoted-tools}))
 
 (def LoopOptsPatch
   "Allowlisted per-session loop policy fields."
@@ -135,6 +137,24 @@
       (or (seq (:namespaces op))
           (true? (:from-edits op))))]])
 
+(def RegisterRuntimeToolOp
+  [:map {:closed true}
+   [:op [:= :register-runtime-tool]]
+   [:spec factory.proto/ToolSpec]])
+
+(def ForgetRuntimeToolOp
+  [:map {:closed true}
+   [:op [:= :forget-runtime-tool]]
+   [:tool-name [:string {:min 1}]]])
+
+(def PromoteRuntimeToolOp
+  [:map {:closed true}
+   [:op [:= :promote-runtime-tool]]
+   [:tool-name [:string {:min 1}]]
+   [:as-plugin {:optional true} :boolean]
+   [:target {:optional true} [:enum :workspace :project]]
+   [:workspace-root {:optional true} :string]])
+
 (def Transition
   "Closed union of supported transition ops."
   [:multi {:dispatch :op}
@@ -146,7 +166,10 @@
    [:set-loop-opts SetLoopOptsOp]
    [:set-tool-enabled SetToolEnabledOp]
    [:set-memory-policy SetMemoryPolicyOp]
-   [:reload-runtime ReloadRuntimeOp]])
+   [:reload-runtime ReloadRuntimeOp]
+   [:register-runtime-tool RegisterRuntimeToolOp]
+   [:forget-runtime-tool ForgetRuntimeToolOp]
+   [:promote-runtime-tool PromoteRuntimeToolOp]])
 
 (def Transitions
   [:vector Transition])
@@ -224,6 +247,24 @@
       (assoc (or state {})
              :agent/runtime-reload
              {:namespaces (vec (distinct (or nses [])))}))
+    :register-runtime-tool
+    (update (or state {}) :agent/runtime-tools
+            (fn [tools]
+              (assoc (or tools {}) (get-in op [:spec :name]) (:spec op))))
+    :forget-runtime-tool
+    (-> (or state {})
+        (update :agent/runtime-tools
+                (fn [tools] (dissoc (or tools {}) (:tool-name op))))
+        (update :agent/promoted-tools
+                (fn [names]
+                  (vec (remove #{(:tool-name op)} (or names []))))))
+    :promote-runtime-tool
+    (-> (or state {})
+        (update :agent/runtime-tools
+                (fn [tools] (dissoc (or tools {}) (:tool-name op))))
+        (update :agent/promoted-tools
+                (fn [names]
+                  (vec (distinct (conj (or names []) (:tool-name op)))))))
     state))
 
 (defn apply-transitions
@@ -267,7 +308,13 @@
         loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)
         tools-touched? (some #(= :set-tool-enabled (:op %)) applied)
         memory-touched? (some #(= :set-memory-policy (:op %)) applied)
-        reload-touched? (some #(= :reload-runtime (:op %)) applied)]
+        reload-touched? (some #(= :reload-runtime (:op %)) applied)
+        runtime-tools-touched?
+        (some #(contains? #{:register-runtime-tool
+                            :forget-runtime-tool
+                            :promote-runtime-tool}
+                          (:op %))
+              applied)]
     (cond-> llm-patch
       mcp-touched?
       (assoc :mcp/servers (or (:mcp/servers after) {}))
@@ -280,7 +327,10 @@
       memory-touched?
       (assoc :agent/memory-policy (:agent/memory-policy after))
       reload-touched?
-      (assoc :agent/runtime-reload (:agent/runtime-reload after)))))
+      (assoc :agent/runtime-reload (:agent/runtime-reload after))
+      runtime-tools-touched?
+      (assoc :agent/runtime-tools (or (:agent/runtime-tools after) {})
+             :agent/promoted-tools (or (:agent/promoted-tools after) [])))))
 
 (defn redact-transition
   "Return a logging/model-safe copy of `op` with secrets replaced by

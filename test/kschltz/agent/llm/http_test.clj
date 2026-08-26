@@ -13,6 +13,7 @@
    No real network is touched. The server is bound to 127.0.0.1
    on an OS-assigned port and shut down at the end of each test."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.llm.http :as lcm-http]
@@ -95,6 +96,24 @@
         (is (= 1 (count (schemas/extract-tool-calls resp))))
         (is (= "echo"
                (get-in resp [:choices 0 :message :tool_calls 0 :function :name])))))))
+
+(deftest post-chat-json-encodes-pattern-in-tool-schema
+  (with-fake-server
+    echo-handler
+    (fn [port]
+      (let [client (lcm-http/http-client
+                    {:base-url (str "http://127.0.0.1:" port)
+                     :model    "echo-model"})
+            resp   (lcm-client/-call
+                    client
+                    {:model    "echo-model"
+                     :messages [{:role "user" :content "hi"}]
+                     :tools    [{:type "function"
+                                 :function {:name "web_search"
+                                            :description "search"
+                                            :parameters {:type "object"
+                                                         :pattern (re-pattern "\\S")}}}]})]
+        (is (= "hi" (schemas/extract-text resp)))))))
 
 (deftest http-error-throws-structured-ex-info
   (with-fake-server
@@ -192,3 +211,67 @@
            (lcm-http/resolve-base-url "http://localhost:11434/v1" host)))
     (is (= "https://api.cerebras.ai/v1"
            (lcm-http/resolve-base-url "https://api.cerebras.ai/v1" docker)))))
+
+(deftest merge-adjacent-assistant-messages-collapses-trailing-pair
+  (let [out (lcm-http/merge-adjacent-assistant-messages
+             [{:role "user" :content "go"}
+              {:role "assistant" :content "Here's the plan."}
+              {:role "assistant" :content "Let me give an honest answer."}])]
+    (is (= ["user" "assistant"] (mapv :role out)))
+    (is (str/includes? (:content (last out)) "Here's the plan."))
+    (is (str/includes? (:content (last out)) "Let me give an honest answer."))))
+
+(deftest normalize-chat-messages-system-then-merged-assistants
+  (let [out (lcm-http/normalize-chat-messages
+             [{:role "system" :content "base"}
+              {:role "user" :content "q"}
+              {:role "assistant" :content "a1"}
+              {:role "system" :content "nudge"}
+              {:role "assistant" :content "a2"}])]
+    (is (= "system" (:role (first out))))
+    (is (= 1 (count (filter #(= "system" (:role %)) out))))
+    (is (= ["user" "assistant"] (mapv :role (rest out))))
+    (is (str/includes? (:content (last out)) "a1"))
+    (is (str/includes? (:content (last out)) "a2"))))
+
+(deftest coalesce-system-messages-single-leading-system
+  (testing "Qwen/Ollama templates reject any system message that is not first"
+    (let [out (lcm-http/coalesce-system-messages
+               [{:role "system" :content "base"}
+                {:role "system" :content "[recall] hi"}
+                {:role "user" :content "hi"}
+                {:role "assistant" :content "hello"}
+                {:role "system" :content "Call the tools now."}
+                {:role "user" :content "so?"}])]
+      (is (= "system" (:role (first out))))
+      (is (= 1 (count (filter #(= "system" (:role %)) out))))
+      (is (str/includes? (:content (first out)) "base"))
+      (is (str/includes? (:content (first out)) "[recall] hi"))
+      (is (str/includes? (:content (first out)) "Call the tools now."))
+      (is (= ["user" "assistant" "user"] (mapv :role (rest out)))))))
+
+(deftest post-chat-sends-one-leading-system
+  (let [seen (atom nil)]
+    (with-fake-server
+      (fn [req]
+        (reset! seen (json/parse-string (slurp (:body req)) true))
+        {:status 200
+         :headers {"Content-Type" "application/json"}
+         :body (json/generate-string
+                {:model "echo-model"
+                 :choices [{:message {:role "assistant" :content "ok"}}]})})
+      (fn [port]
+        (let [client (lcm-http/http-client
+                      {:base-url (str "http://127.0.0.1:" port)
+                       :model    "echo-model"})]
+          (lcm-client/-call client
+                            {:model "echo-model"
+                             :messages [{:role "system" :content "sys"}
+                                        {:role "user" :content "hi"}
+                                        {:role "assistant" :content "hello"}
+                                        {:role "system" :content "[recall] hi"}
+                                        {:role "user" :content "so?"}]})
+          (let [msgs (:messages @seen)]
+            (is (= "system" (:role (first msgs))))
+            (is (= 1 (count (filter #(= "system" (:role %)) msgs))))
+            (is (str/includes? (:content (first msgs)) "[recall] hi"))))))))

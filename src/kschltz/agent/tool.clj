@@ -57,17 +57,23 @@
              :pattern (str portable-tool-name-pattern)})))
   name)
 
-(defn- json-schema-value
-  "Normalize values emitted by Malli's JSON Schema transformer to values
-   accepted by JSON encoders. Malli 0.16.4 preserves `java.util.regex.Pattern`
-   instances in `:pattern`; JSON Schema requires those values to be strings."
-  [schema]
+(defn json-safe
+  "Walk `x` so Cheshire can encode it. Malli 0.16.4 leaves
+   `java.util.regex.Pattern` in JSON Schema `:pattern` fields; those
+   must be strings on the wire or the next LLM call dies and the
+   session looks hung."
+  [x]
   (walk/postwalk
-   (fn [x]
-     (if (instance? java.util.regex.Pattern x)
-       (.pattern ^java.util.regex.Pattern x)
-       x))
-   schema))
+   (fn [v]
+     (if (instance? java.util.regex.Pattern v)
+       (.pattern ^java.util.regex.Pattern v)
+       v))
+   x))
+
+(defn- json-schema-value
+  "Normalize values emitted by Malli's JSON Schema transformer."
+  [schema]
+  (json-safe schema))
 
 (defn- parse-arguments
   "Parse the JSON arguments string that the model returned."

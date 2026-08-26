@@ -31,6 +31,7 @@
             [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.runtime-reload :as runtime-reload]
             [kschltz.agent.transitions.interceptors :as tr.ix]))
 
 (defn base-plugin
@@ -43,8 +44,9 @@
   []
   (let [react-loop (loop/react-loop)]
     (with-meta
-      [(assoc (logging/logging-interceptor) :slot :guard)
+      [       (assoc (logging/logging-interceptor) :slot :guard)
        (assoc ix/error-boundary :slot :guard)
+       (assoc (runtime-reload/notice-interceptor) :slot :enrich)
        (assoc ix/compose-context :slot :compose)
        (assoc (loop/inject-tools-interceptor) :slot :compose)
        (assoc (loop/llm-call-with-self-heal) :slot :llm)

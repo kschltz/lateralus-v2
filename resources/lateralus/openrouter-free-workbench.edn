@@ -84,16 +84,24 @@
  :dynamic {:enabled? true}
 }
  :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
+ :lateralus/factory-session      {:workspace-root "." :dynamic {:enabled? true}}
+ :lateralus/factory-tools        {:session #ig/ref :lateralus/factory-session}
+ :lateralus/factory-plugin       {:session #ig/ref :lateralus/factory-session}
+ :lateralus/workflow-tools       {}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/clojure-tools
                                   #ig/ref :lateralus/web-tools
                                   #ig/ref :lateralus/runtime-tools
-                                  #ig/ref :lateralus/mcp-session-tools]
+                                  #ig/ref :lateralus/mcp-session-tools
+                                  #ig/ref :lateralus/factory-tools
+                                  #ig/ref :lateralus/workflow-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
-                                    :mcp-session #ig/ref :lateralus/mcp-tools}
+                                    :mcp-session #ig/ref :lateralus/mcp-tools
+                                    :factory-session #ig/ref :lateralus/factory-session}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/factory-plugin
                                   #ig/ref :lateralus/workbench-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
                                   :llm-client     #ig/ref :lateralus/llm-client

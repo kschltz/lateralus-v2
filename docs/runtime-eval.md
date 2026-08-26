@@ -12,6 +12,10 @@ scratch REPL baked directly into the agent loop.
 | `clojure_add_lib` | Load a Maven/Git dependency onto the live classpath (Clojure 1.12 `add-libs`). |
 | `clojure_loaded_libs` | List the libs currently loaded in the JVM. |
 
+To turn evaluated code into a **callable Tool** (and later a real plugin),
+use `tool_define` / `tool_promote` — see [`runtime-tools.md`](runtime-tools.md).
+`clojure_eval` stays a scratch REPL; it does not register a model-visible tool.
+
 All three are isolated behind the `ClojureRuntime` protocol
 (`kschltz.agent.tools.runtime.protocol`) so the network boundary can be
 stubbed in tests and Malli-instrumented at the implementation layer,

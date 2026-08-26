@@ -65,7 +65,8 @@
           (true? (:from-edits m))))]])
 
 (def ^:private protected-runtime-tools
-  #{"set_tool_enabled" "runtime_describe" "reload_runtime"})
+  #{"set_tool_enabled" "runtime_describe" "reload_runtime"
+    "tool_define" "tool_promote" "tool_list_runtime" "tool_forget"})
 
 (defn- current-llm-config
   [ctx]
@@ -150,8 +151,8 @@
   (-input-schema [_] SetToolEnabledInput)
   (-output-schema [_] :string)
   (-invoke [_ {:keys [tool-name enabled]} ctx]
-    (let [known (or (:agent/static-tool-registry ctx)
-                    (:agent/tool-registry ctx)
+    (let [        known (or (:agent/tool-registry ctx)
+                    (:agent/static-tool-registry ctx)
                     {})
           disabled (set (get-in ctx [:agent/state :agent/disabled-tools]))]
       (cond

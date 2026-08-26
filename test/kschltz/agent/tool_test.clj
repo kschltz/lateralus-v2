@@ -96,6 +96,9 @@
       (is (= (.pattern pattern)
              (get-in definition [:function :parameters :properties :name :pattern])))
       (is (string? (json/generate-string definition)))
+      (is (string? (json/generate-string
+                    (tool/json-safe {:pattern pattern}))))
+      (is (string? (get-in (tool/json-safe {:pattern pattern}) [:pattern])))
       (is (= "allowed.value" (tool/invoke-tool t {:name "allowed.value"} {})))
       (is (str/includes? (tool/invoke-tool t {:name "forbidden"} {})
                          "input validation failed")))))

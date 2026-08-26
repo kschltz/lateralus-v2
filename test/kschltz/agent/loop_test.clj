@@ -108,6 +108,24 @@
     (is (str/starts-with? desc "Echoes a message"))
     (is (< (count desc) (count (tool/-description t))))))
 
+(deftest inject-tools-compact-keeps-factory-tool-full
+  (let [enter (:enter (loop/inject-tools-interceptor))
+        t (reify tool/Tool
+            (-name [_] "tool_define")
+            (-description [_] "Create a callable session tool now: name, description, input-schema. Extra contract the local model must still see.")
+            (-input-schema [_] [:map [:name :string] [:description :string]
+                                [:input-schema :string] [:invoke :string]])
+            (-output-schema [_] :string)
+            (-invoke [_ _ _] "ok"))
+        ctx {:llm/request {:model "m" :messages []}
+             :agent/tool-registry {"tool_define" t}
+             :agent/loop-opts {:tool-schema-mode :compact}}
+        out (enter ctx)
+        desc (get-in out [:llm/request :tools 0 :function :description])
+        params (get-in out [:llm/request :tools 0 :function :parameters])]
+    (is (= (tool/-description t) desc))
+    (is (contains? (set (map name (keys (:properties params)))) "input-schema"))))
+
 (deftest loop-interceptors-validate-self-heal
   (testing "llm-call-with-self-heal passes a valid request through"
     (let [enter-fn (:enter (loop/llm-call-with-self-heal))

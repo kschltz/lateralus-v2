@@ -26,14 +26,22 @@
                                   :tool-schema-mode :compact
                                   :tool-content-caps {"clojure_eval" 8000
                                                       "clojure_add_lib" 8000}}
+ :lateralus/factory-session      {:workspace-root "." :dynamic {:enabled? true}}
+ :lateralus/factory-tools        {:session #ig/ref :lateralus/factory-session}
+ :lateralus/factory-plugin       {:session #ig/ref :lateralus/factory-session}
+ :lateralus/workflow-tools       {}
  :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
                                   #ig/ref :lateralus/self-awareness-tools
                                   #ig/ref :lateralus/config-tools
                                   #ig/ref :lateralus/clojure-tools
-                                  #ig/ref :lateralus/runtime-tools]
- :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/factory-tools
+                                  #ig/ref :lateralus/workflow-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                  :factory-session #ig/ref :lateralus/factory-session}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
-                                  #ig/ref :lateralus/tools-plugin]
+                                  #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/factory-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
                                   :llm-client     #ig/ref :lateralus/llm-client
                                   :llm-config     #ig/ref :lateralus/llm-config

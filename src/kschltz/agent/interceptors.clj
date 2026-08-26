@@ -407,9 +407,22 @@
                          (seq tool-results)    (flat-tool-history-msgs tool-results)
                          :else                 [])
          with-tools    (into with-user tool-msgs)
-         with-response (if (seq response)
-                         (conj with-tools {:role "assistant" :content response})
-                         with-tools)]
+         last          (peek with-tools)
+         with-response (cond
+                         (str/blank? response)
+                         with-tools
+                         (and last
+                              (= "assistant" (:role last))
+                              (empty? (:tool_calls last)))
+                         (let [prev (str (:content last))]
+                           (if (or (str/blank? prev)
+                                   (= (str/trim prev) (str/trim (str response))))
+                             (conj (pop with-tools)
+                                   (assoc last :content response))
+                             (conj (pop with-tools)
+                                   (assoc last :content (str prev "\n\n" response)))))
+                         :else
+                         (conj with-tools {:role "assistant" :content response}))]
      (trim-history with-response caps))))
 
 (def error-boundary

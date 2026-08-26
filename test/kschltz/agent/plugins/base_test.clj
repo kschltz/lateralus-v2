@@ -14,6 +14,7 @@
             [kschltz.agent.loop :as loop]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as base]
+            [kschltz.agent.runtime-reload :as runtime-reload]
             [kschltz.agent.transitions.interceptors :as tr.ix]))
 
 (defn- by-slot [plugin slot]
@@ -25,6 +26,8 @@
       (is (= :base (-> p meta :plugin/name)))
       (is (= [::logging/logging ::ix/error-boundary]
              (mapv :name (by-slot p :guard))))
+      (is (= [::runtime-reload/reload-notice]
+             (mapv :name (by-slot p :enrich))))
       (is (= [::ix/compose-context ::loop/inject-tools]
              (mapv :name (by-slot p :compose))))
       (is (= [::loop/llm-call-with-self-heal ::ix/llm-call ::ix/parse-response]
@@ -48,6 +51,7 @@
     (let [chain (plugin/assemble-chain [(base/base-plugin)])]
       (is (= [::logging/logging
               ::ix/error-boundary
+              ::runtime-reload/reload-notice
               ::ix/compose-context
               ::loop/inject-tools
               ::loop/llm-call-with-self-heal
