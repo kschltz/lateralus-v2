@@ -25,6 +25,7 @@
    [:role Role]
    [:text {:optional true} :string]
    [:thinking {:optional true} [:maybe :string]]
+   [:turn-id {:optional true} :string]
    [:refs {:optional true} [:vector PortalRef]]
    [:ts :int]])
 
@@ -46,7 +47,8 @@
    [:open-browser? {:optional true} :boolean]
    [:app {:optional true} :boolean]
    [:window-title {:optional true} :string]
-   [:open? {:optional true} :boolean]])
+   [:open? {:optional true} :boolean]
+   [:stream-bus {:optional true} :any]])
 
 (def PortalSubmitKind
   [:enum "html" "table" "vega" "markdown" "code" "auto"

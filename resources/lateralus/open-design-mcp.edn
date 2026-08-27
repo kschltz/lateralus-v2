@@ -52,8 +52,11 @@
                                   #ig/ref :lateralus/mcp-session-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
                                     :mcp-session #ig/ref :lateralus/mcp-tools}
+ :lateralus/stream-bus           {}
+ :lateralus/stream-plugin        {:bus #ig/ref :lateralus/stream-bus}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
-                                  #ig/ref :lateralus/tools-plugin]
+                                  #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/stream-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
                                   :llm-client     #ig/ref :lateralus/llm-client
                                   :llm-config     #ig/ref :lateralus/llm-config

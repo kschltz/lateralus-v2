@@ -12,6 +12,7 @@
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
+            [kschltz.agent.loop.retry :as retry]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as base]
             [kschltz.agent.runtime-reload :as runtime-reload]
@@ -35,6 +36,8 @@
       (is (= [::loop/dispatch-tools
               ::tr.ix/harvest-transitions
               ::tr.ix/apply-transitions
+              ::retry/retry-now-available
+              ::retry/nudge-untested-runtime-tools
               ::loop/compose-tool-results]
              (mapv :name (by-slot p :tools))))
       (is (= [::loop/tool-loop ::loop/ensure-text-response]
@@ -60,6 +63,8 @@
               ::loop/dispatch-tools
               ::tr.ix/harvest-transitions
               ::tr.ix/apply-transitions
+              ::retry/retry-now-available
+              ::retry/nudge-untested-runtime-tools
               ::loop/compose-tool-results
               ::loop/tool-loop
               ::loop/ensure-text-response

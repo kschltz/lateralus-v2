@@ -8,6 +8,8 @@
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [kschltz.agent.stream.bus :as stream.bus]
+            [kschltz.agent.stream.protocol :as stream]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.schemas :as schemas]
             [org.httpkit.server :as http-kit]))
@@ -69,6 +71,25 @@
           (for [pair (when q (str/split q #"&"))
                 :let [[k v] (str/split pair #"=" 2)]]
             [(keyword k) (or v "")]))))
+
+(defn- turn-id-from-path
+  "Extract turn id from `/turn/<id>` or `/api/turns/<id>[/events]`."
+  [path]
+  (when-let [m (re-matches #"/turn/([^/]+)" (str path))]
+    (second m)))
+
+(defn- api-turn-id
+  [path]
+  (when-let [m (re-matches #"/api/turns/([^/]+)(?:/events)?" (str path))]
+    (second m)))
+
+(defn- turn-events-path?
+  [path]
+  (boolean (re-matches #"/api/turns/[^/]+/events" (str path))))
+
+(defn- stream-bus-of
+  [hub]
+  (:stream-bus hub))
 
 (defn request-hostname
   "Hostname from the Ring/http-kit Host header (port stripped).
@@ -216,6 +237,51 @@
                       false)
       (future (sse-loop! hub channel http-kit/send! run? since req)))))
 
+(defn- turn-sse-loop!
+  [stream-bus turn-id channel send! run? since]
+  (try
+    (loop [last (long since)]
+      (if-not @run?
+        nil
+        (let [chunk (stream.bus/events-since stream-bus turn-id last)
+              next  (if (and chunk (seq (:events chunk)))
+                      (do
+                        (send! channel
+                               (str "data: " (json/generate-string chunk) "\n\n")
+                               false)
+                        (long (:rev chunk last)))
+                      last)]
+          (when (and chunk (not (:live? chunk)) (empty? (:events chunk)))
+            (send! channel
+                   (str "data: " (json/generate-string (assoc chunk :done true)) "\n\n")
+                   false)
+            (send! channel "" true))
+          (Thread/sleep 150)
+          (recur next))))
+    (catch Throwable _)))
+
+(defn- handle-turn-sse
+  [hub req turn-id]
+  (let [bus   (stream-bus-of hub)
+        run?  (atom true)
+        query (merge (parse-query (:uri req))
+                     (parse-query (str "?" (or (:query-string req) ""))))
+        since (try (Long/parseLong (or (:since query) "-1"))
+                   (catch Exception _ -1))]
+    (if-not (and (stream/stream-bus? bus) (stream.bus/snapshot bus turn-id))
+      (json-response 404 {:error "turn not found" :id turn-id})
+      #_{:clj-kondo/ignore [:unresolved-symbol]}
+      (http-kit/with-channel req channel
+        (http-kit/on-close channel (fn [_] (reset! run? false)))
+        (http-kit/send! channel
+                        {:status  200
+                         :headers {"Content-Type"                "text/event-stream; charset=utf-8"
+                                   "Cache-Control"               "no-cache"
+                                   "Connection"                  "keep-alive"
+                                   "Access-Control-Allow-Origin" "*"}}
+                        false)
+        (future (turn-sse-loop! bus turn-id channel http-kit/send! run? since))))))
+
 (def ^:private portal-asset-paths
   "Paths owned by djblue/portal's HTTP handler (mounted on the CHAT server)."
   #{"/main.js" "/rpc" "/icon.svg" "/load" "/submit" "/wait.js"})
@@ -302,23 +368,55 @@
            :body ""}
 
           :else
-          (case [method path]
-            [:get "/"]
+          (cond
+            (and (= method :get) (= path "/"))
             (static-file "index.html")
 
-            [:get "/app.js"]
+            (and (= method :get) (= path "/app.js"))
             (static-file "app.js")
 
-            [:get "/app.css"]
+            (and (= method :get) (= path "/app.css"))
             (static-file "app.css")
 
-            [:get "/api/state"]
+            (and (= method :get) (= path "/turn.js"))
+            (static-file "turn.js")
+
+            (and (= method :get) (= path "/turn.css"))
+            (static-file "turn.css")
+
+            (and (= method :get) (turn-id-from-path path))
+            (static-file "turn.html")
+
+            (and (= method :get) (= path "/api/state"))
             (json-response (client-snapshot hub req))
 
-            [:get "/api/events"]
+            (and (= method :get) (= path "/api/events"))
             (handle-sse hub req)
 
-            [:post "/api/message"]
+            (and (= method :get) (= path "/api/turns/current"))
+            (let [bus (stream-bus-of hub)
+                  id  (when (stream/stream-bus? bus)
+                        (or (stream.bus/current-id bus)
+                            (stream.bus/latest-id bus)))
+                  snap (when (and id (stream/stream-bus? bus))
+                         (stream.bus/snapshot bus id))]
+              (if snap
+                (json-response snap)
+                (json-response 404 {:error "no turn yet"})))
+
+            (and (= method :get) (turn-events-path? path))
+            (handle-turn-sse hub req (api-turn-id path))
+
+            (and (= method :get) (api-turn-id path))
+            (let [bus (stream-bus-of hub)
+                  id  (api-turn-id path)
+                  snap (when (stream/stream-bus? bus)
+                         (stream.bus/snapshot bus id))]
+              (if snap
+                (json-response snap)
+                (json-response 404 {:error "turn not found" :id id})))
+
+            (and (= method :post) (= path "/api/message"))
             (let [body (read-json-body req)
                   msg  (schemas/decode-message
                         {:text (str (:text body))
@@ -327,12 +425,13 @@
               (when on-message (on-message msg))
               (json-response {:ok true}))
 
-            [:post "/api/attach-selection"]
+            (and (= method :post) (= path "/api/attach-selection"))
             (let [ref (when attach-selection! (attach-selection!))]
               (if ref
                 (json-response {:ok true :ref ref})
                 (json-response 404 {:ok false :error "no portal selection"})))
 
+            :else
             (json-response 404 {:error "not found" :path path})))
         (catch clojure.lang.ExceptionInfo e
           (json-response 400 {:error (ex-message e)

@@ -19,14 +19,15 @@
    body so callers (and the audit trail) can distinguish protocol
    errors, network errors, and shape errors.
 
-   Streaming: not implemented. The :stream field is honored in
-   the request schema (so providers don't reject), but the MVP
-   only handles non-streaming responses."
+   Streaming: `StreamableLlmClient/-call-stream` POSTs `stream:true`
+   and parses SSE chunks. `-call` remains a single JSON response."
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [hato.client :as http]
             [kschltz.agent.llm.client :as lcm-client]
+            [kschltz.agent.llm.http-stream :as http-stream]
             [kschltz.agent.llm.schemas :as schemas]
+            [kschltz.agent.llm.stream :as llm.stream]
             [kschltz.agent.tool :as tool]
             [malli.core :as m]
             [malli.instrument :as mi]))
@@ -407,6 +408,57 @@
         :else
         (throw (error-response :http-error response))))))
 
+(defn post-chat-stream
+  "POST a streaming chat-completions request. Calls `emit!` with
+   StreamEvents as SSE chunks arrive. Returns the assembled ChatResponse."
+  [{:keys [base-url api-key model messages temperature max-tokens tools
+           tool-choice connect-timeout-ms request-timeout-ms]
+    :or   {connect-timeout-ms default-connect-timeout-ms
+           request-timeout-ms  default-request-timeout-ms}}
+   emit!]
+  (let [url      (chat-completions-url (resolve-base-url base-url))
+        body     (cond-> {:model    model
+                          :messages (normalize-chat-messages messages)
+                          :stream   true}
+                   temperature (assoc :temperature temperature)
+                   max-tokens  (assoc :max-tokens max-tokens)
+                   tools       (assoc :tools tools)
+                   tool-choice (assoc :tool_choice tool-choice))
+        request  {:method              :post
+                  :url                url
+                  :headers            (assoc (->headers api-key) "Accept" "text/event-stream")
+                  :body               (json/generate-string (tool/json-safe body))
+                  :as                 :stream
+                  :connect-timeout    connect-timeout-ms
+                  :request-timeout    request-timeout-ms
+                  :throw-exceptions   false
+                  :coerce             :always}
+        response (http/request request)
+        status   (:status response)]
+    (cond
+      (<= 200 status 299)
+      (try
+        (let [started (llm.stream/now-ms)
+              _ (emit! (llm.stream/event :llm-start {:model model}))
+              assembled (http-stream/consume-sse (:body response) emit!)]
+          (emit! (llm.stream/event :llm-done {:model (or (:model assembled) model)
+                                              :finish-reason (schemas/extract-finish-reason assembled)
+                                              :usage (or (:usage assembled) {})
+                                              :elapsed-ms (- (llm.stream/now-ms) started)}))
+          assembled)
+        (catch clojure.lang.ExceptionInfo e
+          (throw e))
+        (catch Throwable t
+          (throw (ex-info "LLM HTTP stream is not valid SSE/JSON"
+                          {:kind   :parse
+                           :status status
+                           :cause  t}))))
+
+      :else
+      (let [body (try (slurp (:body response))
+                      (catch Throwable _ ""))]
+        (throw (error-response :http-error {:status status :body body}))))))
+
 (defn http-client
   "Construct a real LlmClient that POSTs OpenAI-shaped chat
    completions to `:base-url`. Required opts:
@@ -423,13 +475,19 @@
    absent. Errors are surfaced as ex-info with :kind :http-error
    or :parse, plus :status and :body."
   [opts]
-  (reify lcm-client/LlmClient
+  (reify
+    lcm-client/LlmClient
     (-call [_client req]
       ;; Per-call request shape overrides the client-defaults.
       (let [merged (merge opts req)
             _      (schemas/decode-request merged)
             resp   (post-chat merged)]
-        resp))))
+        resp))
+    llm.stream/StreamableLlmClient
+    (-call-stream [_client req emit!]
+      (let [merged (merge opts req)
+            _      (schemas/decode-request merged)]
+        (post-chat-stream merged emit!)))))
 
 (m/=> coalesce-system-messages
       [:=> [:cat [:sequential :map]] [:vector :map]])
@@ -449,6 +507,8 @@
        [:=> [:cat :string [:maybe :string]] [:vector :string]]])
 (m/=> post-chat
       [:=> [:cat HttpCallOpts] schemas/ChatResponse])
+(m/=> post-chat-stream
+      [:=> [:cat HttpCallOpts fn?] schemas/ChatResponse])
 (m/=> http-client
       [:=> [:cat HttpClientOpts]
        [:fn #(satisfies? lcm-client/LlmClient %)]])

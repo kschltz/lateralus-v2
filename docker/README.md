@@ -14,7 +14,7 @@ Windows PowerShell: `.\scripts\start-workbench.ps1`
 
 `start-workbench` will:
 
-1. `docker compose build lateralus` from the current tree (uberjar; layer-cached)
+1. Stop any leftover workbench on `:7860` / `:7870`, then rebuild the uberjar when `src/` or `resources/` changed (set `LATERALUS_DOCKER_NO_CACHE=1` to force a full rebuild)
 2. Stop compose `ollama` if it was stealing `:11434`
 3. Point the lateralus container at `http://host.docker.internal:11434/v1`
 4. Run with `--no-deps` (no in-Docker model store)

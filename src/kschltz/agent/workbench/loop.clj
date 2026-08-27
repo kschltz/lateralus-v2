@@ -76,12 +76,19 @@
   [event]
   (dissoc event ::needs-repair? ::repaired?))
 
+(defn- with-turn-id
+  [event result]
+  (if-let [tid (or (:stream/turn-id result)
+                   (get-in result [:agent/state-delta :stream/turn-id]))]
+    (assoc event :turn-id tid)
+    event))
+
 (defn- run-exchange!
   [runtime workbench prompt]
   (let [result (runtime/send-message runtime prompt)
         event  (guard-assistant-event result workbench)]
     (if-not (::needs-repair? event)
-      (public-event event)
+      (with-turn-id (public-event event) result)
       (do
         (wb/publish! workbench
                      {:role :system
@@ -89,7 +96,7 @@
                                 "portal_submit (or used a fake @portal id). Retrying once…")})
         (let [repair (runtime/send-message runtime cite/repair-prompt)
               fixed  (guard-assistant-event repair workbench)]
-          (public-event fixed))))))
+          (with-turn-id (public-event fixed) repair))))))
 
 (defn- start-stdin-feeder!
   "Background thread: each stdin line is enqueued as a human message."

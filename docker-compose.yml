@@ -30,7 +30,10 @@ services:
     profiles: ["setup"]
 
   lateralus:
-    build: .
+    build:
+      context: .
+      args:
+        LATERALUS_SRC_REV: ${LATERALUS_SRC_REV:-dev}
     # Host-Ollama runs use `docker compose run --no-deps` and skip this.
     depends_on:
       ollama:

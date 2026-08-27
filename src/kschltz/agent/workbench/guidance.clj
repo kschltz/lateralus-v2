@@ -20,5 +20,5 @@
 - Use clojure_add_lib only to pull a new Maven/Git dependency. Always pass :require and stop if loaded? is false — report the failure; do not retry the same :lib with variant args.
 - After a successful reload, call runtime_describe section=playbook (or self_status) before the next edit.
 - Prefer clerk/table and clerk/vl over hand-written hiccup if you load Clerk.
-- TOOL AUTHORING (do this, not clojure_eval): tool_define is registered. Call it with name, description, EDN Malli input-schema string, invoke string `(fn [args ctx] result)`. The new name is callable on the next LLM call this exchange. tool_promote persists it; defining a tool does not write files.
+- TOOL AUTHORING (do this, not clojure_eval): tool_define is registered. Call it with name, description, EDN Malli input-schema string, invoke string `(fn [args ctx] result)`. Then call the new name this exchange (same turn is ok) with a real test input. For live HTTP use java.net.URL + slurp (User-Agent) — do not add clj-http. tool_promote persists it; defining a tool does not write files.
 - Artifact workflows: workflow_register_action, workflow_seed, workflow_run, workflow_status, workflow_clear. The engine schedules from :needs/:produces — do not invent a step order.")

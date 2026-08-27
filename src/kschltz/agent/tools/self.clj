@@ -35,7 +35,7 @@
      :use-eval
      "Use clojure_eval for REPL prototypes, not as a substitute for source edits you intend to keep."
      :use-tool-define
-     "Use tool_define to compile a real Tool (name, EDN Malli input-schema string, invoke string). Do not clojure_eval a substitute. Call the new name on the next LLM call this exchange. Use tool_promote to persist it."
+     "Use tool_define to compile a real Tool (name, EDN Malli input-schema string, invoke string). Do not clojure_eval a substitute. Call the new name this exchange (same turn is ok) with a real test input. Use tool_promote to persist it."
      :last-reload reload
      :edited-namespaces (vec (:agent/edited-namespaces state))
      :jdk jdk

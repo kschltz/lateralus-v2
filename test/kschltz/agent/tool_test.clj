@@ -136,6 +136,17 @@
       (is (str/includes? (-> results first :result) "not available"))
       (is (str/includes? (-> results first :result) "unknown")))))
 
+(deftest resolve-tool-trims-and-matches-unique-case
+  (let [t (reify tool/Tool
+            (-name [_] "clojure_eval")
+            (-description [_] "eval")
+            (-input-schema [_] [:map])
+            (-output-schema [_] :string)
+            (-invoke [_ _ _] "ok"))]
+    (is (identical? t (tool/resolve-tool {"clojure_eval" t} " clojure_eval ")))
+    (is (identical? t (tool/resolve-tool {"clojure_eval" t} "Clojure_Eval")))
+    (is (nil? (tool/resolve-tool {"clojure_eval" t} "missing")))))
+
 (deftest execute-tools-invokes-registered-tool
   (testing "execute-tools runs a registered tool and preserves call id"
     (let [t (reify tool/Tool

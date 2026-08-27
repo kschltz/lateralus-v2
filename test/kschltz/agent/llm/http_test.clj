@@ -18,6 +18,7 @@
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.llm.http :as lcm-http]
             [kschltz.agent.llm.schemas :as schemas]
+            [kschltz.agent.llm.stream :as llm.stream]
             [ring.adapter.jetty :as jetty]))
 
 ;; ---- Fake OpenAI-compatible server ----
@@ -275,3 +276,33 @@
             (is (= "system" (:role (first msgs))))
             (is (= 1 (count (filter #(= "system" (:role %)) msgs))))
             (is (str/includes? (:content (first msgs)) "[recall] hi"))))))))
+
+(defn- sse-echo-handler
+  [req]
+  (let [body (json/parse-string (slurp (:body req)) true)
+        text (or (:content (last (:messages body))) "")]
+    {:status 200
+     :headers {"Content-Type" "text/event-stream"}
+     :body (str "data: " (json/generate-string
+                          {:model (:model body)
+                           :choices [{:delta {:content text}}]})
+                "\n"
+                "data: [DONE]\n")}))
+
+(deftest roundtrip-stream-text
+  (with-fake-server
+    sse-echo-handler
+    (fn [port]
+      (let [client (lcm-http/http-client
+                    {:base-url (str "http://127.0.0.1:" port)
+                     :model    "echo-model"})
+            events (atom [])
+            resp   (llm.stream/-call-stream
+                    client
+                    {:model "echo-model"
+                     :messages [{:role "user" :content "stream-hi"}]}
+                    #(swap! events conj %))]
+        (is (llm.stream/streamable? client))
+        (is (= "stream-hi" (schemas/extract-text resp)))
+        (is (some #{:text-delta} (map :type @events)))
+        (is (some #{:llm-done} (map :type @events)))))))

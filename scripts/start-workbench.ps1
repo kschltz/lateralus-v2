@@ -35,17 +35,54 @@ function Wait-HostOllama {
   return $false
 }
 
+function Get-SrcFingerprint {
+  $files = Get-ChildItem -Path src, resources -Recurse -File |
+    Where-Object { $_.Name -ne ".DS_Store" } |
+    Sort-Object FullName
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  foreach ($f in $files) {
+    $rel = [System.Text.Encoding]::UTF8.GetBytes(($f.FullName.Substring($Root.Path.Length + 1) -replace '\\', '/'))
+    $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+    [void]$sha.TransformBlock($rel, 0, $rel.Length, $null, 0)
+    [void]$sha.TransformBlock($bytes, 0, $bytes.Length, $null, 0)
+  }
+  [void]$sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
+  return ([System.BitConverter]::ToString($sha.Hash) -replace '-', '').ToLowerInvariant()
+}
+
+function Stop-OldWorkbench {
+  Write-Host "==> stopping any workbench already publishing :7860 or :7870"
+  $ids = @(
+    docker ps -q --filter publish=7860
+    docker ps -q --filter publish=7870
+  ) | Where-Object { $_ } | Select-Object -Unique
+  if ($ids.Count -gt 0) {
+    docker stop @ids
+  } else {
+    Write-Host "    none running"
+  }
+}
+
 Write-Host "==> checking Docker"
 docker info | Out-Null
 if ($LASTEXITCODE -ne 0) {
   throw "Docker is not running. Start Docker Desktop and retry."
 }
 
-Write-Host "==> building lateralus image from current tree"
-Invoke-Compose build lateralus
+Stop-OldWorkbench
+
+$env:LATERALUS_SRC_REV = Get-SrcFingerprint
+Write-Host "==> building lateralus image from current tree (src-rev $($env:LATERALUS_SRC_REV.Substring(0, 12)))"
+$buildArgs = @("build", "--build-arg", "LATERALUS_SRC_REV=$($env:LATERALUS_SRC_REV)")
+if ($env:LATERALUS_DOCKER_NO_CACHE -eq "1") {
+  $buildArgs += "--no-cache"
+}
+Invoke-Compose @buildArgs lateralus
+$imageInfo = docker image inspect lateralus-v2-lateralus:latest --format "{{.Id}} {{.Created}}" 2>$null
+Write-Host "==> image $imageInfo"
 
 $useHost = $false
-$runArgs = @("run", "--rm", "--service-ports")
+$runArgs = @("run", "--rm", "--service-ports", "--build")
 
 if ($env:LATERALUS_FORCE_DOCKER_OLLAMA -ne "1") {
   if (Test-ComposeOllamaRunning) {

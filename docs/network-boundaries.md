@@ -7,7 +7,7 @@ schemas with always-on namespace instrumentation.
 
 | Capability | Protocol | Instrumented implementation |
 |---|---|---|
-| Chat completion | `LlmClient` | `kschltz.agent.llm.http` |
+| Chat completion | `LlmClient`, `StreamableLlmClient` | `kschltz.agent.llm.http` (`post-chat`, `post-chat-stream`) |
 | Model discovery | `ModelCatalog` | `tools.config.catalog` → `llm.http` |
 | Dense embedding | `Embedder` | `memory.http-embedding`, `langchain4j-embedding` |
 | Web search/fetch | `WebProvider` | `tools.web.mojeek`, `tools.web.ddg` |

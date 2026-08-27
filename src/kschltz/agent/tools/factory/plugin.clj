@@ -3,7 +3,7 @@
   (:require [kschltz.agent.tools.factory.protocol :as proto]))
 
 (def system-guidance
-  "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then invoke the new name this exchange. Do not clojure_eval a substitute.")
+  "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then invoke the new name this exchange (same turn is ok). Do not clojure_eval a substitute. After define, call the new tool with a real test input before telling the human it works.")
 
 (def ^:private dispatch-slots
   "Slots that can host a runtime-defined interceptor without a rebuild."

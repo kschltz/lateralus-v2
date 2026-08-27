@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1218" />
+  <title>response details</title>
+  <link rel="stylesheet" href="/turn.css?v=17" />
+</head>
+<body>
+  <header>
+    <p class="kicker">lateralus · response</p>
+    <h1 id="title">details</h1>
+    <p id="badge" class="badge historic" aria-live="polite">historic</p>
+  </header>
+  <main>
+    <section class="prompt-sec">
+      <h2>prompt</h2>
+      <pre id="prompt" class="block"></pre>
+    </section>
+    <section class="stream-grid">
+      <div>
+        <h2>thinking</h2>
+        <pre id="thinking" class="block muted pane"></pre>
+      </div>
+      <div>
+        <h2>response</h2>
+        <pre id="response" class="block pane"></pre>
+      </div>
+    </section>
+    <section class="meta-grid">
+      <div>
+        <h2>model</h2>
+        <p id="model">—</p>
+      </div>
+      <div>
+        <h2>usage</h2>
+        <p id="usage">—</p>
+      </div>
+      <div>
+        <h2>tools</h2>
+        <p id="tools">—</p>
+      </div>
+      <div>
+        <h2>timing</h2>
+        <p id="timing">—</p>
+      </div>
+    </section>
+    <section class="log">
+      <h2>event log</h2>
+      <div id="events-wrap" class="pane">
+        <ol id="events"></ol>
+      </div>
+    </section>
+  </main>
+  <script src="/turn.js?v=17"></script>
+</body>
+</html>

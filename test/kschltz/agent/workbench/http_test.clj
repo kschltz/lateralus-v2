@@ -2,6 +2,8 @@
   (:require [cheshire.core :as json]
             [clojure.string :as string]
             [clojure.test :refer [deftest is testing]]
+            [kschltz.agent.llm.stream :as llm.stream]
+            [kschltz.agent.stream.bus :as stream.bus]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.http :as http]))
 
@@ -174,3 +176,42 @@
                       "snapshot rev advances after a publish"))))))
         (finally
           (http/stop-server! server))))))
+
+(deftest turn-details-routes
+  (let [b (stream.bus/create-bus)
+        id (stream.bus/open-turn! b {:user-text "draw"})
+        _ (stream.bus/emit! b id (llm.stream/event :text-delta {:text "pad"}))
+        _ (stream.bus/close-turn! b id :done {})
+        h (hub/create-hub {:session-id "turn-http" :stream-bus b})
+        handler (http/make-handler h {})
+        page (handler {:request-method :get :uri (str "/turn/" id)})
+        api  (handler {:request-method :get :uri (str "/api/turns/" id)})
+        miss (handler {:request-method :get :uri "/api/turns/missing"})
+        body (json/parse-string (:body api) true)]
+    (is (= 200 (:status page)))
+    (is (re-find #"response details" (String. ^bytes (:body page) "UTF-8")))
+    (is (re-find #"events-wrap" (String. ^bytes (:body page) "UTF-8")))
+    (is (= 200 (:status api)))
+    (is (= "pad" (:text body)))
+    (is (= "draw" (:user-text body)))
+    (is (= "done" (:status body)))
+    (is (= 404 (:status miss)))))
+
+(deftest current-and-live-turn-routes
+  (let [b (stream.bus/create-bus)
+        id (stream.bus/open-turn! b {:user-text "now"})
+        h (hub/create-hub {:session-id "live-http" :stream-bus b})
+        handler (http/make-handler h {})
+        cur (handler {:request-method :get :uri "/api/turns/current"})
+        page (handler {:request-method :get :uri "/turn/live"})
+        body (json/parse-string (:body cur) true)]
+    (is (= 200 (:status cur)))
+    (is (= id (:id body)))
+    (is (true? (:live? body)))
+    (is (= 200 (:status page)))
+    (stream.bus/close-turn! b id :done {})
+    (let [after (json/parse-string
+                 (:body (handler {:request-method :get :uri "/api/turns/current"}))
+                 true)]
+      (is (= id (:id after)))
+      (is (false? (:live? after))))))

@@ -141,7 +141,8 @@
   (cond-> [(ig/ref :lateralus/memory-plugin)
            (ig/ref :lateralus/tools-plugin)
            (ig/ref :lateralus/factory-plugin)]
-    workbench? (conj (ig/ref :lateralus/workbench-plugin))))
+    workbench? (conj (ig/ref :lateralus/workbench-plugin))
+    true (conj (ig/ref :lateralus/stream-plugin))))
 
 (defn- agent-map
   [workbench?]
@@ -196,6 +197,8 @@
                                                :dynamic {:enabled? true}}
               :lateralus/factory-tools        {:session (ig/ref :lateralus/factory-session)}
               :lateralus/factory-plugin       {:session (ig/ref :lateralus/factory-session)}
+              :lateralus/stream-bus           {}
+              :lateralus/stream-plugin        {:bus (ig/ref :lateralus/stream-bus)}
               :lateralus/workflow-tools       {}
               :lateralus/tool-registry        (conj (tool-registry groups)
                                                     (ig/ref :lateralus/mcp-session-tools)
@@ -225,7 +228,8 @@
                        :portal? true
                        :open-browser? false
                        :app false
-                       :window-title "lateralus"}
+                       :window-title "lateralus"
+                       :stream-bus (ig/ref :lateralus/stream-bus)}
                 portal-port (assoc :portal-port portal-port))
               :lateralus/workbench-plugin {:workbench (ig/ref :lateralus/workbench)}
               :lateralus/workbench-tools  {:workbench (ig/ref :lateralus/workbench)}})))))

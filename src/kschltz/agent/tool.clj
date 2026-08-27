@@ -176,6 +176,21 @@
                   (first-sentence (get-in full [:function :description])))
         (update-in [:function :parameters] compact-parameters))))
 
+(defn resolve-tool
+  "Look up `name` in `registry`. Trims whitespace and, when that still
+   misses, accepts a unique case-insensitive match so a model-visible
+   'not available' list cannot contradict a near-miss name."
+  [registry name]
+  (let [reg (or registry {})
+        raw (str name)
+        n (str/trim raw)]
+    (or (get reg raw)
+        (get reg n)
+        (let [hits (filter #(= (str/lower-case n) (str/lower-case (str %)))
+                           (keys reg))]
+          (when (= 1 (count hits))
+            (get reg (first hits)))))))
+
 (defn execute-tools
   "Execute a seq of `calls` against a `registry` (map name -> Tool).
    Each call is expected to be OpenAI-shaped: `:function` with `:name`
@@ -187,7 +202,7 @@
   [registry ctx calls]
   (mapv (fn [call]
           (let [name (get-in call [:function :name])
-                tool (get registry name)
+                tool (resolve-tool registry name)
                 available (vec (sort (keys registry)))
                 args-str (get-in call [:function :arguments])]
             (if tool

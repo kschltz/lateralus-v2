@@ -37,6 +37,8 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/factory-session   ──▶  RuntimeToolStore (tool_define overlay) │
 │  :lateralus/factory-tools     ──▶  tool_define / forget / list / promote  │
 │  :lateralus/factory-plugin    ──▶  seed session + runtime interceptors    │
+│  :lateralus/stream-bus        ──▶  live/historic response metadata        │
+│  :lateralus/stream-plugin     ──▶  wrap LLM + emit thinking/token events  │
 │  :lateralus/workflow-tools    ──▶  workflow_register/seed/run/status/clear│
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry` (+ MCP + factory) │
@@ -206,7 +208,7 @@ because JVM protocol/class identity cannot be replaced safely in place.
 
 ## Extension points
 
-- **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` and add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
+- **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` (and optionally `llm.stream/StreamableLlmClient` for token/thinking SSE). See [`docs/stream.md`](stream.md). Add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
 - **New tool:** build a namespace under `kschltz.agent.tools.*` that exports a `Tool` record (`deftype` or `defrecord`), add its registry to a new Integrant key (e.g. `:lateralus/web-tools`), and reference that key in `:lateralus/tool-registry`. Tool names use conservative snake_case (`^[A-Za-z][A-Za-z0-9_]{0,63}$`) so the same definitions work across OpenAI-compatible, Cerebras, Anthropic, Gemini, and Bedrock APIs; `tool-definition` rejects non-portable names before network I/O. Current examples: filesystem tools (`:lateralus/file-tools`), self-awareness tools (`:lateralus/self-awareness-tools`), session-config tools (`:lateralus/config-tools` — `set_llm_config`, `list_llm_models`, behind `ModelCatalog`; see [`docs/transitions.md`](transitions.md)), clojure structured-editing tools (`:lateralus/clojure-tools`), clojure runtime-eval tools (`:lateralus/runtime-tools` — `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs`, behind the `ClojureRuntime` protocol), web tools (`:lateralus/web-tools` with providers `:none`, `:mojeek`, and `:ddg`), and MCP client tools (`:lateralus/mcp-tools` — `McpSession` owning stdio/HTTP clients; control tools under `:lateralus/mcp-session-tools`; see [`docs/mcp.md`](mcp.md) and [`docs/dynamic-mcp-tool-setup.md`](dynamic-mcp-tool-setup.md)).
 - **New memory backend:** implement `kschltz.agent.memory.protocol/MemoryBackend` and add a case in `kschltz.agent.system/init-key :lateralus/memory-backend`. Current implementations: noop (`noop-backend`), Proximum HNSW (`proximum-backend`), and KG + BM25 (`kg-bm25`).
 - **New embedder:** implement `kschltz.agent.memory.embedding/Embedder` and add a case in `kschltz.agent.system/init-key :lateralus/embedder`. Current implementations: noop, HTTP (`http-embedding`), and LangChain4j in-process ONNX (`langchain4j-embedding`).

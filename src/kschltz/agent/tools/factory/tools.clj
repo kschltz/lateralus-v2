@@ -60,7 +60,7 @@
   tool/Tool
   (-name [_] "tool_define")
   (-description [_]
-    "Create a callable session tool now: name, description, input-schema (EDN Malli string), invoke (Clojure string of (fn [args ctx] result)). Do not use clojure_eval. The new name is callable on the next LLM call this exchange. Optional libs/require/alias and interceptor-slot plus interceptor-enter/leave/error. Emits a transition; compile + registry refresh happen before the next LLM call.")
+    "Create a callable session tool now: name, description, input-schema (EDN Malli string), invoke (Clojure string of (fn [args ctx] result)). Do not use clojure_eval. You may call the new name in this same turn (parallel with tool_define) or on the next LLM call this exchange. For live HTTP prefer java.net.URL + slurp (set User-Agent) or an existing web_* tool — do not add clj-http. Optional libs/require/alias and interceptor-slot plus interceptor-enter/leave/error. Emits a transition; compile + registry refresh happen before compose.")
   (-input-schema [_] DefineInput)
   (-output-schema [_] :string)
   (-invoke [_ spec _ctx]

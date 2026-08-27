@@ -82,7 +82,7 @@
    Portal is on the classpath, opens Portal for the iframe pane."
   [opts]
   (let [opts        (schemas/decode-config (or opts {}))
-        hub         (hub/create-hub opts)
+        hub         (hub/create-hub (select-keys opts [:session-id :stream-bus]))
         use-portal? (and (not (false? (:portal? opts)))
                          (portal/available?))
         portal-info (when (and use-portal? (not (false? (:open? opts))))

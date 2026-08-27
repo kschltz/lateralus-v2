@@ -14,6 +14,7 @@
   let lastRev = -1;
   let busy = false;
   let lastStatus = "connecting";
+  let lastCurrentTurnId = null;
   let pollTimer = null;
   let stickToBottom = true;
   let lastPortalUrl = null;
@@ -149,22 +150,58 @@
     });
   }
 
-  function activityBubble(status, detail) {
+  function liveHref(turnId) {
+    return "/turn/" + encodeURIComponent(turnId || "live");
+  }
+
+  function infoLink(turnId, live) {
+    const href = liveHref(live ? turnId || "live" : turnId);
+    if (!live && !turnId) return "";
+    const label = live ? "live details ↗" : "details ↗";
+    return `<a class="details-link${live ? " live" : ""}" href="${href}" target="_blank" rel="noopener noreferrer" title="Open thinking, tokens, and metadata">${label}</a>`;
+  }
+
+  function lastTurnId(turns, current) {
+    if (current) return current;
+    for (let i = (turns || []).length - 1; i >= 0; i--) {
+      const id = turns[i]["turn-id"] || turns[i].turnId;
+      if (id) return id;
+    }
+    return null;
+  }
+
+  function renderHeaderDetails(turns, currentTurnId, status) {
+    const el = document.getElementById("turn-details");
+    if (!el) return;
+    const live = isBusy(status) || !!currentTurnId;
+    const id = lastTurnId(turns, currentTurnId);
+    if (!id && !isBusy(status)) {
+      el.classList.add("hidden");
+      return;
+    }
+    el.href = liveHref(id);
+    el.textContent = live && isBusy(status) ? "live details ↗" : "details ↗";
+    el.classList.toggle("live", isBusy(status));
+    el.classList.remove("hidden");
+  }
+
+  function activityBubble(status, detail, currentTurnId) {
     if (!isBusy(status)) return "";
+    const href = liveHref(currentTurnId);
     const copy =
       status === "queued"
-        ? detail || "Queued — waiting for the session loop…"
-        : detail || "Model working…";
+        ? "Queued — open live details when the model starts"
+        : "Model working — click for live thinking and tokens";
     return `<article class="turn activity" aria-live="polite">
-      <div class="role">assistant</div>
-      <div class="activity-row">
+      <a class="live-banner" href="${href}" target="_blank" rel="noopener noreferrer">
         <span class="spinner" aria-hidden="true"></span>
         <span>${esc(copy)}</span>
-      </div>
+        <span class="live-banner-go">live details ↗</span>
+      </a>
     </article>`;
   }
 
-  function renderTurns(turns, status, detail) {
+  function renderTurns(turns, status, detail, currentTurnId) {
     const body = (turns || [])
       .map((t) => {
         const role = esc(t.role || "system");
@@ -177,12 +214,13 @@
         const thinking = t.thinking
           ? `<div class="thinking">${esc(t.thinking)}</div>`
           : "";
-        return `<article class="turn ${role}"><div class="role">${role}</div>${esc(
+        const meta = t.role === "assistant" || t.role === "error" ? infoLink(t["turn-id"] || t.turnId, false) : "";
+        return `<article class="turn ${role}"><div class="role">${role}${meta}</div>${esc(
           t.text || ""
         )}${refs ? `<div>${refs}</div>` : ""}${thinking}</article>`;
       })
       .join("");
-    turnsEl.innerHTML = body + activityBubble(status, detail);
+    turnsEl.innerHTML = body + activityBubble(status, detail, currentTurnId);
     if (stickToBottom) scrollTurnsToBottom();
   }
 
@@ -192,15 +230,19 @@
     const detail = state["status-detail"] || "";
     const rev = typeof state.rev === "number" ? state.rev : lastRev;
     // Drop stale snapshots — overlapping SSE/poll can reorder.
+    const currentTurnId = state["current-turn-id"] || null;
     if (lastRev !== -1 && rev < lastRev) return;
-    if (lastRev !== -1 && rev === lastRev && nextStatus === lastStatus) return;
+    if (lastRev !== -1 && rev === lastRev && nextStatus === lastStatus
+        && currentTurnId === lastCurrentTurnId) return;
 
     const wasBusy = isBusy(lastStatus);
     lastRev = rev;
     lastStatus = nextStatus;
+    lastCurrentTurnId = currentTurnId;
     busy = isBusy(lastStatus);
     renderStatus(lastStatus, detail);
-    renderTurns(state.turns, lastStatus, detail);
+    renderTurns(state.turns, lastStatus, detail, currentTurnId);
+    renderHeaderDetails(state.turns, currentTurnId, lastStatus);
     setComposerEnabled(!busy);
     if (busy) ensureBusyPoller();
     else stopBusyPollerIfIdle();

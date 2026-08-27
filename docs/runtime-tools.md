@@ -17,7 +17,9 @@ an uberjar workbench cannot persist eval'd vars into `src/`.
 The factory is the missing bridge:
 
 1. **Define** — compile a persistable spec into a `Tool`.
-2. **Use** — next ReAct turn sees the new function schema and can invoke it.
+2. **Use** — the new name is callable this exchange. A parallel call in the
+   same batch is retried after apply; if the model only defined the tool,
+   the follow-up turn is nudged to test it.
 3. **Promote** — write on-disk Tool + plugin source. Explicit only.
 
 ## Tools

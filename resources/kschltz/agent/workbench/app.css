@@ -224,7 +224,49 @@ body[data-portal-mode="float"] #portal-head {
   letter-spacing: 0.08em;
   color: var(--accent);
   margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
+.chat-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.details-link {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--accent);
+  text-decoration: none;
+  font: 600 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.details-link.live { color: #7ecb8a; border-bottom-color: #7ecb8a; }
+.details-link:hover,
+.details-link:focus-visible { color: var(--ink); border-bottom-style: solid; }
+.details-link.hidden { display: none; }
+.live-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.15rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+.live-banner-go {
+  margin-left: auto;
+  color: #7ecb8a;
+  font: 600 12px/1 "IBM Plex Mono", ui-monospace, monospace;
+  border-bottom: 1px solid #7ecb8a;
+  white-space: nowrap;
+}
+.turn.activity {
+  border-color: color-mix(in srgb, #7ecb8a 45%, var(--line));
+  cursor: pointer;
+}
+.turn.activity:hover { border-color: #7ecb8a; }
 .turn.error .role { color: var(--danger); }
 .turn .thinking {
   margin-top: 0.5rem;

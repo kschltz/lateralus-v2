@@ -15,7 +15,10 @@
     (is (some? (:lateralus/workbench-plugin edn)))
     (is (contains? edn :lateralus/workflow-tools))
     (is (some #(= :lateralus/workflow-tools (:key %))
-              (:lateralus/tool-registry edn)))))
+              (:lateralus/tool-registry edn)))
+    (is (some? (:lateralus/stream-bus edn)))
+    (is (some? (:lateralus/stream-plugin edn)))
+    (is (some? (get-in edn [:lateralus/workbench :stream-bus])))))
 
 (deftest build-cloud-url
   (is (= t/cloud-base-url

@@ -28,6 +28,7 @@
  :lateralus/cli-ui               {:enabled? :auto :theme :default}
  :lateralus/thinking             {:mode :preview}
  :lateralus/workbench            {:enabled? true
+                       :stream-bus #ig/ref :lateralus/stream-bus
                                   :host "127.0.0.1"
                                   :port 7860
                                   :portal? true
@@ -67,10 +68,13 @@
  :lateralus/tools-plugin         {:registry    #ig/ref :lateralus/tool-registry
                                   :mcp-session #ig/ref :lateralus/mcp-tools
                                   :factory-session #ig/ref :lateralus/factory-session}
+ :lateralus/stream-bus           {}
+ :lateralus/stream-plugin        {:bus #ig/ref :lateralus/stream-bus}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
                                   #ig/ref :lateralus/tools-plugin
                                   #ig/ref :lateralus/factory-plugin
-                                  #ig/ref :lateralus/workbench-plugin]
+                                  #ig/ref :lateralus/workbench-plugin
+                                  #ig/ref :lateralus/stream-plugin]
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
                                   :llm-client     #ig/ref :lateralus/llm-client
                                   :llm-config     #ig/ref :lateralus/llm-config

@@ -10,7 +10,11 @@ COPY deps.edn build.clj ./
 RUN clojure -P -M:workbench && clojure -P -T:build
 COPY src ./src
 COPY resources ./resources
-RUN clojure -T:build uber \
+# Fingerprint from start-workbench: busts this layer when src/resources change,
+# even if BuildKit would otherwise reuse a stale uberjar.
+ARG LATERALUS_SRC_REV=dev
+RUN echo "lateralus src-rev ${LATERALUS_SRC_REV}" \
+ && clojure -T:build uber \
  && JAR=$(ls target/net.clojars.kschltz/lateralus-v2-*.jar | head -1) \
  && cp "$JAR" /src/lateralus.jar
 

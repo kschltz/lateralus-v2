@@ -16,6 +16,7 @@
             [kschltz.agent.llm.schemas :as schemas]
             [kschltz.agent.loop.act :as act]
             [kschltz.agent.loop.edits :as edits]
+            [kschltz.agent.loop.retry :as retry]
             [kschltz.agent.loop.stall :as stall]
             [kschltz.agent.loop.summary :as summary]
             [kschltz.agent.loop.trim :as trim]
@@ -93,6 +94,8 @@
      (dispatch-tools-interceptor)
      (tr.ix/harvest-transitions-interceptor)
      (tr.ix/apply-transitions-interceptor)
+     (retry/retry-now-available-interceptor)
+     (retry/nudge-untested-runtime-tools-interceptor)
      (compose-tool-results-interceptor)
      (tool-loop-interceptor this)
      (ensure-text-response-interceptor this)]))

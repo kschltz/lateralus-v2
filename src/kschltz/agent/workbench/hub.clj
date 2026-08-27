@@ -1,6 +1,7 @@
 (ns kschltz.agent.workbench.hub
   "In-memory workbench session: chat transcript, human inbox, portal refs."
   (:require [clojure.string :as str]
+            [kschltz.agent.stream.protocol :as stream]
             [kschltz.agent.workbench.schemas :as schemas])
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
@@ -9,10 +10,11 @@
 
 (defn create-hub
   "Create a fresh workbench hub atom + inbox."
-  [{:keys [session-id]
+  [{:keys [session-id stream-bus]
     :or   {session-id (str (random-uuid))}}]
   {:session-id session-id
    :inbox      (LinkedBlockingQueue.)
+   :stream-bus stream-bus
    :state      (atom {:session-id    session-id
                       :status        :idle
                       :status-detail nil
@@ -41,6 +43,7 @@
                       :ts   (or (:ts event) (now-ms))}
                (some? (:text event))     (assoc :text (:text event))
                (some? (:thinking event)) (assoc :thinking (:thinking event))
+               (some? (:turn-id event))  (assoc :turn-id (:turn-id event))
                (seq (:refs event))       (assoc :refs (:refs event)))]
     (bump! (:state hub) #(update % :turns (fnil conj []) turn))
     turn))
@@ -63,6 +66,16 @@
 (defn get-ref
   [hub id]
   (get-in @(:state hub) [:refs id]))
+
+(defn begin-turn!
+  "Open a live stream turn as soon as the session loop starts working
+   so the CHAT UI can show a details link before the first LLM token."
+  [hub meta]
+  (let [bus (:stream-bus hub)]
+    (when (stream/stream-bus? bus)
+      (let [id (stream/-open-turn! bus (or meta {}))]
+        (bump! (:state hub) #(assoc % :current-turn-id id))
+        id))))
 
 (defn set-status!
   "Set session status. Optional `detail` is a short UI hint string."
@@ -105,13 +118,17 @@
        (throw (ex-info "Workbench await-human timed out"
                        {:timeout-ms timeout-ms})))
      (set-status! hub :running "model working…")
+     (begin-turn! hub {:user-text (:text msg)})
      msg)))
 
 (defn snapshot
   "Client-facing state (no raw :value payloads)."
   [hub]
-  (let [s @(:state hub)]
+  (let [s   @(:state hub)
+        bus (:stream-bus hub)]
     (-> s
+        (assoc :current-turn-id (when (stream/stream-bus? bus)
+                                  (stream/-current-id bus)))
         (update :refs
                 (fn [refs]
                   (into {}

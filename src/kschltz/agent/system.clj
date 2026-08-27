@@ -28,11 +28,7 @@
    `:lateralus/llm-client {:impl :http :base-url ... :api-key ... :model ...}`
    in the runtime config.
 
-   Halt policy: only keys with real resources to release define
-   `halt-key!` (currently `:lateralus/memory-backend` and
-   `:lateralus/mcp-tools`, plus optional portal/workbench).
-   Integrant skips keys with no `halt-key!` defined, which is the
-   correct behavior — defining a no-op halt is misleading."
+   Halt policy: only keys with real resources define `halt-key!`."
   (:require [integrant.core :as ig]
             [malli.core :as m]
             [kschltz.agent.plugin :as plugin]
@@ -54,6 +50,7 @@
             [kschltz.agent.tools.mcp.session-tools :as mcp.session-tools]
             [kschltz.agent.tools.factory.wiring]
             [kschltz.agent.tools.workflow.wiring]
+            [kschltz.agent.stream.wiring]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.cli.ui :as ui]
@@ -576,6 +573,8 @@
    :lateralus/factory-session      {:workspace-root "." :dynamic {:enabled? true}}
    :lateralus/factory-tools        {:session (ig/ref :lateralus/factory-session)}
    :lateralus/factory-plugin       {:session (ig/ref :lateralus/factory-session)}
+   :lateralus/stream-bus           {}
+   :lateralus/stream-plugin        {:bus (ig/ref :lateralus/stream-bus)}
    :lateralus/workflow-tools       {}
    :lateralus/tool-registry        [(ig/ref :lateralus/file-tools) (ig/ref :lateralus/self-awareness-tools)
                                     (ig/ref :lateralus/config-tools) (ig/ref :lateralus/clojure-tools)
@@ -587,7 +586,8 @@
                                     :factory-session (ig/ref :lateralus/factory-session)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)
-                                    (ig/ref :lateralus/factory-plugin)]
+                                    (ig/ref :lateralus/factory-plugin)
+                                    (ig/ref :lateralus/stream-plugin)]
    :lateralus/agent                {:plugins        (ig/ref :lateralus/plugins)
                                     :llm-client     (ig/ref :lateralus/llm-client)
                                     :llm-config     (ig/ref :lateralus/llm-config)

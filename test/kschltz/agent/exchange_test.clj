@@ -19,6 +19,7 @@
             [kschltz.agent.llm.client :as lcm-client]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
+            [kschltz.agent.loop.retry :as retry]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.tools :as plugins.tools]
@@ -61,6 +62,8 @@
             ::loop/dispatch-tools
             :kschltz.agent.transitions.interceptors/harvest-transitions
             :kschltz.agent.transitions.interceptors/apply-transitions
+            ::retry/retry-now-available
+            ::retry/nudge-untested-runtime-tools
             ::loop/compose-tool-results
             ::loop/tool-loop
             ::loop/ensure-text-response

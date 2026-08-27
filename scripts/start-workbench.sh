@@ -48,18 +48,60 @@ wait_host_ollama() {
   return 1
 }
 
+src_fingerprint() {
+  # Stamp of files baked into the uberjar (tracked + dirty + untracked).
+  # Used as --build-arg so the jar layer rebuilds when the tree changes.
+  (
+    cd "$ROOT"
+    find src resources -type f ! -name '.DS_Store' \
+      | LC_ALL=C sort \
+      | xargs shasum \
+      | shasum \
+      | awk '{print $1}'
+  )
+}
+
+stop_old_workbench() {
+  # `compose run` leaves a container on :7860; a later start then cache-hits
+  # the image and never replaces that process, so CHAT keeps serving the old jar.
+  echo "==> stopping any workbench already publishing :7860 or :7870"
+  local ids
+  ids="$(
+    {
+      docker ps -q --filter publish=7860
+      docker ps -q --filter publish=7870
+    } | awk 'NF && !seen[$0]++'
+  )"
+  if [[ -n "$ids" ]]; then
+    # shellcheck disable=SC2086
+    docker stop $ids
+  else
+    echo "    none running"
+  fi
+}
+
 echo "==> checking Docker"
 if ! docker info >/dev/null 2>&1; then
   echo "error: Docker is not running. Start Docker Desktop (or the daemon) and retry." >&2
   exit 1
 fi
 
-echo "==> building lateralus image from current tree"
-"${COMPOSE[@]}" build lateralus
+stop_old_workbench
+
+export LATERALUS_SRC_REV="$(src_fingerprint)"
+echo "==> building lateralus image from current tree (src-rev ${LATERALUS_SRC_REV:0:12})"
+BUILD_ARGS=(build --build-arg "LATERALUS_SRC_REV=$LATERALUS_SRC_REV")
+if [[ "${LATERALUS_DOCKER_NO_CACHE:-0}" == "1" ]]; then
+  BUILD_ARGS+=(--no-cache)
+fi
+"${COMPOSE[@]}" "${BUILD_ARGS[@]}" lateralus
+IMAGE_ID="$(docker image inspect lateralus-v2-lateralus:latest --format '{{.Id}} {{.Created}}' 2>/dev/null || true)"
+echo "==> image ${IMAGE_ID:-lateralus-v2-lateralus:latest}"
 
 USE_HOST_OLLAMA=0
 # Build run argv explicitly so empty extras don't trip `set -u`.
-RUN_ARGS=(run --rm --service-ports)
+# --build makes `run` use the image we just built, not a leftover tag.
+RUN_ARGS=(run --rm --service-ports --build)
 
 if [[ "${LATERALUS_FORCE_DOCKER_OLLAMA:-0}" != "1" ]]; then
   # Compose publishes :11434 and blocks Desktop — stop it so we can reference the host.

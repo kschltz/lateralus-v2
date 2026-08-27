@@ -11,7 +11,8 @@
      :compose           — compose-context, inject-tools
      :llm               — llm-call-with-self-heal, llm-call, parse-response
      :tools             — dispatch-tools, harvest-transitions,
-                          apply-transitions, compose-tool-results
+                          apply-transitions, retry-now-available,
+                          nudge-untested-runtime-tools, compose-tool-results
      :finalize          — tool-loop, ensure-text-response
      :history-summarize — summarize-history-interceptor (long-context compaction)
      :history           — store-exchange
@@ -30,6 +31,7 @@
   (:require [kschltz.agent.interceptors :as ix]
             [kschltz.agent.logging :as logging]
             [kschltz.agent.loop :as loop]
+            [kschltz.agent.loop.retry :as retry]
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.runtime-reload :as runtime-reload]
             [kschltz.agent.transitions.interceptors :as tr.ix]))
@@ -55,6 +57,8 @@
        (assoc (loop/dispatch-tools-interceptor) :slot :tools)
        (assoc (tr.ix/harvest-transitions-interceptor) :slot :tools)
        (assoc (tr.ix/apply-transitions-interceptor) :slot :tools)
+       (assoc (retry/retry-now-available-interceptor) :slot :tools)
+       (assoc (retry/nudge-untested-runtime-tools-interceptor) :slot :tools)
        (assoc (loop/compose-tool-results-interceptor) :slot :tools)
        (assoc (loop/tool-loop-interceptor react-loop) :slot :finalize)
        (assoc (loop/ensure-text-response-interceptor react-loop) :slot :finalize)
