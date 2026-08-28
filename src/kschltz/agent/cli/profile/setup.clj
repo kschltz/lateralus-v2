@@ -117,6 +117,18 @@
                          (if set? "set" "unset")
                          " in this environment.")))))
 
+(defn- prompt-api-key!
+  "Optionally collect an API key for THIS RUN. Secrets are never written:
+   the key travels only in memory (opts `:session-api-key`)."
+  [^java.io.PrintWriter out read-line-fn]
+  (.println out "")
+  (.println out "API key for this run (Enter to skip — env var resolution applies):")
+  (.print out "API key: ")
+  (.flush out)
+  (let [line (read-line-fn)]
+    (when (nil? line) (throw (ex-info "no-tty" {:phase :no-tty})))
+    (not-empty (str/trim line))))
+
 (defn- env-api-key-for
   "API key to use for listing models against `base-url`: the profile's
    own var or LATERALUS_API_KEY; OLLAMA_API_KEY only for ollama URLs."
@@ -127,12 +139,16 @@
     (not-empty (System/getenv "LATERALUS_API_KEY"))))
 
 (defn- apply-settings
-  "Attach expanded profile EDN + name onto CLI opts."
-  [opts name settings]
-  (assoc opts
-         :profile-name name
-         :profile-settings settings
-         :profile-edn (templates/build settings)))
+  "Attach expanded profile EDN + name onto CLI opts. An optional
+   `run-key` (interactive, never persisted) rides on opts as
+   `:session-api-key` for this process only."
+  ([opts name settings] (apply-settings opts name settings nil))
+  ([opts name settings run-key]
+   (cond-> opts
+     :always (assoc :profile-name name
+                    :profile-settings settings
+                    :profile-edn (templates/build settings))
+     run-key (assoc :session-api-key run-key))))
 
 (defn- edit-settings
   "Interactive field editor. Returns updated settings, or nil if no TTY."
@@ -151,6 +167,10 @@
                           (:base-url cur))
             base-url (prompt-line out read-line-fn "Base URL" default-url)
             _ (when (nil? base-url) (throw (ex-info "no-tty" {:phase :no-tty})))
+            ;; Optional per-run key, offered early so model listing can
+            ;; use it. Never persisted.
+            run-key (prompt-api-key! out read-line-fn)
+            key-for-listing (or run-key (env-api-key-for base-url))
             model-default (:model cur)
             model-line (do
                          (.print out (str "Model"
@@ -166,7 +186,7 @@
                         (or (= cmd :list) (and (map? cmd) (contains? cmd :filter)))
                         (try
                           (let [ids (list-models-fn base-url
-                                                     (env-api-key-for base-url))
+                                                     key-for-listing)
                                 initial-term (when (map? cmd) (:filter cmd))]
                             (cond
                               (empty? ids)
@@ -209,13 +229,14 @@
           ;; profile name is chosen/known by the caller; the per-profile
           ;; var pattern is still shown generically below.
           (print-env-guidance! out backend nil)
-          (templates/normalize-settings
-           {:backend      backend
-            :base-url     base-url
-            :model        model
-            :web-provider (keyword web-s)
-            :workbench?   workbench?
-            :tool-groups  tool-groups*}))))))
+          {:settings (templates/normalize-settings
+                      {:backend      backend
+                       :base-url     base-url
+                       :model        model
+                       :web-provider (keyword web-s)
+                       :workbench?   workbench?
+                       :tool-groups  tool-groups*})
+           :api-key   run-key})))))
 
 (defn- starter-settings
   [kind]
@@ -240,13 +261,15 @@
                  "2" (starter-settings :workbench)
                  "3" (starter-settings :cloud)
                  (starter-settings :local))
-          edited (edit-settings out read-line-fn list-models-fn base)
+          edited-map (edit-settings out read-line-fn list-models-fn base)
+          edited (:settings edited-map)
+          run-key (:api-key edited-map)
           name (prompt-line out read-line-fn "Save as profile name" "default")]
       (when (nil? name) (throw (ex-info "no-tty" {:phase :no-tty})))
       (let [name (str/lower-case name)]
         (store/write-profile! root name edited)
         (store/set-active! root name)
-        [name edited]))))
+        [name edited run-key]))))
 
 (defn- select-existing
   "Menu over existing profiles. Returns [name settings] or :create / :edit."
@@ -304,8 +327,8 @@
         (let [sel (select-existing out read-line-fn root names active)]
           (cond
             (= sel :create)
-            (let [[name settings] (create-profile! out read-line-fn list-models-fn root)]
-              (apply-settings opts name settings))
+            (let [[name settings run-key] (create-profile! out read-line-fn list-models-fn root)]
+              (apply-settings opts name settings run-key))
 
             (= sel :edit)
             (let [target (prompt-line out read-line-fn
@@ -314,10 +337,12 @@
               (when (nil? target) (throw (ex-info "no-tty" {:phase :no-tty})))
               (let [cur (or (store/read-profile root target)
                             (starter-settings :local))
-                    edited (edit-settings out read-line-fn list-models-fn cur)]
+                    edited-map (edit-settings out read-line-fn list-models-fn cur)
+                    edited (:settings edited-map)
+                    run-key (:api-key edited-map)]
                 (store/write-profile! root target edited)
                 (store/set-active! root target)
-                (apply-settings opts target edited)))
+                (apply-settings opts target edited run-key)))
 
             :else
             (let [[name settings] sel
@@ -326,15 +351,18 @@
                                     "Y")]
               (when (nil? keep) (throw (ex-info "no-tty" {:phase :no-tty})))
               (if (yn? keep true)
-                (do (store/set-active! root name)
-                    (apply-settings opts name settings))
-                (let [edited (edit-settings out read-line-fn list-models-fn settings)]
+                (let [run-key (prompt-api-key! out read-line-fn)]
+                  (store/set-active! root name)
+                  (apply-settings opts name settings run-key))
+                (let [edited-map (edit-settings out read-line-fn list-models-fn settings)
+                      edited (:settings edited-map)
+                      run-key (:api-key edited-map)]
                   (store/write-profile! root name edited)
                   (store/set-active! root name)
-                  (apply-settings opts name edited))))))
+                  (apply-settings opts name edited run-key))))))
         ;; First run — no profiles yet.
-        (let [[name settings] (create-profile! out read-line-fn list-models-fn root)]
-          (apply-settings opts name settings)))
+        (let [[name settings run-key] (create-profile! out read-line-fn list-models-fn root)]
+          (apply-settings opts name settings run-key)))
       (catch clojure.lang.ExceptionInfo e
         (if (= :no-tty (:phase (ex-data e)))
           opts

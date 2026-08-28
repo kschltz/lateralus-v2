@@ -224,10 +224,12 @@
    Precedence: CLI flag > existing profile/config value > LATERALUS_*/OLLAMA_API_KEY.
    Profile wins over compose env so an ollama-cloud profile is not forced
    back onto the local Docker Ollama URL."
-  [m {:keys [model base-url api-key]} {:keys [profile-name profile-settings] :as _profile-ctx}]
+  [m {:keys [model base-url api-key]} {:keys [profile-name profile-settings session-api-key] :as _profile-ctx}]
   (let [model* (or (not-empty model) (not-empty (:model m)) (env-model))
         base*  (or (not-empty base-url) (not-empty (:base-url m)) (env-base-url))
-        key*   (or (not-empty api-key) (not-empty (:api-key m))
+        key*   (or (not-empty api-key)
+                   (not-empty session-api-key)
+                   (not-empty (:api-key m))
                    (env-api-key {:profile-name profile-name
                                  :profile-settings profile-settings}
                                 m))]
@@ -262,7 +264,7 @@
   [{:keys [model base-url api-key] :as opts}]
   (let [base       (config-base opts)
         overrides  {:model model :base-url base-url :api-key api-key}
-        profile-ctx (select-keys opts [:profile-name :profile-settings])
+        profile-ctx (select-keys opts [:profile-name :profile-settings :session-api-key])
         client-llm  (apply-llm-overrides (:lateralus/llm-client base) overrides profile-ctx)
         config-llm  (apply-llm-overrides (or (:lateralus/llm-config base) {}) overrides profile-ctx)]
     (cond-> (assoc base

@@ -282,6 +282,22 @@
                                       :embedder :memory-backend :cli-ui])))
           "all agent refs are Integrant refs"))))
 
+(deftest build-system-session-api-key-precedence
+  (testing "interactive :session-api-key beats config/env but not --api-key"
+    (let [with-key (fn [opts] (get-in (cli/build-system opts)
+                                      [:lateralus/llm-client :api-key]))]
+      (is (= "session-key"
+             (with-key {:session-api-key "session-key"})))
+      (is (= "flag-key"
+             (with-key {:api-key "flag-key" :session-api-key "session-key"})))
+      (let [cfg (java.io.File/createTempFile "lat-cfg" ".edn")]
+        (spit cfg "{:lateralus/llm-client {:impl :http :api-key \"config-key\"}}")
+        (is (= "session-key"
+               (with-key {:config (.getPath cfg)
+                          :session-api-key "session-key"})))
+        (is (= "config-key"
+               (with-key {:config (.getPath cfg)})))))))
+
 (deftest build-system-merges-custom-config
   (testing "--config file overrides the bundled/default config with ig/read-string"
     (let [config (cli/build-system {:config "resources/lateralus/config.edn"
@@ -702,8 +718,9 @@
   (testing "no --config on a TTY runs the profile wizard before the system builds"
     (let [sys-opts (atom nil)
           out      (java.io.StringWriter.)
-          ;; first-run: starter 1, keep all field defaults, accept tool groups, save
-          lines    (atom ["1" "" "" "" "" "" "" "default"])
+          ;; first-run: starter 1, keep all field defaults, skip API key,
+          ;; accept tool groups, save
+          lines    (atom ["1" "" "" "" "" "" "" "" "" "default"])
           opts     (cli/parse-args ["hi"])
           code     (cli/run-cli opts
                      {:in     (java.io.ByteArrayInputStream. (.getBytes "hi"))

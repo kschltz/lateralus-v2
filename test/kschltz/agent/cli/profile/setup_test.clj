@@ -34,11 +34,11 @@
     (store/write-profile! root "default"
                           {:backend :ollama-local :model "kept" :workbench? false})
     (store/set-active! root "default")
-    ;; Use profile [1], Keep ALL [Y]
+    ;; Use profile [1], Keep ALL [Y], skip API key
     (let [opts (setup/run-wizard {}
                  {:out out
                   :profile-root root
-                  :read-line-fn (scripted ["" "Y"])
+                  :read-line-fn (scripted ["" "Y" ""])
                   :list-models-fn (fn [_ _] [])})]
       (is (= "kept" (get-in opts [:profile-edn :lateralus/llm-client :model])))
       (is (str/includes? (str out) "Keep ALL current values")))))
@@ -50,6 +50,7 @@
         lines ["1"          ; starter local
                ""           ; backend keep
                ""           ; url keep
+               ""           ; api key skip
                ""           ; model keep
                ""           ; web keep
                ""           ; workbench keep
@@ -82,7 +83,7 @@
   (testing "run-cli passes :read-line-fn nil from destructuring; must not NPE"
     (let [root (temp-root)
           out  (java.io.StringWriter.)
-          lines (atom ["1" "" "" "" "" "" "" "default"])
+          lines (atom ["1" "" "" "" "" "" "" "" "default"])
           opts (setup/ensure-profile {:action :interactive} out
                  {:tty? true
                   :profile-root root
@@ -95,7 +96,7 @@
       (let [opts2 (setup/ensure-profile {:action :interactive} (java.io.StringWriter.)
                     {:tty? true
                      :profile-root root
-                     :read-line-fn (scripted ["1" "" "" "" "" "" "" "default"])
+                     :read-line-fn (scripted ["1" "" "" "" "" "" "" "" "default"])
                      :list-models-fn (fn [_ _] [])})]
         (is (= "default" (:profile-name opts2)))
         (is (some? (:profile-edn opts2)))
