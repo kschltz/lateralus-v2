@@ -120,6 +120,18 @@ The agent can change its own LLM session knobs mid-run via staged
 Wired via `:lateralus/config-tools` (`:catalog :http` or `:stub`). See
 [`docs/transitions.md`](docs/transitions.md).
 
+### Runtime tools for the model itself
+
+These tools exist so the model can operate on its own runtime — reconfigure,
+retune, and reload without a restart. The same knobs are exposed to the human
+as the collapsible **Settings** menu in the workbench CHAT header
+(`GET/POST /api/settings`, backed by the same allowlisted transitions).
+
+A screen recording of this self-service runtime in use (user upload):
+[`Gravacao.de.Tela.2026-08-28.as.16.53.28.mov`](https://github.com/kschltz/lateralus-v2/releases/download/workbench-demo/Gravacao.de.Tela.2026-08-28.as.16.53.28.mov)
+— the agent listing its tools, inspecting its runtime, and editing its own
+session config live via the workbench.
+
 ## Web tool
 
 The agent now ships `web_search`, `web_fetch`, and `web_extract` tools. The
