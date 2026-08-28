@@ -1,4 +1,4 @@
-/ (ns kschltz.agent.interceptors
+ (ns kschltz.agent.interceptors
     "v2 interceptor stages for the agent exchange pipeline.
 
    Each stage is a plain map satisfying

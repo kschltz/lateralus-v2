@@ -86,17 +86,45 @@
     true
     (catch Throwable _ false)))
 
+(defn- profile-key-env-name
+  "Same derivation as kschltz.agent.cli/profile-key-env-name — kept local
+   to avoid a cyclic require."
+  [profile-name]
+  (when (not-empty profile-name)
+    (str "LATERALUS_PROFILE_"
+         (-> (str profile-name)
+             str/upper-case
+             (str/replace #"[^A-Z0-9]+" "_"))
+         "_API_KEY")))
+
 (defn- print-env-guidance!
-  [^java.io.PrintWriter out backend]
-  (let [set? (not (str/blank? (System/getenv "OLLAMA_API_KEY")))]
+  [^java.io.PrintWriter out backend profile-name]
+  (let [ollama? (contains? #{:ollama-local :ollama-cloud} backend)
+        pvar    (profile-key-env-name profile-name)]
     (.println out "")
     (.println out "API keys are never saved to profile files.")
+    (.println out "Key resolution: LATERALUS_PROFILE_<NAME>_API_KEY > LATERALUS_API_KEY")
+    (when ollama?
+      (.println out "> OLLAMA_API_KEY (ollama profiles only)."))
     (when (#{:ollama-cloud :custom} backend)
-      (.println out "For cloud / authenticated endpoints, set:")
-      (.println out "  export OLLAMA_API_KEY=…"))
-    (.println out (str "OLLAMA_API_KEY is currently "
-                       (if set? "set" "unset")
-                       " in this environment."))))
+      (.println out "For this profile, set one of:")
+      (when pvar (.println out (str "  export " pvar "=…   ; this profile only")))
+      (if ollama?
+        (.println out "  export OLLAMA_API_KEY=…")
+        (.println out "  export LATERALUS_API_KEY=…   ; any non-ollama profile")))
+    (let [set? (not (str/blank? (System/getenv "OLLAMA_API_KEY")))]
+      (.println out (str "OLLAMA_API_KEY is currently "
+                         (if set? "set" "unset")
+                         " in this environment.")))))
+
+(defn- env-api-key-for
+  "API key to use for listing models against `base-url`: the profile's
+   own var or LATERALUS_API_KEY; OLLAMA_API_KEY only for ollama URLs."
+  [base-url]
+  (if (and (string? base-url) (re-find #"(?i)ollama" (str base-url)))
+    (or (not-empty (System/getenv "LATERALUS_API_KEY"))
+        (not-empty (System/getenv "OLLAMA_API_KEY")))
+    (not-empty (System/getenv "LATERALUS_API_KEY"))))
 
 (defn- apply-settings
   "Attach expanded profile EDN + name onto CLI opts."
@@ -138,7 +166,7 @@
                         (or (= cmd :list) (and (map? cmd) (contains? cmd :filter)))
                         (try
                           (let [ids (list-models-fn base-url
-                                                     (System/getenv "OLLAMA_API_KEY"))
+                                                     (env-api-key-for base-url))
                                 initial-term (when (map? cmd) (:filter cmd))]
                             (cond
                               (empty? ids)
@@ -178,7 +206,9 @@
           (when (and workbench? (not (workbench-available?)))
             (.println out "  Note: workbench deps not on classpath; run with -M:workbench:run")
             (.println out "  or the workbench keys will fail at system init."))
-          (print-env-guidance! out backend)
+          ;; profile name is chosen/known by the caller; the per-profile
+          ;; var pattern is still shown generically below.
+          (print-env-guidance! out backend nil)
           (templates/normalize-settings
            {:backend      backend
             :base-url     base-url

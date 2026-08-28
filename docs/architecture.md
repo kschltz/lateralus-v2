@@ -119,7 +119,7 @@ The context is an open map. Engine state (`::chain/queue`, `::chain/stack`, `::c
 
 | Key | Set by | Read by | Meaning |
 |-----|--------|---------|---------|
-| `:exchange/session-id` | runtime | all stages | stable session identifier |
+| `:exchange/session-id` | runtime | all stages | active session identifier (switchable via workbench Sessions UI / `/session`) |
 | `:exchange/user-msg-id` | runtime | all stages | UUID for this user turn |
 | `:exchange/assistant-msg-id` | runtime | all stages | UUID for the assistant response |
 | `:exchange/user-text` | runtime | compose-context, memory plugin | the user's prompt |
@@ -374,6 +374,7 @@ session...`) is detected by the loop via that exact phrase, not the looser
 | `src/kschltz/agent/cli/spinner.clj` | CLI spinner / progress indicator |
 | `src/kschltz/agent/memory/bm25.clj` | BM25 scoring |
 | `src/kschltz/agent/memory/knowledge_graph.clj` | entity knowledge graph |
+| `src/kschltz/agent/session/` | workbench session catalog (list/switch/create/rename/delete) |
 | `src/kschltz/agent/memory/store/file.clj` | file-backed session store |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` |
 | `resources/lateralus/config.edn` | runtime default config (Proximum + LangChain4j + file/self/clojure/web :none + empty mcp-tools) |

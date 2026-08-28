@@ -49,19 +49,36 @@
 
 (defprotocol AgentRuntime
   "Thin outer-loop runtime contract."
-  (session-id [runtime] "Stable ID for the lifetime of this runtime.")
+  (session-id [runtime] "Active session id (may change via adopt-session!).")
   (send-message [runtime user-text] "Run one exchange.")
   (stop [runtime] "Return the current merged state."))
 
+(defn export-state
+  "Serializable session-scoped runtime state (no live objects)."
+  [runtime]
+  (dissoc (or @(:state runtime) {}) :agent/log-sink))
+
+(defn adopt-session!
+  "Switch this runtime onto `id`, replacing session-scoped state."
+  [runtime id state]
+  (let [base (or (:initial-state (:agent-map runtime)) {})
+        next (merge base
+                    (or state {})
+                    {:agent/session-id id})]
+    (reset! (:state runtime) next)
+    runtime))
+
 (defrecord RuntimeRecord [state agent-map session-id log-sink chain]
   AgentRuntime
-  (session-id [_] session-id)
+  (session-id [this]
+    (or (get @(:state this) :agent/session-id) session-id))
   (send-message [this user-text]
     (let [user-msg-id      (str (random-uuid))
           assistant-msg-id (str (random-uuid))
           base-state       @(:state this)
+          sid              (or (get base-state :agent/session-id) session-id)
           chain-to-run     @chain
-          ctx              {:exchange/session-id       session-id
+          ctx              {:exchange/session-id       sid
                             :exchange/user-msg-id      user-msg-id
                             :exchange/assistant-msg-id assistant-msg-id
                             :exchange/user-text        user-text

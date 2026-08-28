@@ -146,10 +146,17 @@
 
 (defn- portal-view
   [viewer-sym value]
-  (try
-    ((requiring-resolve viewer-sym) value)
-    (catch Throwable _
-      value)))
+  (let [kw (keyword "portal.viewer" (name viewer-sym))]
+    (if-let [f (try (requiring-resolve viewer-sym) (catch Throwable _ nil))]
+      (try
+        (f value)
+        (catch Throwable _
+          value))
+      ;; Portal not on the classpath (fast test suite): still tag the
+      ;; intended viewer so the viz atom carries rich-surface metadata.
+      (if (instance? clojure.lang.IObj value)
+        (with-meta value {:portal.viewer/default kw})
+        value))))
 
 (defn detect-viewer
   "Logical viewer name for tool results / UI hints."

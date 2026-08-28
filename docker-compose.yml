@@ -48,6 +48,7 @@ services:
       LATERALUS_DOCKER_OLLAMA_URL: ${LATERALUS_DOCKER_OLLAMA_URL:-http://ollama:11434/v1}
       LATERALUS_LIST_CLOUD: ${LATERALUS_LIST_CLOUD:-0}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      LATERALUS_API_KEY: ${LATERALUS_API_KEY:-}
       LATERALUS_CONFIG_HOME: /data/config
     volumes:
       - lateralus-config:/data/config

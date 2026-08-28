@@ -1,6 +1,7 @@
 (ns kschltz.agent.workbench.hub
   "In-memory workbench session: chat transcript, human inbox, portal refs."
   (:require [clojure.string :as str]
+            [kschltz.agent.session.protocol :as session]
             [kschltz.agent.stream.protocol :as stream]
             [kschltz.agent.workbench.schemas :as schemas])
   (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
@@ -10,12 +11,14 @@
 
 (defn create-hub
   "Create a fresh workbench hub atom + inbox."
-  [{:keys [session-id stream-bus]
+  [{:keys [session-id session-title stream-bus session-store]
     :or   {session-id (str (random-uuid))}}]
-  {:session-id session-id
-   :inbox      (LinkedBlockingQueue.)
-   :stream-bus stream-bus
-   :state      (atom {:session-id    session-id
+  {:session-id    session-id
+   :inbox         (LinkedBlockingQueue.)
+   :stream-bus    stream-bus
+   :session-store session-store
+   :state         (atom {:session-id    session-id
+                      :session-title (or session-title session-id)
                       :status        :idle
                       :status-detail nil
                       :turns         []
@@ -121,14 +124,40 @@
      (begin-turn! hub {:user-text (:text msg)})
      msg)))
 
+(defn set-session-title!
+  [hub title]
+  (bump! (:state hub) #(assoc % :session-title (str title))))
+
+(defn load-workspace!
+  "Replace the visible transcript with a persisted session workspace."
+  [hub {:keys [session-id title turns refs]}]
+  (when-let [q (:inbox hub)]
+    (.clear ^LinkedBlockingQueue q))
+  (bump! (:state hub)
+         (fn [s]
+           (assoc s
+                  :session-id session-id
+                  :session-title (or title session-id)
+                  :turns (vec (or turns []))
+                  :refs (into {} (or refs {}))
+                  :status :waiting
+                  :status-detail "session ready"
+                  :current-turn-id nil)))
+  hub)
+
 (defn snapshot
   "Client-facing state (no raw :value payloads)."
   [hub]
   (let [s   @(:state hub)
-        bus (:stream-bus hub)]
+        bus (:stream-bus hub)
+        sid (:session-id s)]
     (-> s
         (assoc :current-turn-id (when (stream/stream-bus? bus)
                                   (stream/-current-id bus)))
+        (assoc :session {:id    sid
+                         :title (or (:session-title s) sid)})
+        (cond-> (session/session-store? (:session-store hub))
+          (assoc :sessions (session/-list (:session-store hub))))
         (update :refs
                 (fn [refs]
                   (into {}

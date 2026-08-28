@@ -48,7 +48,9 @@
    [:app {:optional true} :boolean]
    [:window-title {:optional true} :string]
    [:open? {:optional true} :boolean]
-   [:stream-bus {:optional true} :any]])
+   [:stream-bus {:optional true} :any]
+   [:session-id {:optional true} :string]
+   [:sessions-dir {:optional true} :string]])
 
 (def PortalSubmitKind
   [:enum "html" "table" "vega" "markdown" "code" "auto"

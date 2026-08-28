@@ -56,6 +56,18 @@
       (is (string? (:current-turn-id snap)))
       (is (true? (:live? (stream.bus/snapshot b (:current-turn-id snap))))))))
 
+(deftest load-workspace-replaces-turns
+  (let [h (hub/create-hub {:session-id "old" :session-title "Old"})]
+    (hub/publish-turn! h {:role :user :text "keep me?"})
+    (hub/load-workspace! h {:session-id "new"
+                            :title "New"
+                            :turns [{:id "t1" :role :assistant :text "restored" :ts 1}]
+                            :refs {}})
+    (let [snap (hub/snapshot h)]
+      (is (= "new" (:session-id snap)))
+      (is (= "New" (get-in snap [:session :title])))
+      (is (= ["restored"] (map :text (:turns snap)))))))
+
 (deftest format-prompt-with-refs
   (testing "plain"
     (is (= "hi" (hub/format-prompt {:text "hi" :refs []}))))

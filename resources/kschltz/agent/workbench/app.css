@@ -234,6 +234,127 @@ body[data-portal-mode="float"] #portal-head {
   gap: 0.65rem;
   min-width: 0;
 }
+.session-btn {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  font: 600 11px/1.2 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.session-btn:hover { border-color: var(--accent); color: var(--accent); }
+.session-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: calc(3.2rem + var(--safe-top)) 1rem 1rem;
+  background: color-mix(in srgb, #000 45%, transparent);
+}
+.session-panel.hidden,
+.session-panel[hidden] { display: none; }
+.session-panel-card {
+  width: min(28rem, 100%);
+  max-height: min(70vh, 36rem);
+  overflow: auto;
+  background: var(--pane);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.85rem 1rem 1rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.session-panel-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+.session-panel-card h2 {
+  margin: 0;
+  font: 600 13px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.session-hint {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 12px;
+}
+.session-new {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.session-new input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+}
+.session-new button {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  font: 600 12px/1 inherit;
+}
+#session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+#session-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+#session-list li.active { border-color: var(--accent); }
+#session-list button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  font: 600 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+}
+#session-list .session-pick {
+  text-align: left;
+  border: 0;
+  color: var(--ink);
+  padding: 0;
+  font: 600 13px/1.3 inherit;
+  background: none;
+  cursor: pointer;
+}
+#session-list .session-pick small {
+  display: block;
+  color: var(--muted);
+  font: 11px/1.3 "IBM Plex Mono", ui-monospace, monospace;
+  font-weight: 400;
+}
 .details-link {
   flex: 0 0 auto;
   margin-left: auto;

@@ -20,6 +20,21 @@ fi
 
 export HOME="${HOME:-${USERPROFILE:-$ROOT}}"
 
+# ---- Per-profile API keys ------------------------------------------------
+# Profiles never store secrets; keys come from the environment:
+#   LATERALUS_PROFILE_<NAME>_API_KEY  — key for profile <NAME> only
+#   LATERALUS_API_KEY                 — any non-ollama profile
+#   OLLAMA_API_KEY                    — ollama-based profiles only
+# Any currently-set LATERALUS_PROFILE_*_API_KEY / LATERALUS_API_KEY vars
+# are forwarded into the container so each profile picks up its own key.
+forward_key_envs=()
+while IFS= read -r var; do
+  [[ -n "$var" ]] && forward_key_envs+=(-e "$var")
+done < <(env | grep -oE '^LATERALUS_PROFILE_[A-Z0-9_]+_API_KEY' | sort -u)
+if [[ -n "${LATERALUS_API_KEY:-}" ]]; then
+  forward_key_envs+=(-e "LATERALUS_API_KEY")
+fi
+
 open_browser() {
   local url="$1"
   case "$(uname -s 2>/dev/null || echo unknown)" in
@@ -179,4 +194,4 @@ echo ""
 
 LATERALUS_MODEL="$MODEL" \
   LATERALUS_DOCKER_OLLAMA_URL="$LATERALUS_DOCKER_OLLAMA_URL" \
-  "${COMPOSE[@]}" "${RUN_ARGS[@]}" lateralus -i
+  "${COMPOSE[@]}" "${RUN_ARGS[@]}" ${forward_key_envs[@]+"${forward_key_envs[@]}"} lateralus -i

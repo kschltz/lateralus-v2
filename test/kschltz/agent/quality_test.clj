@@ -52,10 +52,17 @@
 
 (deftest no-src-file-exceeds-600-loc-without-tests
   (testing "no source file exceeds 600 lines; files that do must have tests"
-    (doseq [f (src-files)]
-      (let [lines (-> f slurp str/split-lines count)]
-        (is (<= lines 600)
-            (str (.getPath f) " is " lines " lines; max allowed is 600"))))))
+    (let [test-nses (set (keep ns-from-file (test-files)))]
+      (doseq [f (src-files)]
+        (let [lines     (-> f slurp str/split-lines count)
+              src-ns    (ns-from-file f)
+              ;; A file above the cap is allowed when it has a test ns.
+              has-test? (and src-ns
+                             (contains? test-nses (test-ns-for src-ns)))]
+          (when-not has-test?
+            (is (<= lines 600)
+                (str (.getPath f) " is " lines
+                     " lines; max allowed is 600 (or add a test ns)"))))))))
 
 (deftest chain-plus-runtime-under-350-loc
   (testing "combined chain + runtime stay under the plan's 350 LOC target"

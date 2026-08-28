@@ -115,6 +115,13 @@
       (is (= sid (runtime/session-id r))
           "session-id is stored on the runtime"))))
 
+(deftest adopt-session-swaps-id-and-state
+  (let [r (runtime/start {} "alpha")]
+    (swap! (:state r) assoc :agent/token-usage {:total_tokens 9})
+    (runtime/adopt-session! r "beta" {:agent/token-usage {:total_tokens 3}})
+    (is (= "beta" (runtime/session-id r)))
+    (is (= 3 (get-in (runtime/export-state r) [:agent/token-usage :total_tokens])))))
+
 (deftest send-message-injects-traceability-ids
   (testing "send-message generates session-id, user-msg-id, assistant-msg-id
    on the per-exchange ctx"

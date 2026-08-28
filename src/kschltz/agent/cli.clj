@@ -150,10 +150,42 @@
 
 ;; ---- run-cli ----
 
+(defn- profile-key-env-name
+  "Per-profile API key env var: LATERALUS_PROFILE_<NAME>_API_KEY
+   (name uppercased, non-alphanumeric runs collapsed to `_`)."
+  [profile-name]
+  (when (not-empty profile-name)
+    (str "LATERALUS_PROFILE_"
+         (-> (str profile-name)
+             str/upper-case
+             (str/replace #"[^A-Z0-9]+" "_"))
+         "_API_KEY")))
+
+(defn- ollama-based?
+  "True when the profile targets an Ollama endpoint (by backend keyword
+   or base-url hint). Only ollama-based profiles may consume
+   OLLAMA_API_KEY; other endpoints must use their own key so the
+   Ollama key is never reused for a different provider."
+  [backend base-url]
+  (or (contains? #{:ollama-local :ollama-cloud} (some-> backend keyword))
+      (and (string? base-url) (re-find #"(?i)ollama" base-url))))
+
 (defn- env-api-key
-  "API key from the environment only — profiles never persist secrets."
-  []
-  (not-empty (System/getenv "OLLAMA_API_KEY")))
+  "API key from the environment only — profiles never persist secrets.
+   Resolution order:
+     1. LATERALUS_PROFILE_<NAME>_API_KEY  (this profile only)
+     2. LATERALUS_API_KEY                 (any backend)
+     3. OLLAMA_API_KEY                    (ollama-based profiles only)
+   A non-ollama profile never falls back to OLLAMA_API_KEY."
+  [{:keys [profile-name profile-settings]}
+   {:keys [base-url]}]
+  (or (some-> profile-name
+              profile-key-env-name
+              System/getenv
+              not-empty)
+      (not-empty (System/getenv "LATERALUS_API_KEY"))
+      (when (ollama-based? (:backend profile-settings) base-url)
+        (not-empty (System/getenv "OLLAMA_API_KEY")))))
 
 (defn- env-base-url
   "Optional Docker/ops override when CLI `--base-url` is omitted."
@@ -192,10 +224,13 @@
    Precedence: CLI flag > existing profile/config value > LATERALUS_*/OLLAMA_API_KEY.
    Profile wins over compose env so an ollama-cloud profile is not forced
    back onto the local Docker Ollama URL."
-  [m {:keys [model base-url api-key]}]
+  [m {:keys [model base-url api-key]} {:keys [profile-name profile-settings] :as _profile-ctx}]
   (let [model* (or (not-empty model) (not-empty (:model m)) (env-model))
         base*  (or (not-empty base-url) (not-empty (:base-url m)) (env-base-url))
-        key*   (or (not-empty api-key) (not-empty (:api-key m)) (env-api-key))]
+        key*   (or (not-empty api-key) (not-empty (:api-key m))
+                   (env-api-key {:profile-name profile-name
+                                 :profile-settings profile-settings}
+                                m))]
     (cond-> (dissoc m :model :base-url :api-key)
       model* (assoc :model model*)
       base*  (assoc :base-url base*)
@@ -214,7 +249,8 @@
    Integrant."
   [{:keys [model base-url api-key] :as opts}]
   (apply-llm-overrides (:lateralus/llm-client (config-base opts))
-                       {:model model :base-url base-url :api-key api-key}))
+                       {:model model :base-url base-url :api-key api-key}
+                       opts))
 
 (defn build-system
   "Build an Integrant system config from the cli options.
@@ -226,11 +262,14 @@
   [{:keys [model base-url api-key] :as opts}]
   (let [base       (config-base opts)
         overrides  {:model model :base-url base-url :api-key api-key}
-        client-llm (apply-llm-overrides (:lateralus/llm-client base) overrides)
-        config-llm (apply-llm-overrides (or (:lateralus/llm-config base) {}) overrides)]
-    (assoc base
-           :lateralus/llm-client client-llm
-           :lateralus/llm-config config-llm)))
+        profile-ctx (select-keys opts [:profile-name :profile-settings])
+        client-llm  (apply-llm-overrides (:lateralus/llm-client base) overrides profile-ctx)
+        config-llm  (apply-llm-overrides (or (:lateralus/llm-config base) {}) overrides profile-ctx)]
+    (cond-> (assoc base
+                   :lateralus/llm-client client-llm
+                   :lateralus/llm-config config-llm)
+      (and (:session-id opts) (map? (:lateralus/workbench base)))
+      (assoc-in [:lateralus/workbench :session-id] (:session-id opts)))))
 
 (defn- needs-model-selection?
   "True when the resolved LLM impl is `:http` and no `:model` is set on
@@ -404,6 +443,9 @@
         renderer   (ui/renderer-from-agent agent-map)
         workbench  (:agent/workbench agent-map)
         portal     (:agent/portal agent-map)]
+    (when workbench
+      ((requiring-resolve 'kschltz.agent.workbench.jvm/attach-runtime!)
+       workbench runtime))
     (try
       (cond
         workbench

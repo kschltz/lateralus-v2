@@ -18,6 +18,7 @@
   let pollTimer = null;
   let stickToBottom = true;
   let lastPortalUrl = null;
+  let lastSessionId = null;
   const STICK_THRESHOLD_PX = 64;
 
   function nearBottom() {
@@ -232,8 +233,10 @@
     // Drop stale snapshots — overlapping SSE/poll can reorder.
     const currentTurnId = state["current-turn-id"] || null;
     if (lastRev !== -1 && rev < lastRev) return;
+    const sessionId = (state.session && state.session.id) || null;
     if (lastRev !== -1 && rev === lastRev && nextStatus === lastStatus
-        && currentTurnId === lastCurrentTurnId) return;
+        && currentTurnId === lastCurrentTurnId
+        && sessionId === lastSessionId) return;
 
     const wasBusy = isBusy(lastStatus);
     lastRev = rev;
@@ -243,6 +246,12 @@
     renderStatus(lastStatus, detail);
     renderTurns(state.turns, lastStatus, detail, currentTurnId);
     renderHeaderDetails(state.turns, currentTurnId, lastStatus);
+    renderSessionButton(state.session);
+    if (state.session && state.session.id && state.session.id !== lastSessionId) {
+      lastSessionId = state.session.id;
+      stickToBottom = true;
+      if (sessionPanelOpen()) renderSessionList(state.sessions);
+    }
     setComposerEnabled(!busy);
     if (busy) ensureBusyPoller();
     else stopBusyPollerIfIdle();
@@ -656,7 +665,132 @@
   if (tabChat) tabChat.addEventListener("click", () => setMobilePane("chat"));
   if (tabPortal) tabPortal.addEventListener("click", () => setMobilePane("portal"));
 
+  const sessionBtn = document.getElementById("session-btn");
+  const sessionPanel = document.getElementById("session-panel");
+  const sessionList = document.getElementById("session-list");
+  const sessionTitle = document.getElementById("session-title");
+
+  function sessionPanelOpen() {
+    return sessionPanel && !sessionPanel.classList.contains("hidden");
+  }
+
+  function renderSessionButton(session) {
+    if (!sessionBtn || !session) return;
+    sessionBtn.textContent = session.title || session.id || "session";
+    sessionBtn.title = "Session " + (session.id || "");
+  }
+
+  function renderSessionList(sessions) {
+    if (!sessionList) return;
+    const rows = sessions || [];
+    sessionList.innerHTML = rows.length
+      ? rows
+          .map((s) => {
+            const active = s["active?"] || s.active;
+            return `<li class="${active ? "active" : ""}">
+              <button type="button" class="session-pick" data-act="switch" data-id="${esc(s.id)}">
+                ${esc(s.title || s.id)}${active ? " · now" : ""}
+                <small>${esc(s.preview || s.id)}</small>
+              </button>
+              <button type="button" data-act="rename" data-id="${esc(s.id)}">rename</button>
+              <button type="button" data-act="delete" data-id="${esc(s.id)}" ${active ? "disabled" : ""}>delete</button>
+            </li>`;
+          })
+          .join("")
+      : "<li>No sessions yet.</li>";
+  }
+
+  async function fetchSessions() {
+    const res = await fetch("/api/sessions", { cache: "no-store" });
+    if (!res.ok) throw new Error("sessions unavailable");
+    const body = await res.json();
+    return body.sessions || [];
+  }
+
+  async function openSessionPanel() {
+    if (!sessionPanel) return;
+    sessionPanel.hidden = false;
+    sessionPanel.classList.remove("hidden");
+    if (sessionBtn) sessionBtn.setAttribute("aria-expanded", "true");
+    try {
+      renderSessionList(await fetchSessions());
+    } catch (e) {
+      sessionList.innerHTML = `<li>${esc(e.message || "failed")}</li>`;
+    }
+  }
+
+  function closeSessionPanel() {
+    if (!sessionPanel) return;
+    sessionPanel.hidden = true;
+    sessionPanel.classList.add("hidden");
+    if (sessionBtn) sessionBtn.setAttribute("aria-expanded", "false");
+  }
+
+  async function sessionAction(path, method, body) {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      cache: "no-store",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let parsed = {};
+    try { parsed = JSON.parse(text); } catch (_) {}
+    if (!res.ok) throw new Error(parsed.error || text || "session request failed");
+    lastRev = -1;
+    await refresh();
+    if (sessionPanelOpen()) renderSessionList(await fetchSessions());
+  }
+
+  if (sessionBtn) sessionBtn.addEventListener("click", () => {
+    sessionPanelOpen() ? closeSessionPanel() : openSessionPanel();
+  });
+  on("session-close", closeSessionPanel);
+  on("session-create", async () => {
+    try {
+      await sessionAction("/api/sessions", "POST", {
+        title: (sessionTitle && sessionTitle.value.trim()) || undefined,
+      });
+      if (sessionTitle) sessionTitle.value = "";
+    } catch (e) {
+      renderStatus("error", e.message || "create failed");
+    }
+  });
+  if (sessionList) {
+    sessionList.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button[data-act]");
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const act = btn.dataset.act;
+      try {
+        if (act === "switch") {
+          await sessionAction("/api/sessions/" + encodeURIComponent(id) + "/activate", "POST");
+          closeSessionPanel();
+        } else if (act === "rename") {
+          const title = window.prompt("Rename session", btn.closest("li").querySelector(".session-pick").childNodes[0].textContent.trim());
+          if (title) await sessionAction("/api/sessions/" + encodeURIComponent(id), "PATCH", { title });
+        } else if (act === "delete") {
+          if (window.confirm("Delete this session?")) {
+            await sessionAction("/api/sessions/" + encodeURIComponent(id), "DELETE");
+          }
+        }
+      } catch (err) {
+        renderStatus("error", err.message || "session action failed");
+      }
+    });
+  }
+  if (sessionPanel) {
+    sessionPanel.addEventListener("click", (e) => {
+      if (e.target === sessionPanel) closeSessionPanel();
+    });
+  }
+
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && sessionPanelOpen()) {
+      e.preventDefault();
+      closeSessionPanel();
+      return;
+    }
     const mod = e.metaKey || e.ctrlKey;
     if (mod && (e.key === "j" || e.key === "J")) {
       e.preventDefault();

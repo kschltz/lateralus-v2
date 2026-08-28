@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>lateralus workbench</title>
-  <link rel="stylesheet" href="/app.css?v=15" />
+  <link rel="stylesheet" href="/app.css?v=18" />
 </head>
 <body data-portal-mode="split" data-mobile-pane="chat">
   <div id="shell">
@@ -15,6 +15,7 @@
       <header class="pane-head">
         <h1>CHAT</h1>
         <div class="chat-meta">
+          <button type="button" id="session-btn" class="session-btn" title="Manage sessions" aria-haspopup="dialog" aria-expanded="false">session</button>
           <a id="turn-details" class="details-link hidden" href="#" target="_blank" rel="noopener noreferrer">details ↗</a>
           <span id="status" class="meta" data-status="connecting">connecting…</span>
         </div>
@@ -68,7 +69,21 @@
     </button>
   </nav>
   <button type="button" id="portal-show" class="desktop-only" title="Show Portal (Ctrl/Cmd-J)">▸ Portal</button>
+  <div id="session-panel" class="session-panel hidden" role="dialog" aria-label="Sessions" hidden>
+    <div class="session-panel-card">
+      <header>
+        <h2>Sessions</h2>
+        <button type="button" id="session-close" class="meta-btn">close</button>
+      </header>
+      <p class="session-hint">Switch chats without restarting. History and memory stay per session.</p>
+      <div class="session-new">
+        <input id="session-title" type="text" maxlength="80" placeholder="Name a new session…" />
+        <button type="button" id="session-create">New</button>
+      </div>
+      <ul id="session-list"></ul>
+    </div>
+  </div>
   <div id="drag-shield" aria-hidden="true"></div>
-  <script src="/app.js?v=15"></script>
+  <script src="/app.js?v=18"></script>
 </body>
 </html>

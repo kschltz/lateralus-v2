@@ -5,6 +5,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [kschltz.agent.runtime :as runtime]
+            [kschltz.agent.session.manager :as sessions]
             [kschltz.agent.workbench.cite :as cite]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.protocol :as wb]))
@@ -98,6 +99,56 @@
               fixed  (guard-assistant-event repair workbench)]
           (with-turn-id (public-event fixed) repair))))))
 
+(defn- session-command?
+  [text]
+  (boolean (re-find #"(?i)^/session(?:\s|$)" (str text))))
+
+(defn- handle-session-command!
+  [runtime workbench text]
+  (let [store (:session-store workbench)
+        hub   (:hub workbench)
+        parts (vec (remove str/blank? (str/split (str text) #"\s+")))
+        verb  (str/lower-case (or (second parts) "help"))
+        arg   (str/join " " (drop 2 parts))]
+    (if-not store
+      {:role :system :text "Session catalog is not available in this workbench."}
+      (try
+        (case verb
+          ("help" "")
+          {:role :system
+           :text (str "/session list | new [title] | switch <id> | rename <title> | delete <id>")}
+
+          "list"
+          {:role :system
+           :text (str "Sessions:\n"
+                      (str/join "\n"
+                                (map (fn [s]
+                                       (str (if (:active? s) "* " "  ")
+                                            (:id s) " — " (:title s)))
+                                     (sessions/list-sessions store))))}
+
+          "new"
+          (let [s (sessions/create! store hub runtime {:title (not-empty arg)})]
+            {:role :system :text (str "Switched to new session " (:id s) " (" (:title s) ").")})
+
+          ("switch" "use")
+          (let [s (sessions/activate! store hub runtime (str/trim arg))]
+            {:role :system :text (str "Active session " (:id s) " (" (:title s) ").")})
+
+          "rename"
+          (let [cur (:session-id (hub/snapshot hub))
+                s   (sessions/rename! store hub cur arg)]
+            {:role :system :text (str "Renamed session to " (:title s) ".")})
+
+          "delete"
+          (do (sessions/delete! store hub (str/trim arg))
+              {:role :system :text (str "Deleted session " (str/trim arg) ".")})
+
+          {:role :system
+           :text (str "Unknown /session command. Try /session help.")})
+        (catch Exception e
+          {:role :error :text (or (ex-message e) "session command failed")})))))
+
 (defn- start-stdin-feeder!
   "Background thread: each stdin line is enqueued as a human message."
   [workbench in]
@@ -143,12 +194,19 @@
              (do (wb/publish! workbench {:role :system :text "Goodbye."})
                  :quit)
 
+             (session-command? trimmed)
+             (do (wb/publish! workbench
+                              (handle-session-command! runtime workbench trimmed))
+                 (recur))
+
              (seq trimmed)
              (let [h (:hub workbench)]
                (hub/set-status! h :running "model working…")
                (try
                  (let [event (run-exchange! runtime workbench prompt)]
                    (wb/publish! workbench event)
+                   (when-let [store (:session-store workbench)]
+                     (sessions/persist-current! store h runtime))
                    (hub/set-status! h :waiting "ready for your next message"))
                  (catch Throwable t
                    (wb/publish! workbench

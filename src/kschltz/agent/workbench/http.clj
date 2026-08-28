@@ -12,6 +12,7 @@
             [kschltz.agent.stream.protocol :as stream]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.schemas :as schemas]
+            [kschltz.agent.workbench.session-http :as session-http]
             [org.httpkit.server :as http-kit]))
   ;; http-kit is on the classpath only via the :workbench / :portal alias, which
   ;; is also the only path that loads this namespace (system.clj requires it
@@ -344,7 +345,7 @@
 
    Portal asset/RPC routes (`/rpc`, `/main.js`, `/?<session-uuid>`, …) are
    delegated to Portal's in-process handler so the iframe is same-origin."
-  [hub {:keys [attach-selection! on-message]}]
+  [hub {:keys [attach-selection! on-message session-ops]}]
   (fn [req]
     (let [uri    (or (:uri req) "/")
           path   (first (str/split uri #"\?"))
@@ -363,12 +364,15 @@
           (= method :options)
           {:status 204
            :headers {"Access-Control-Allow-Origin"  "*"
-                     "Access-Control-Allow-Methods" "GET,POST,OPTIONS"
+                     "Access-Control-Allow-Methods" "GET,POST,PATCH,DELETE,OPTIONS"
                      "Access-Control-Allow-Headers" "Content-Type"}
            :body ""}
 
           :else
-          (cond
+          (or
+           (when (str/starts-with? (str path) "/api/sessions")
+             (session-http/handle method path (read-json-body req) session-ops))
+           (cond
             (and (= method :get) (= path "/"))
             (static-file "index.html")
 
@@ -432,7 +436,7 @@
                 (json-response 404 {:ok false :error "no portal selection"})))
 
             :else
-            (json-response 404 {:error "not found" :path path})))
+            (json-response 404 {:error "not found" :path path}))))
         (catch clojure.lang.ExceptionInfo e
           (json-response 400 {:error (ex-message e)
                               :data  (ex-data e)}))

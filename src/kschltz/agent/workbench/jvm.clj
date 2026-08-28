@@ -2,7 +2,10 @@
   "Workbench plugin host: HTTP chat UI + Portal visualizer + agent tools.
 
    Requires the optional `:workbench` (or `:portal`) deps alias."
-  (:require [kschltz.agent.workbench.hub :as hub]
+  (:require [kschltz.agent.runtime :as runtime]
+            [kschltz.agent.session.manager :as sessions]
+            [kschltz.agent.session.store :as session.store]
+            [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.http :as http]
             [kschltz.agent.workbench.portal :as portal]
             [kschltz.agent.workbench.protocol :as proto]
@@ -32,7 +35,7 @@
       (str (subs s 0 157) "...")
       s)))
 
-(defrecord WorkbenchImpl [hub portal viz-atom portal-url http-server tools-map]
+(defrecord WorkbenchImpl [hub portal viz-atom portal-url http-server tools-map session-store runtime-atom]
   proto/Workbench
   (-url [_]
     (:url http-server))
@@ -82,7 +85,15 @@
    Portal is on the classpath, opens Portal for the iframe pane."
   [opts]
   (let [opts        (schemas/decode-config (or opts {}))
-        hub         (hub/create-hub (select-keys opts [:session-id :stream-bus]))
+        sess-store  (session.store/create-store
+                     (or (:sessions-dir opts) "sessions/workbench"))
+        session-id  (or (:session-id opts) (str (random-uuid)))
+        _           (sessions/ensure! sess-store {:id session-id :title session-id})
+        runtime-atom (atom nil)
+        hub         (hub/create-hub (assoc (select-keys opts [:stream-bus])
+                                           :session-id session-id
+                                           :session-title session-id
+                                           :session-store sess-store))
         use-portal? (and (not (false? (:portal? opts)))
                          (portal/available?))
         portal-info (when (and use-portal? (not (false? (:open? opts))))
@@ -102,13 +113,21 @@
                       :port    (or (:port opts) 7860)
                       :handler (fn [req] (@handler req))})
         tools-map   (tools/registry wb-ref)
-        record      (->WorkbenchImpl hub portal* viz-atom portal-url server tools-map)]
+        record      (->WorkbenchImpl hub portal* viz-atom portal-url server tools-map
+                                     sess-store runtime-atom)]
     (reset! wb-ref record)
     (reset! handler
             (http/make-handler
              hub
              {:attach-selection!
-              (fn [] (proto/-attach-selection! @wb-ref))}))
+              (fn [] (proto/-attach-selection! @wb-ref))
+              :session-ops
+              {:list-sessions     #(sessions/list-sessions sess-store)
+               :create-session    #(sessions/create! sess-store hub @runtime-atom %)
+               :activate-session  #(sessions/activate! sess-store hub @runtime-atom %)
+               :rename-session    #(sessions/rename! sess-store hub %1 %2)
+               :delete-session    #(sessions/delete! sess-store hub %)}}))
+    (sessions/persist-current! sess-store hub nil)
     (hub/publish-turn! hub
                        {:role :system
                         :text (str "Workbench ready — CHAT left | PORTAL right ("
@@ -124,3 +143,13 @@
     (when-not (false? (:open-browser? opts))
       (open-browser! (:url server)))
     record))
+
+(defn attach-runtime!
+  "Bind the live AgentRuntime so session switch also swaps memory/state."
+  [workbench runtime]
+  (when-let [a (:runtime-atom workbench)]
+    (reset! a runtime)
+    (when-let [store (:session-store workbench)]
+      (sessions/attach! store (:hub workbench) runtime
+                        (runtime/session-id runtime))))
+  workbench)
