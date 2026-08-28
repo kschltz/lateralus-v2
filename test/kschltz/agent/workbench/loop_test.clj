@@ -1,5 +1,6 @@
 (ns kschltz.agent.workbench.loop-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.loop :as loop]
             [kschltz.agent.workbench.protocol :as proto]))
@@ -78,3 +79,28 @@
     (is (= :error (:role event)))
     (is (re-find #"ollama cloud is disabled" (:text event)))
     (is (re-find #"HTTP 403" (:text event)))))
+
+(deftest friendly-exchange-error-maps-statuses
+  (let [http-ex (fn [status msg]
+                  (ex-info (str "LLM HTTP :http-error failed: " status)
+                           {:kind :http-error
+                            :status status
+                            :body {:error {:message msg}}}))]
+    (testing "429 explains throttling and mentions the retry"
+      (let [text (loop/friendly-exchange-error (http-ex 429 "slow down") nil)]
+        (is (str/includes? text "429"))
+        (is (str/includes? text "slow down"))
+        (is (str/includes? text "retried"))))
+    (testing "401 points at the API key"
+      (is (str/includes? (loop/friendly-exchange-error (http-ex 401 "bad key") nil)
+                         "API key")))
+    (testing "5xx says provider error, transient"
+      (is (str/includes? (loop/friendly-exchange-error (http-ex 503 "overloaded") nil)
+                         "503")))
+    (testing "transport kind"
+      (is (str/includes? (loop/friendly-exchange-error
+                          (ex-info "connection refused" {:kind :transport}) nil)
+                         "network error")))
+    (testing "result map with :error/raised gets the same treatment"
+      (let [result {:error/raised {:exception (http-ex 429 "quota")}}]
+        (is (str/includes? (loop/friendly-exchange-error nil result) "429"))))))

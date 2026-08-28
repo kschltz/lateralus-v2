@@ -306,3 +306,64 @@
         (is (= "stream-hi" (schemas/extract-text resp)))
         (is (some #{:text-delta} (map :type @events)))
         (is (some #{:llm-done} (map :type @events)))))))
+
+(defn- rate-limit-then-ok-handler
+  "First two calls return 429, then a normal 200 echo."
+  [hits]
+  (fn [req]
+    (slurp (:body req))
+    (if (< (swap! hits inc) 3)
+      {:status 429
+       :headers {"Content-Type" "application/json"
+                 "Retry-After" "0"}
+       :body (json/generate-string
+              {:error {:message "slow down" :code 429}})}
+      {:status 200
+       :headers {"Content-Type" "application/json"}
+       :body (json/generate-string
+              {:model "m" :choices [{:message {:role "assistant" :content "after-retry"}}]})})))
+
+(deftest http-retries-429-then-succeeds
+  (let [hits (atom 0)]
+    (with-fake-server
+      (rate-limit-then-ok-handler hits)
+      (fn [port]
+        (let [client (lcm-http/http-client
+                      {:base-url (str "http://127.0.0.1:" port)
+                       :model    "m"})]
+          (is (= "after-retry"
+                 (schemas/extract-text
+                  (lcm-client/-call client
+                                    {:model "m"
+                                     :messages [{:role "user" :content "x"}]}))))
+          (is (= 3 @hits) "two 429s then the 200"))))))
+
+(deftest http-429-exhausts-retries-with-provider-message
+  (let [hits (atom 0)
+        handler (fn [req]
+                  (slurp (:body req))
+                  (swap! hits inc)
+                  {:status 429
+                   :headers {"Content-Type" "application/json"
+                             "Retry-After" "0"}
+                   :body (json/generate-string
+                          {:error {:message "quota exceeded" :code 429}})})]
+    (with-fake-server
+      handler
+      (fn [port]
+        (let [client (lcm-http/http-client
+                      {:base-url (str "http://127.0.0.1:" port)
+                       :model    "m"})]
+          (try
+            (lcm-client/-call client
+                              {:model "m"
+                               :messages [{:role "user" :content "x"}]})
+            (is false "expected throw")
+            (catch clojure.lang.ExceptionInfo e
+              (let [d (ex-data e)]
+                (is (= :http-error (:kind d)))
+                (is (= 429 (:status d)))
+                ;; message carries the provider detail
+                (is (str/includes? (ex-message e) "quota exceeded"))))
+            (finally
+              (is (= 4 @hits) "1 initial + 3 retries"))))))))

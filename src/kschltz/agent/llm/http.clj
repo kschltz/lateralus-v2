@@ -74,14 +74,55 @@
     api-key (assoc "Authorization" (str "Bearer " api-key))))
 
 (defn- error-response
-  "Build an error ex-info with structured data about an HTTP failure."
+  "Build an error ex-info with structured data about an HTTP failure.
+   Includes the provider's own error message when the body carries one."
   [kind {:keys [status body]}]
   (let [parsed (try (json/parse-string body true)
-                    (catch Throwable _ body))]
-    (ex-info (str "LLM HTTP " kind " failed: " status)
+                    (catch Throwable _ body))
+        provider-msg (cond
+                       (and (map? parsed) (map? (:error parsed)))
+                       (or (not-empty (:message (:error parsed)))
+                           (not-empty (str (:error parsed))))
+
+                       (and (map? parsed) (some? (:error parsed)))
+                       (not-empty (str (:error parsed)))
+
+                       (string? parsed) (not-empty parsed)
+                       :else nil)]
+    (ex-info (str "LLM HTTP " kind " failed: " status
+                  (when provider-msg (str " — " provider-msg)))
              {:kind   kind
               :status status
               :body   parsed})))
+
+(def ^:private rate-limit-retries
+  "How many times a 429 response is retried before giving up."
+  3)
+
+(defn- retry-after-ms
+  "Honor a numeric Retry-After header (seconds), else exponential backoff."
+  [response attempt]
+  (let [ra (some-> response :headers (get "retry-after") not-empty)
+        secs (try (when ra (Long/parseLong (str/trim ra))) (catch Throwable _ nil))]
+    (long (if (and secs (pos? secs))
+            (* 1000 secs)
+            (* 1000 (Math/pow 2 (dec attempt)))))))
+
+(defn- rate-limited?
+  [response]
+  (= 429 (:status response)))
+
+(defn- post-with-retry
+  "Issue the HTTP request, transparently retrying 429 (rate limited)
+   responses with backoff (honoring Retry-After when present). Returns
+   the final response; caller maps non-2xx to error-response ex-info."
+  [request]
+  (loop [attempt 1]
+    (let [response (http/request request)]
+      (if (and (rate-limited? response) (<= attempt rate-limit-retries))
+        (do (Thread/sleep (min 15000 (retry-after-ms response attempt)))
+            (recur (inc attempt)))
+        response))))
 
 (defn normalize-base-url
   "Strip trailing slashes so `…/v1/` and `…/v1` resolve the same.
@@ -389,7 +430,7 @@
                   :request-timeout    request-timeout-ms
                   :throw-exceptions   false
                   :coerce             :always}
-        response (http/request request)]
+        response (post-with-retry request)]
     (let [status (:status response)]
       (cond
         (<= 200 status 299)
@@ -433,7 +474,7 @@
                   :request-timeout    request-timeout-ms
                   :throw-exceptions   false
                   :coerce             :always}
-        response (http/request request)
+        response (post-with-retry request)
         status   (:status response)]
     (cond
       (<= 200 status 299)

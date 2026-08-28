@@ -23,22 +23,65 @@
   [result]
   (or (:agent/all-tool-results result) (:tool/results result) []))
 
+(defn- status-hint
+  "Human explanation for an LLM HTTP status code."
+  [status]
+  (case status
+    401 "The API key was rejected (HTTP 401). Check the key for this profile."
+    403 "The provider refused the request (HTTP 403) — check API-key
+        permissions, plan, or geo availability."
+    404 "Model or endpoint not found (HTTP 404) — check the profile's model
+        name and base URL."
+    429 "The provider rate-limited the request (HTTP 429). It was retried
+        automatically and still throttled — wait a moment and try again,
+        or switch to a lighter model / different provider."
+    (if (and (int? status) (>= status 500))
+      (str "The LLM provider had a server error (HTTP " status ").
+          Usually transient — retry shortly.")
+      (str "The LLM endpoint answered HTTP " status "."))))
+
+(defn friendly-exchange-error
+  "User-facing one-liner for a failed exchange. Accepts the exception
+   (when the chain rethrew) or a result map with :error/raised."
+  [^Throwable ex result]
+  (let [data (or (when (instance? clojure.lang.ExceptionInfo ex) (ex-data ex))
+                 (when result
+                   (when-let [raised (:error/raised result)]
+                     (let [e (:exception raised)]
+                       (when (instance? clojure.lang.ExceptionInfo e) (ex-data e))))))
+        status (:status data)
+        body (:body data)
+        provider-msg (cond
+                       (map? (:error body)) (not-empty (:message (:error body)))
+                       (string? (:error body)) (not-empty (:error body))
+                       (some? (:error body)) (not-empty (str (:error body)))
+                       (string? body) (not-empty body))]
+    (cond
+      (= 429 status)
+      (str "Rate limited by the LLM provider (HTTP 429"
+           (when provider-msg (str ": " provider-msg)) ")."
+           " The request was retried automatically and still throttled."
+           " Wait a bit and try again, or switch models/providers.")
+
+      (int? status)
+      (str (status-hint status)
+           (when provider-msg (str " Provider said: " provider-msg)))
+
+      (= :transport (:kind data))
+      "Could not reach the LLM endpoint (network error). Check the
+      base URL / connectivity."
+
+      :else
+      (str "Exchange failed: "
+           (or provider-msg (some-> ex ex-message) "unknown error")))))
+
 (defn- raised-error-text
   "Human-readable text when the chain handled an LLM/tool throw via
    `:error/raised` (e.g. Ollama Cloud 403) — otherwise workbench looked
    like a silent empty reply."
   [result]
   (when-let [raised (:error/raised result)]
-    (let [ex   (:exception raised)
-          data (when (instance? clojure.lang.ExceptionInfo ex) (ex-data ex))
-          body (:body data)
-          detail (cond
-                   (and (map? body) (:error body)) (str (:error body))
-                   (string? body) body
-                   (ex-message ex) (ex-message ex)
-                   :else "unknown error")]
-      (str "Exchange failed: " detail
-           (when (:status data) (str " (HTTP " (:status data) ")"))))))
+    (friendly-exchange-error (:exception raised) result)))
 
 (defn- raw-assistant-text
   [result]
@@ -209,13 +252,10 @@
                      (sessions/persist-current! store h runtime))
                    (hub/set-status! h :waiting "ready for your next message"))
                  (catch Throwable t
+                 (let [msg (friendly-exchange-error t nil)]
                    (wb/publish! workbench
-                                {:role :error
-                                 :text (str "Exchange failed: "
-                                            (or (ex-message t)
-                                                (.getName (class t))))})
-                   (hub/set-status! h :error
-                                    (or (ex-message t) "exchange failed"))))
+                                {:role :error :text msg})
+                   (hub/set-status! h :error msg))))
                (recur))
 
              :else
