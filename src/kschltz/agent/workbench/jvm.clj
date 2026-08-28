@@ -126,7 +126,23 @@
                :create-session    #(sessions/create! sess-store hub @runtime-atom %)
                :activate-session  #(sessions/activate! sess-store hub @runtime-atom %)
                :rename-session    #(sessions/rename! sess-store hub %1 %2)
-               :delete-session    #(sessions/delete! sess-store hub %)}}))
+               :delete-session    #(sessions/delete! sess-store hub %)}
+              :settings-ops
+              {:view-fn   (fn []
+                            (when-let [r @runtime-atom]
+                              (require 'kschltz.agent.workbench.settings-http)
+                              ((resolve 'kschltz.agent.workbench.settings-http/settings-view) r)))
+               :apply-fn  (fn [op]
+                            (if-let [r @runtime-atom]
+                              (do (require 'kschltz.agent.workbench.settings-http)
+                                  ((resolve 'kschltz.agent.workbench.settings-http/apply-op!)
+                                   hub r op))
+                              {:ok false :error "runtime not attached yet"}))
+               :models-fn (fn [q]
+                            (if-let [r @runtime-atom]
+                              (do (require 'kschltz.agent.workbench.settings-http)
+                                  ((resolve 'kschltz.agent.workbench.settings-http/list-models) r q))
+                              {:models [] :error "runtime not attached yet"}))}}))
     (sessions/persist-current! sess-store hub nil)
     (hub/publish-turn! hub
                        {:role :system

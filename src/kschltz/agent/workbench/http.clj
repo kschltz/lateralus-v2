@@ -345,7 +345,7 @@
 
    Portal asset/RPC routes (`/rpc`, `/main.js`, `/?<session-uuid>`, …) are
    delegated to Portal's in-process handler so the iframe is same-origin."
-  [hub {:keys [attach-selection! on-message session-ops]}]
+  [hub {:keys [attach-selection! on-message session-ops settings-ops]}]
   (fn [req]
     (let [uri    (or (:uri req) "/")
           path   (first (str/split uri #"\?"))
@@ -372,6 +372,29 @@
           (or
            (when (str/starts-with? (str path) "/api/sessions")
              (session-http/handle method path (read-json-body req) session-ops))
+           (when (str/starts-with? (str path) "/api/settings")
+             (when settings-ops
+               (cond
+                 (and (= method :get) (= path "/api/settings"))
+                 (json-response ((:view-fn settings-ops)))
+
+                 (and (= method :post) (= path "/api/settings"))
+                 (let [body*  (read-json-body req)
+                       op    (cond-> (:op body*)
+                               (map? (:op body*)) (update :op keyword))
+                       result ((:apply-fn settings-ops) op)]
+                   (if (:ok result)
+                     (json-response result)
+                     (json-response 400 result)))
+
+                 (and (= method :get) (= path "/api/settings/models"))
+                 (let [q    (parse-query uri)
+                       view ((:models-fn settings-ops)
+                             {:base-url (:base-url q)
+                              :api-key  (:api-key q)})]
+                   (if (seq (:error view))
+                     (json-response 400 view)
+                     (json-response view))))))
            (cond
             (and (= method :get) (= path "/"))
             (static-file "index.html")

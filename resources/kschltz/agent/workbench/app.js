@@ -785,10 +785,243 @@
     });
   }
 
+  // ---- Settings panel ----
+  const settingsBtn = document.getElementById("settings-btn");
+  const settingsPanel = document.getElementById("settings-panel");
+  const settingsStatus = document.getElementById("settings-status");
+
+  function settingsOpen() {
+    return settingsPanel && !settingsPanel.classList.contains("hidden");
+  }
+
+  function setSettingsStatus(msg, cls) {
+    if (!settingsStatus) return;
+    settingsStatus.textContent = msg || "";
+    settingsStatus.className = "field-status" + (cls ? " " + cls : "");
+  }
+
+  async function fetchSettings() {
+    const res = await fetch("/api/settings", { cache: "no-store" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "settings unavailable");
+    return body;
+  }
+
+  async function postSettingsOp(op) {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ op }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) {
+      throw new Error(body.error || "settings update failed");
+    }
+    return body;
+  }
+
+  function renderSettings(view) {
+    if (!view) return;
+    const $ = (id) => document.getElementById(id);
+    const llm = view.llm || {};
+    if ($("set-model")) $("set-model").value = llm.model || "";
+    if ($("set-base-url")) $("set-base-url").value = llm["base-url"] || "";
+    if ($("set-api-key")) $("set-api-key").value = "";
+    if ($("set-system-message")) $("set-system-message").value = view["system-message"] || "";
+    const loop = view["loop-opts"] || {};
+    if ($("set-max-loop-depth")) $("set-max-loop-depth").value = loop["max-loop-depth"] || "";
+    if ($("set-max-tool-calls-per-exchange")) $("set-max-tool-calls-per-exchange").value = loop["max-tool-calls-per-exchange"] || "";
+    if ($("set-max-tool-calls-per-turn")) $("set-max-tool-calls-per-turn").value = loop["max-tool-calls-per-turn"] || "";
+    if ($("set-tool-schema-mode")) $("set-tool-schema-mode").value = loop["tool-schema-mode"] || "";
+    const mem = view["memory-policy"] || {};
+    if ($("set-memory-top-y")) $("set-memory-top-y").value = mem["top-y"] ?? "";
+    if ($("set-memory-last-n")) $("set-memory-last-n").value = mem["last-n"] ?? "";
+    if ($("set-memory-recall")) $("set-memory-recall").checked = mem["recall-enabled"] ?? true;
+    if ($("set-memory-persist")) $("set-memory-persist").checked = mem["persist-enabled"] ?? true;
+    const list = document.getElementById("tools-list");
+    if (list) {
+      const tools = view.tools || [];
+      list.innerHTML = tools.length
+        ? tools
+            .map((t) => {
+              const desc = esc(t.description || "");
+              const prot = t.protected ? ' disabled title="protected tool"' : "";
+              return `<li>
+                <span class="tool-name">${esc(t.name)}</span>
+                <span class="tool-desc" title="${desc}">${desc}</span>
+                <button type="button" class="meta-btn tool-toggle" data-tool="${esc(t.name)}"
+                  data-enabled="${t.enabled ? "1" : "0"}"${prot}>
+                  ${t.enabled ? "on" : "off"}
+                </button>
+              </li>`;
+            })
+            .join("")
+        : "<li><span class='tool-desc'>No tools registered.</span></li>";
+    }
+  }
+
+  async function openSettingsPanel() {
+    if (!settingsPanel) return;
+    settingsPanel.hidden = false;
+    settingsPanel.classList.remove("hidden");
+    if (settingsBtn) settingsBtn.setAttribute("aria-expanded", "true");
+    setSettingsStatus("loading…");
+    try {
+      renderSettings(await fetchSettings());
+      setSettingsStatus("");
+    } catch (e) {
+      setSettingsStatus(e.message || "failed to load settings", "err");
+    }
+  }
+
+  function closeSettingsPanel() {
+    if (!settingsPanel) return;
+    settingsPanel.hidden = true;
+    settingsPanel.classList.add("hidden");
+    if (settingsBtn) settingsBtn.setAttribute("aria-expanded", "false");
+  }
+
+  if (settingsBtn) {
+    settingsBtn.addEventListener("click", () => {
+      settingsOpen() ? closeSettingsPanel() : openSettingsPanel();
+    });
+  }
+  on("settings-close", closeSettingsPanel);
+
+  function numOrNull(el) {
+    if (!el) return undefined;
+    const raw = (el.value || "").trim();
+    if (raw === "") return undefined;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  on("settings-save-llm", async () => {
+    const $ = (id) => document.getElementById(id);
+    const op = { op: "set-llm" };
+    const model = ($("set-model") && $("set-model").value.trim()) || "";
+    const baseUrl = ($("set-base-url") && $("set-base-url").value.trim()) || "";
+    const apiKey = ($("set-api-key") && $("set-api-key").value.trim()) || "";
+    if (model) op.model = model;
+    if (baseUrl) op["base-url"] = baseUrl;
+    if (apiKey) op["api-key"] = apiKey;
+    if (!model && !baseUrl && !apiKey) {
+      setSettingsStatus("nothing to change", "err");
+      return;
+    }
+    try {
+      await postSettingsOp(op);
+      setSettingsStatus("model/endpoint applied ✓", "ok");
+    } catch (e) {
+      setSettingsStatus(e.message || "failed", "err");
+    }
+  });
+
+  on("settings-save-system", async () => {
+    const el = document.getElementById("set-system-message");
+    if (!el) return;
+    try {
+      await postSettingsOp({ op: "set-system-message", message: el.value });
+      setSettingsStatus("system message applied ✓", "ok");
+    } catch (e) {
+      setSettingsStatus(e.message || "failed", "err");
+    }
+  });
+
+  on("settings-save-loop", async () => {
+    const $ = (id) => document.getElementById(id);
+    const op = { op: "set-loop-opts" };
+    const depth = numOrNull($("set-max-loop-depth"));
+    const perExchange = numOrNull($("set-max-tool-calls-per-exchange"));
+    const perTurn = numOrNull($("set-max-tool-calls-per-turn"));
+    if (depth !== undefined) op["max-loop-depth"] = depth;
+    if (perExchange !== undefined) op["max-tool-calls-per-exchange"] = perExchange;
+    if (perTurn !== undefined) op["max-tool-calls-per-turn"] = perTurn;
+    const mode = ($("set-tool-schema-mode") && $("set-tool-schema-mode").value) || "";
+    if (mode) op["tool-schema-mode"] = mode;
+    if (depth === undefined && perExchange === undefined && perTurn === undefined && !mode) {
+      setSettingsStatus("nothing to change", "err");
+      return;
+    }
+    try {
+      await postSettingsOp(op);
+      setSettingsStatus("loop policy applied ✓", "ok");
+    } catch (e) {
+      setSettingsStatus(e.message || "failed", "err");
+    }
+  });
+
+  on("settings-save-memory", async () => {
+    const $ = (id) => document.getElementById(id);
+    const op = { op: "set-memory-policy" };
+    const topY = numOrNull($("set-memory-top-y"));
+    const lastN = numOrNull($("set-memory-last-n"));
+    if (topY !== undefined) op["top-y"] = topY;
+    if (lastN !== undefined) op["last-n"] = lastN;
+    if ($("set-memory-recall")) op["recall-enabled"] = !!$("set-memory-recall").checked;
+    if ($("set-memory-persist")) op["persist-enabled"] = !!$("set-memory-persist").checked;
+    try {
+      await postSettingsOp(op);
+      setSettingsStatus("memory policy applied ✓", "ok");
+    } catch (e) {
+      setSettingsStatus(e.message || "failed", "err");
+    }
+  });
+
+  on("settings-list-models", async () => {
+    const $ = (id) => document.getElementById(id);
+    const dl = document.getElementById("model-options");
+    const status = document.getElementById("model-list-status");
+    if (!dl) return;
+    const params = new URLSearchParams();
+    const baseUrl = ($("set-base-url") && $("set-base-url").value.trim()) || "";
+    const apiKey = ($("set-api-key") && $("set-api-key").value.trim()) || "";
+    if (baseUrl) params.set("base-url", baseUrl);
+    if (apiKey) params.set("api-key", apiKey);
+    if (status) status.textContent = "listing models…";
+    try {
+      const res = await fetch("/api/settings/models?" + params.toString(), { cache: "no-store" });
+      const body = await res.json();
+      if (!res.ok || body.error) throw new Error(body.error || "listing failed");
+      dl.innerHTML = (body.models || [])
+        .map((m) => `<option value="${esc(m)}"></option>`)
+        .join("");
+      if (status) status.textContent = `${(body.models || []).length} models`;
+    } catch (e) {
+      if (status) status.textContent = e.message || "listing failed";
+    }
+  });
+
+  if (settingsPanel) {
+    settingsPanel.addEventListener("click", async (e) => {
+      if (e.target === settingsPanel) {
+        closeSettingsPanel();
+        return;
+      }
+      const btn = e.target.closest("button.tool-toggle");
+      if (!btn) return;
+      const tool = btn.dataset.tool;
+      const enabled = btn.dataset.enabled !== "1";
+      btn.disabled = true;
+      try {
+        await postSettingsOp({ op: "set-tool-enabled", "tool-name": tool, enabled });
+        btn.dataset.enabled = enabled ? "1" : "0";
+        btn.textContent = enabled ? "on" : "off";
+        setSettingsStatus(`${tool} ${enabled ? "enabled" : "disabled"} ✓`, "ok");
+      } catch (err) {
+        setSettingsStatus(err.message || "failed", "err");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && sessionPanelOpen()) {
+    if (e.key === "Escape" && (sessionPanelOpen() || settingsOpen())) {
       e.preventDefault();
       closeSessionPanel();
+      closeSettingsPanel();
       return;
     }
     const mod = e.metaKey || e.ctrlKey;

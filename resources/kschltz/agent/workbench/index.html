@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>lateralus workbench</title>
-  <link rel="stylesheet" href="/app.css?v=18" />
+  <link rel="stylesheet" href="/app.css?v=19" />
 </head>
 <body data-portal-mode="split" data-mobile-pane="chat">
   <div id="shell">
@@ -16,6 +16,7 @@
         <h1>CHAT</h1>
         <div class="chat-meta">
           <button type="button" id="session-btn" class="session-btn" title="Manage sessions" aria-haspopup="dialog" aria-expanded="false">session</button>
+          <button type="button" id="settings-btn" class="session-btn" title="Runtime settings" aria-haspopup="dialog" aria-expanded="false">settings</button>
           <a id="turn-details" class="details-link hidden" href="#" target="_blank" rel="noopener noreferrer">details ↗</a>
           <span id="status" class="meta" data-status="connecting">connecting…</span>
         </div>
@@ -83,7 +84,70 @@
       <ul id="session-list"></ul>
     </div>
   </div>
+  <div id="settings-panel" class="session-panel hidden" role="dialog" aria-label="Runtime settings" hidden>
+    <div class="session-panel-card settings-card">
+      <header>
+        <h2>Settings</h2>
+        <button type="button" id="settings-close" class="meta-btn">close</button>
+      </header>
+      <p class="session-hint">Applies to the current session immediately (same allowlisted transitions the agent's config tools use). Secrets stay in memory.</p>
+
+      <details open>
+        <summary>Model &amp; endpoint</summary>
+        <label>Model <span class="inline-btns"><button type="button" id="settings-list-models" class="meta-btn">list models</button></span></label>
+        <input id="set-model" type="text" placeholder="model id" list="model-options" />
+        <datalist id="model-options"></datalist>
+        <div id="model-list-status" class="field-status"></div>
+        <label>Base URL</label>
+        <input id="set-base-url" type="text" placeholder="https://…/v1" />
+        <label>API key <small>(leave blank to keep current)</small></label>
+        <input id="set-api-key" type="password" placeholder="paste to replace" autocomplete="off" />
+        <button type="button" id="settings-save-llm" class="save-btn">Apply model / endpoint</button>
+      </details>
+
+      <details>
+        <summary>System message</summary>
+        <textarea id="set-system-message" rows="4" placeholder="system prompt"></textarea>
+        <button type="button" id="settings-save-system" class="save-btn">Apply system message</button>
+      </details>
+
+      <details>
+        <summary>Loop policy</summary>
+        <div class="grid2">
+          <label>Max loop depth <input id="set-max-loop-depth" type="number" min="1" /></label>
+          <label>Tool calls / exchange <input id="set-max-tool-calls-per-exchange" type="number" min="1" /></label>
+          <label>Tool calls / turn <input id="set-max-tool-calls-per-turn" type="number" min="1" /></label>
+          <label>Tool schema mode
+            <select id="set-tool-schema-mode">
+              <option value="">(current)</option>
+              <option value="full">full</option>
+              <option value="compact">compact</option>
+            </select>
+          </label>
+        </div>
+        <button type="button" id="settings-save-loop" class="save-btn">Apply loop policy</button>
+      </details>
+
+      <details>
+        <summary>Memory policy</summary>
+        <div class="grid2">
+          <label>Recall top-y <input id="set-memory-top-y" type="number" min="0" /></label>
+          <label>Recent last-n <input id="set-memory-last-n" type="number" min="0" /></label>
+          <label><input id="set-memory-recall" type="checkbox" /> Recall enabled</label>
+          <label><input id="set-memory-persist" type="checkbox" /> Persist enabled</label>
+        </div>
+        <button type="button" id="settings-save-memory" class="save-btn">Apply memory policy</button>
+      </details>
+
+      <details>
+        <summary>Tools</summary>
+        <ul id="tools-list" class="tools-list"></ul>
+      </details>
+
+      <div id="settings-status" class="field-status" role="status"></div>
+    </div>
+  </div>
   <div id="drag-shield" aria-hidden="true"></div>
-  <script src="/app.js?v=18"></script>
+  <script src="/app.js?v=19"></script>
 </body>
 </html>

@@ -56,6 +56,9 @@
    :agent/tool-registry on the context."
   [registry mcp-session factory-session]
   {:name ::seed-registry
+   ;; Plain-data handle so UI/tooling can enumerate the static registry
+   ;; without replaying an exchange (see workbench settings HTTP).
+   :registry registry
    :slot :guard
    :enter (fn [ctx]
             (when (factory.proto/runtime-tool-store? factory-session)
