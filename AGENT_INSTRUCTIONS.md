@@ -4,13 +4,16 @@
 
 - **Active goal:** `goals/lateralus-v2-rewrite/goal.md` → `facts.md` → `plan.md`
 - **Follow-up goal (MCP client tools):** `goals/mcp-client-tools/goal.md` → `plan.md`
-- **MCP client tool:** `docs/mcp.md` (`tools.mcp`, `:lateralus/mcp-tools`, stdio servers, air-gapped default)
+- **MCP client tool:** `docs/mcp.md` (`tools.mcp`, `:lateralus/mcp-tools`, stdio + Streamable HTTP servers, air-gapped default)
 - **Architecture overview:** `docs/architecture.md`
-- **Interceptor-chain design note (superseded thesis):** `docs/interceptor-loop-design-note.md`
 - **Web tool:** `docs/web.md` (`tools.web`, `:none` default, `:mojeek`/`:ddg` opt-in, `:lateralus/web-tools` Integrant key)
+- **Runtime tool factory + workflow engine:** `docs/runtime-tools.md` (`tool_define`/`tool_promote`, `:lateralus/factory-tools`, `:needs`/`:produces` artifact DAGs, `:lateralus/workflow-tools`)
+- **Workbench (CHAT | Portal) + 2-way Portal loop:** `docs/workbench-2way.md` (`workbench/` ns group, `portal_*` tools, `/api/portal-event` call-back, `portal_selected` read-back, settings/secrets/sessions HTTP surfaces)
 - **Session config / transitions:** `docs/transitions.md` (`transitions`, `set_llm_config` + `list_llm_models`, `ModelCatalog`, `:lateralus/config-tools`)
 - **Follow-up goal (dynamic MCP tool setup):** `goals/dynamic-mcp-tool-setup/goal.md` → `plan.md` — design: `docs/dynamic-mcp-tool-setup.md`
 - **Runtime-eval tool:** `docs/runtime-eval.md` (`tools.runtime`, `clojure_eval` + `clojure_add_lib` + `clojure_loaded_libs`, `ClojureRuntime` protocol, `:lateralus/runtime-tools` Integrant key)
+- **Skill packs:** `docs/skills.md` (`kschltz.agent.skills`, `:lateralus/skills-store` + `:lateralus/skills-plugin`, `.edn` skill schema, progressive disclosure)
+- **Secrets plugin:** `docs/secrets.md` (`kschltz.agent.secrets`, `:lateralus/secret-store` + `:lateralus/secret-plugin`, use-without-seeing)
 - **Network boundary matrix:** `docs/network-boundaries.md` (protocol isolation + Malli instrumentation)
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)
@@ -31,11 +34,18 @@ All agent behavior flows through an **interceptor chain** on an **immutable cont
 | Agent ns | `kschltz.agent.*` |
 | Integrant config | `resources/lateralus/config.edn` |
 
-Portable v1 seed: `chain.clj`, `plugin.clj`, `interceptors/schema.clj`, `interceptors.clj`, `context.clj`, `llm/client.clj`, `exchange.clj` — rewrite interceptors to remove `loop/` delegation.
+Portable v1 seed namesakes: `chain.clj`, `plugin.clj`, `interceptors/schema.clj`, `interceptors.clj`, `llm/client.clj` — v1 `context.clj` / `exchange.clj` were dissolved into `runtime.clj` + the chain stages.
 
-## MVP Scope
+## Scope (past MVP — current reality)
 
-Core loop (tool-calling loop in base plugin, empty registry by default, filesystem tools in example configs) + session memory (`MemoryBackend` protocol with noop and Proximum implementations; runtime default is Proximum + LangChain4j in-process ONNX embedder) + clean-slate CLI + JVM distributable. GraalVM native-image is implemented (Step 9). No v1 tools in MVP. **No Datalevin in MVP.**
+The MVP is complete; the system now ships: the tool-calling loop in the base
+plugin, Proximum HNSW + LangChain4j ONNX memory defaults (KG + BM25 for
+native-image), the interactive workbench (sessions/settings/secrets UI), the
+2-way Portal loop, web tools with SSRF/injection guards, MCP client +
+mid-session `mcp_*` management tools, the runtime tool factory, the workflow
+artifact engine, secrets and skills plugins (both opt-in), and the full
+file/clojure filesystem+structured-edit harness. GraalVM native-image is
+implemented (Step 9). No v1 tools. **No Datalevin.**
 
 ## Verify
 
@@ -66,11 +76,22 @@ Follow `goals/lateralus-v2-rewrite/plan.md` step order. No feature ships without
 
 ## MVP status
 
-- Steps 1–6, 7–8, and 10 are implemented.
-- Step 6 ships the memory plugin interceptors, a noop `MemoryBackend`, and a **Proximum** HNSW backend with **LangChain4j in-process ONNX embedding** as the JVM runtime default. A **KG + BM25** backend is the native-image default.
-- Step 9 (GraalVM native-image) is implemented using the KG + BM25 backend and a noop HTTP embedder, with Proximum / LangChain4j sources excluded from the filtered native classpath.
-- Step 10 (docs + quality gate) is complete.
+- Steps 1–10 are implemented (bootstrap → docs + quality gate).
+- Step 6 ships the memory plugin interceptors and the **Proximum** HNSW /
+  **LangChain4j in-process ONNX** JVM defaults; **KG + BM25** is the
+  native-image default.
+- Step 9 (GraalVM native-image) uses the KG + BM25 backend, with Proximum /
+  LangChain4j / live web sources excluded from the filtered native classpath.
+- Recent work: workbench secrets-management UI (`/api/secrets`, values never
+  served back), `portal_selected` + `/api/portal-event` 2-way Portal loop,
+  skills + secrets plugins (Malli-closed, fail-closed, opt-in), dynamic tool
+  factory + workflow engine.
 
 ## Doc freshness policy
 
-When a Kanban card changes architecture (new Integrant keys, plugin slots, protocol surface, default config, or tool surface), update `docs/architecture.md`, `README.md`, and the relevant tool doc (`docs/web.md` for web tools, `docs/mcp.md` for MCP client tools, `docs/memory-v2.md` for memory) before advancing the card.
+When a Kanban card changes architecture (new Integrant keys, plugin slots,
+protocol surface, default config, or tool surface), update
+`docs/architecture.md`, `README.md`, and the relevant tool doc (`docs/web.md`
+for web tools, `docs/mcp.md` for MCP client tools, `docs/memory-v2.md` for
+memory, `docs/secrets.md` for secrets, `docs/skills.md` for skills,
+`docs/workbench-2way.md` for the Portal loop) before advancing the card.

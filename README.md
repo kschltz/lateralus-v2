@@ -4,7 +4,8 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 
 **Coord:** `net.clojars.kschltz/lateralus-v2`  
 **Main ns:** `kschltz.lateralus`  
-**License:** [Eclipse Public License 2.0](LICENSE)
+**License:** [Eclipse Public License 2.0](LICENSE)  
+**Suite:** 940 tests / 3,142 assertions, green; `clj-kondo` 0 errors
 
 ## Quick start
 
@@ -27,12 +28,19 @@ clojure -M:workbench:run -i
 
 # One-shot / help
 clojure -M:run -h
-clojure -M:run "Explain recursion"
+clojure -M:run --config resources/lateralus/demo-stub.edn "Explain recursion"
 
 # Tests
-clojure -M:test
-clojure -M:e2e
-LATERALUS_E2E_FAKE=true clojure -M:e2e
+clojure -M:test                            # full suite (excludes ^:e2e)
+clojure -M:e2e                             # live-LLM memory e2e (auto-skips w/o Ollama)
+LATERALUS_E2E_FAKE=true clojure -M:e2e     # deterministic fake-server e2e
+```
+
+The default `resources/lateralus/config.edn` expects a reachable Ollama at
+`http://localhost:11434/v1`. Without Ollama, run offline with the bundled stub:
+
+```bash
+clojure -M:run --config resources/lateralus/demo-stub.edn "your prompt"
 ```
 
 Profiles are saved under `~/.config/lateralus/` (override with `LATERALUS_CONFIG_HOME`).
@@ -58,9 +66,8 @@ Flags:
 When `--config` is omitted on a TTY, lateralus always opens the **profile gate**
 (pick / create / edit a saved profile; Enter keeps current values). Editing also
 shows a **tool-group checklist** (`j`/`k` move, space/`t` toggle, Enter accept).
-Model prompts
-accept `?` (list catalog) and `/term` (filter), backed by the endpoint’s `/v1/models`
-(and Ollama Cloud when keyed).
+Model prompts accept `?` (list catalog) and `/term` (filter), backed by the
+endpoint's `/v1/models` (and Ollama Cloud when keyed).
 
 Examples:
 
@@ -90,96 +97,140 @@ clojure -M:run \
 Lateralus v2 is built on three ideas:
 
 1. **Interceptor chain engine** — every stage of an exchange (compose, LLM call, parse, dispatch, persist, deliver) is a pure function of an immutable context map.
-2. **Integrant lifecycles** — the LLM client, embedder, memory backend, and plugins are Integrant-managed components.
+2. **Integrant lifecycles** — the LLM client, embedder, memory backend, plugins, and optional stores (secrets, skills) are Integrant-managed components, Malli-validated at init (`ig/assert-key`).
 3. **Thin outer runtime** — `kschltz.agent.runtime` creates a per-exchange context with traceability IDs, runs the chain, and merges `:agent/state-delta` into an in-memory atom.
 
 For details, see [`docs/architecture.md`](docs/architecture.md).
 
-## Session config tools
+## Built-in tool suite
 
-The agent can change its own LLM session knobs mid-run via staged
-**transitions** (not by mutating the runtime atom from a tool):
+The default registries give the model, among others:
 
-- `set_llm_config` — update `:model`, `:base-url`, and/or `:api-key` for the
-  rest of the session; applies before the next LLM call (including ReAct
-  follow-ups in the same exchange).
-- `set_system_message` — replace the durable system instruction through the
-  transition/state-delta path.
-- `set_loop_policy` — update allowlisted loop depth, tool-call, and
-  per-tool-content limits for the current and later exchanges.
-- `set_tool_enabled` — enable or disable any pre-registered static or MCP tool
-  for the session; recovery/introspection tools remain protected.
-- `set_memory_policy` — tune recall breadth or disable recall/persistence
-  without replacing the Integrant-managed backend or embedder.
-- `reload_runtime` — after source edits, reload allowlisted agent namespaces
-  and rebuild Integrant-assembled built-in plugins for the next exchange;
-  core engine/protocol changes report `restart-required`.
-- `list_llm_models` — list models at the current (or overridden) endpoint
-  behind the `ModelCatalog` protocol.
+| Group | Tools |
+|-------|-------|
+| Filesystem | `file_read` (windowed, SHA-256 witness), `file_list`, `file_info`, `file_glob`, `file_search`, `file_create`, `file_write`, `file_update`, `file_patch` |
+| Clojure structured edit | `clojure_query`, `clojure_add_require`, `clojure_remove_def`, `clojure_rename_symbol`, `clojure_insert_form`, `clojure_edit_def`, `clojure_format_file`, `clojure_lint` |
+| Runtime eval | `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` |
+| Web | `web_search`, `web_fetch`, `web_extract` |
+| Session config | `set_llm_config`, `set_system_message`, `set_loop_policy`, `set_tool_enabled`, `set_memory_policy`, `list_llm_models`, `reload_runtime` |
+| Introspection | `self_status`, `runtime_describe` |
+| Dynamic tools | `tool_define`, `tool_list_runtime`, `tool_forget`, `tool_promote` |
+| Workflows | `workflow_register_action`, `workflow_seed`, `workflow_run`, `workflow_status`, `workflow_clear` |
+| Workbench/Portal | `portal_submit`, `portal_clear`, `portal_selected`, `portal_focus` |
+| MCP management | `mcp_list_servers`, `mcp_upsert_server`, `mcp_refresh_server`, `mcp_remove_server` |
+| Secrets (opt-in) | `secret_list_handles` |
+| Skills (opt-in) | `load_skill`, `read_skill_file` |
 
-Wired via `:lateralus/config-tools` (`:catalog :http` or `:stub`). See
-[`docs/transitions.md`](docs/transitions.md).
+## Session transitions
 
-### Runtime tools for the model itself
+The agent changes its own session knobs via staged **transitions** (never by
+mutating the runtime atom from a tool): `set_llm_config`, `set_system_message`,
+`set_loop_policy`, `set_tool_enabled`, `set_memory_policy`, and
+`reload_runtime` (reload allowlisted agent namespaces after source edits and
+rebuild the Integrant-assembled plugin chain; core engine changes report
+`restart-required`). Wired via `:lateralus/config-tools`. The same knobs are
+exposed to the human as the workbench **Settings** panel
+(`GET/POST /api/settings`). See [`docs/transitions.md`](docs/transitions.md)
+and [`docs/runtime-tools.md`](docs/runtime-tools.md).
 
-These tools exist so the model can operate on its own runtime — reconfigure,
-retune, and reload without a restart. The same knobs are exposed to the human
-as the collapsible **Settings** menu in the workbench CHAT header
-(`GET/POST /api/settings`, backed by the same allowlisted transitions).
+## Workbench (CHAT | Portal)
 
-A screen recording of this self-service runtime in use (user upload):
-[`Gravacao.de.Tela.2026-08-28.as.16.53.28.mov`](https://github.com/kschltz/lateralus-v2/releases/download/workbench-demo/Gravacao.de.Tela.2026-08-28.as.16.53.28.mov)
-— the agent listing its tools, inspecting its runtime, and editing its own
-session config live via the workbench.
+An http-kit web UI served by `kschltz.agent.workbench`, with Portal as the
+rich visual pane. Session persistence, settings, and secrets are all managed
+from the UI; each is backed by an HTTP surface with its own ops map:
+
+- **Sessions** — `/api/sessions` (list / create / activate / rename / delete)
+- **Settings** — `/api/settings`: LLM config, system message, loop policy,
+  memory policy, per-tool enable/disable, model listing (`/api/settings/models`)
+- **Secrets** — `/api/secrets`: add/replace/delete secrets from **Settings →
+  Secrets** in the UI; the API returns labels only, values never come back.
+  The store is the same `SecretStore` the secrets plugin wraps tools with,
+  so a value saved in the UI is immediately usable as `{{secret:label}}`
+  (opt-in wiring shown in `resources/lateralus/demo-workbench.edn`).
+
+### Workbench 2-way Portal loop
+
+Portal artifacts are interactive. An HTML artifact submitted with
+`portal_submit` may embed a tiny JS helper that POSTs interaction events
+(button clicks, sliders, form input) to `/api/portal-event` (same-origin
+iframe); the event becomes `⟨portal-event⟩` input to the agent's next
+exchange, and the agent responds with an updated artifact that shows the new
+state. `portal_selected` covers the complementary "human points at data"
+read-back — it pulls the value currently selected in the Portal pane into the
+conversation, serialized as clamped EDN. Trust model: events are
+human-initiated data only (the model authors the JS, the human clicks) — no
+`portal.api/register!` or UI-runtime eval is exposed. See
+[`docs/workbench-2way.md`](docs/workbench-2way.md).
+
+## Secrets plugin (use-without-seeing)
+
+Opt-in plugin (`:lateralus/secret-store` + `:lateralus/secret-plugin`) backed
+by a sealed, encrypted-at-rest store (AES-256-GCM, PBKDF2, `LATSEC1` format,
+passphrase via env var). The model references secrets with
+`{{secret:label}}` handles: values are substituted into tool arguments at
+dispatch and every tool result is swept through redaction — values circulate
+in-process but never enter a prompt or tool result. `secret_list_handles`
+shows the model which labels exist; there is no read-back tool. Every
+response path is redacted; the workbench UI and HTTP API never serve a value.
+See [`docs/secrets.md`](docs/secrets.md).
+
+## Skill packs
+
+Pure-data, on-disk skills (`.edn`) with progressive disclosure, so skill
+bodies never sit in the system prompt: a Tier-1 **catalog fragment**
+(name + description only) is appended to the context by the skills plugin;
+`load_skill` fetches a body into the conversation (trimmable); Tier-3
+resources load on demand via `read_skill_file` with undeclared-path gating
+before canonical containment. Malli-closed schemas, fail-closed dir loading
+(one bad file fails init loudly), byte-stable sorted catalog. Opt-in via
+`:lateralus/skills-store` + `:lateralus/skills-plugin`. See
+[`docs/skills.md`](docs/skills.md).
 
 ## Web tool
 
-The agent now ships `web_search`, `web_fetch`, and `web_extract` tools. The
-default provider is `:none`, so **no API key, no paid service, and no network
-I/O** are required out of the box. `web_extract` still works on raw HTML in
-air-gapped mode. Live web access is opt-in via `:provider :mojeek` or `:provider :ddg`.
-
-The `:mojeek` provider parses Mojeek's public HTML result pages with
-`hickory`. The `:ddg` provider queries DuckDuckGo's `html.duckduckgo.com/html`
-endpoint with a browser TLS/HTTP2 fingerprint (`impersonator-okhttp`) so DDG
-returns real HTML instead of a CAPTCHA page. Both are JVM-only and excluded
-from the GraalVM native-image classpath; `resources/lateralus/native.edn` pins
-`:provider :none`.
-
-All three ops are guarded against SSRF (private/loopback/metadata IPs,
-`file://`, protocol-relative URLs), prompt-injection markers, recursive
+The agent ships `web_search`, `web_fetch`, and `web_extract`. The default
+provider is `:none` — **no API key, no paid service, and no network I/O** out
+of the box (`web_extract` still works on raw HTML in air-gapped mode). Live
+access is opt-in via `:provider :mojeek` (parses Mojeek's public HTML) or
+`:provider :ddg` (DuckDuckGo HTML with a browser TLS/HTTP2 fingerprint).
+Both live providers are JVM-only and excluded from the native-image
+classpath. All three ops are guarded against SSRF (private/loopback/metadata
+IPs, `file://`, protocol-relative URLs), prompt-injection markers, recursive
 self-activation, and snippet exfiltration patterns. See [`docs/web.md`](docs/web.md).
 
 ## Runtime-eval tool
 
-The agent ships a Clojure runtime-eval suite for prototyping: it can write
-Clojure code and actually run it, then pull in missing dependencies at
-runtime without a JVM restart.
+The agent can evaluate Clojure and pull dependencies at runtime:
 
-- `clojure_eval` — evaluate Clojure source in a **persistent** runtime
-  namespace (`def`s and `require`s persist across calls). Returns the
-  last form's value, captured stdout, and any exception. Each call is
-  bounded by a configurable timeout so runaway loops are cancelled.
-- `clojure_add_lib` — load a Maven (or Git) dependency onto the live
-  classpath via Clojure 1.12's `clojure.repl.deps/add-libs`. After it
- returns, `require` the new namespaces from `clojure_eval`.
-- `clojure_loaded_libs` — list the libs currently loaded in the JVM.
+- `clojure_eval` — evaluate in a **persistent** runtime namespace; returns the
+  value, captured stdout, and any exception; bounded timeout per call.
+- `clojure_add_lib` — Maven/Git dependency loading via Clojure 1.12
+  `clojure.repl.deps/add-libs`.
+- `clojure_loaded_libs` — list libs loaded in-process.
 
-The suite sits behind the `ClojureRuntime` protocol with a
-Malli-instrumented network boundary, and is wired via the
-`:lateralus/runtime-tools` Integrant key (enabled by default in the JVM
-config; excluded from native-image). It runs arbitrary Clojure in-process
-— set `:enabled? false` to disable it, or `:network? false` to keep eval
-but block runtime dependency loading. See [`docs/runtime-eval.md`](docs/runtime-eval.md).
+Behind the `ClojureRuntime` protocol, Malli-instrumented, wired via
+`:lateralus/runtime-tools` (JVM configs; excluded from native-image).
+`{ :enabled? false }` disables it; `:network? false` keeps eval but blocks
+dependency loading. See [`docs/runtime-eval.md`](docs/runtime-eval.md).
 
-```clojure
-:lateralus/runtime-tools {:enabled? true :network? true}
-```
+## Runtime tool factory + workflows
+
+`tool_define` compiles a real protocol `Tool` mid-session (callable on the
+next turn), `tool_list_runtime` inventories ephemeral + promoted names,
+`tool_forget` drops one, `tool_promote` explicitly writes on-disk Tool +
+plugin source (`target=workspace|project`). This is the bridge between
+`clojure_eval` scratch code and persistent capabilities — see
+[`docs/runtime-tools.md`](docs/runtime-tools.md).
+
+`:lateralus/workflow-tools` is an in-process artifact engine: actions declare
+`:needs` / `:produces` artifact sets, `workflow_run` schedules and executes
+the DAG, `workflow_register_action` / `workflow_seed` / `workflow_status` /
+`workflow_clear` manage specs. Specs persist on `:agent/runtime-tools` in
+`:agent/state-delta`.
 
 ## File harness
 
-The default tool registry includes bounded, line-numbered file reads and safe
-create/write/update operations:
+Bounded, line-numbered reads and safe create/write/update operations:
 
 - `file_read` returns a window, continuation metadata, and a SHA-256 witness.
 - `file_list` is deterministic and bounded; all read/discovery tools enforce
@@ -191,38 +242,32 @@ create/write/update operations:
   stale, overlapping, out-of-range, binary, or invalid-Clojure patches make
   zero writes.
 - `file_write` accepts `expected-sha256` to reject stale full-file replacements.
-- `file_create` is create-only; it never silently overwrites an existing file.
+- `file_create` is create-only.
 
 All mutations use canonical workspace containment (including symlink
-resolution), blocked-path checks, per-path locks, size/omission guards, atomic
-moves, and write verification. Replacement writes also create timestamped
-backups. These tools enter through the same `Tool` dispatch interceptor as
-every other agent capability.
-
-The `clojure_*` structured-edit tools use the same mutation guarantees while
-preserving comments and whitespace through rewrite-clj. They reject non-
-Clojure targets, workspace/symlink escapes, blocked paths, and stale
-read-transform-write attempts with structured JSON errors.
-`clojure_lint` provides bounded, read-only clj-kondo findings after edits and
-returns a structured optional-capability error when clj-kondo is unavailable.
+resolution), blocked-path checks, per-path locks, size/omission guards,
+atomic moves, and write verification; replacement writes create timestamped
+backups. The `clojure_*` structured-edit tools give the same guarantees via
+rewrite-clj; `clojure_lint` provides bounded, read-only clj-kondo findings
+after edits.
 
 ## Runtime introspection
 
-`runtime_describe` exposes the active runtime as redacted structured data. It
-can return the session summary and loop policy, registered tool contracts, the
-ordered interceptor chain, or all three. API keys and live implementation
-objects are never serialized. The tool reads the immutable per-exchange
-context; it does not bypass the transition/state-delta model.
+`runtime_describe` exposes the active runtime as redacted structured data —
+session summary + loop policy, registered tool contracts, the ordered
+interceptor chain — reading the immutable per-exchange context. API keys and
+live implementation objects are never serialized. `self_status` is the
+lighter self-check sibling (used by the self-update playbook after reloads).
 
-## MCP client tools
+## MCP client
 
-Lateralus can attach **stdio** MCP servers (Claude Desktop / Cursor
-`command` / `args` / `env`) and **remote Streamable HTTP** MCP endpoints
-(`:url` + optional Bearer/headers). Default config is air-gapped
-(`:servers {}`). Opt in via `:lateralus/mcp-tools`; tools are discovered at
-Integrant init, remapped to portable prefixed ids (`filesystem_read_file`),
-and closed on halt. Remote URLs are SSRF-checked (https-only; loopback
-blocked unless opted in). See [`docs/mcp.md`](docs/mcp.md).
+Attaches **stdio** MCP servers (`command`/`args`/`env`) and **remote
+Streamable HTTP** endpoints (`:url` + optional Bearer/headers). Default is
+air-gapped (`:servers {}`). Tools are discovered at Integrant init, remapped
+to portable prefixed ids (`filesystem_read_file`), and closed on halt; mid-
+session upsert/refresh/remove is available via the `mcp_*` tools and the
+`:lateralus/mcp-session-tools` component. Remote URLs are SSRF-checked
+(https-only; loopback blocked unless opted in). See [`docs/mcp.md`](docs/mcp.md).
 
 ```clojure
 :lateralus/mcp-tools
@@ -237,9 +282,10 @@ blocked unless opted in). See [`docs/mcp.md`](docs/mcp.md).
 
 ## Memory backend
 
-The runtime Integrant config (`resources/lateralus/config.edn`) now wires a **Proximum** HNSW memory backend and a **LangChain4j** in-process ONNX embedder (`all-MiniLM-L6-v2`, 384 dimensions) by default. Session memory (recent + semantic recall) works out of the box in one-shot mode.
-
-To disable memory and restore the noop behavior:
+The runtime default (`resources/lateralus/config.edn`) is a **Proximum** HNSW
+memory backend with a **LangChain4j** in-process ONNX embedder
+(`all-MiniLM-L6-v2`, 384 dims) — session memory (recent + semantic recall)
+works out of the box. To disable memory, restore noop components:
 
 ```clojure
 {:lateralus/embedder       {:method :noop}
@@ -257,13 +303,11 @@ To make memory durable across JVM restarts, add a file-backed `:store`:
           :id #uuid "465df026-fcd3-4cb3-be44-29a929776250"}}}
 ```
 
-See [`docs/memory-v2.md`](docs/memory-v2.md) for the full configuration reference.
-
-Requirements:
-- Java 22+
-- JVM flags `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED` (baked into the `:run`, `:workbench`, `:test`, and uberjar launcher — no manual `-J` flags needed)
-
-**Note:** LangChain4j in-process embedding uses ONNX and native tokenizer libraries, so it is **not compatible with GraalVM native-image**. For native-image, switch to an HTTP embedder.
+See [`docs/memory-v2.md`](docs/memory-v2.md) for the full reference.
+Requirements: Java 22+; the `jdk.incubator.vector` JVM flags are baked into
+the `:run`, `:workbench`, `:test`, and uberjar launcher. LangChain4j in-process
+embedding uses ONNX and is **not compatible with GraalVM native-image** — the
+native config uses the pure-Clojure **KG + BM25** backend and a noop embedder.
 
 ## Docker
 
@@ -295,24 +339,14 @@ This produces:
 - `target/lateralus-v2` — executable launcher script
 - Docker image `lateralus-v2-lateralus` via compose
 
-### End-to-end memory tests
+### End-to-end tests
 
-A separate `^:e2e` namespace exercises a real HTTP LlmClient, the
-LangChain4j embedder, and the Proximum backend against a local Ollama
-instance. Defaults:
-
-- base URL: `http://localhost:11434/v1`
-- model: `glm5.1:cloud`
-
-Run it with:
+A separate `^:e2e` namespace exercises a real HTTP LlmClient, the LangChain4j
+embedder, and the Proximum backend against a local Ollama instance (default
+`http://localhost:11434/v1`, model `glm5.1:cloud`):
 
 ```bash
 clojure -M:e2e
-```
-
-Override with env vars:
-
-```bash
 LATERALUS_E2E_MODEL=llama3.1:latest LATERALUS_E2E_BASE_URL=http://localhost:11434/v1 clojure -M:e2e
 ```
 
@@ -322,150 +356,140 @@ For deterministic assertions without a real LLM, use the bundled fake server:
 LATERALUS_E2E_FAKE=true clojure -M:e2e
 ```
 
-The interceptor/runtime/file harness has a deterministic offline scenario:
+Live-LLM and list-models e2e tests auto-skip when Ollama is unreachable.
+The interceptor/runtime/file harness has a deterministic offline scenario
+(it initializes the production Integrant graph, then drives runtime
+introspection, policy/tool transitions, deferred reload, `file_read`, and a
+hash-anchored `file_patch` through the real ReAct interceptor chain):
 
 ```bash
 clojure -M:e2e:workbench -n kschltz.agent.runtime-harness-e2e-test
 ```
 
-It initializes the production Integrant graph, then drives runtime
-introspection, policy/tool transitions, deferred reload, `file_read`, and a
-hash-anchored `file_patch` through the real ReAct interceptor chain.
+MCP live e2e:
 
-The default `clojure -M:test` and `clojure -T:build test` exclude these
-slow integration tests.
+```bash
+LATERALUS_E2E_MCP=live clojure -M:e2e -n kschltz.agent.tools.mcp.mcp-e2e-test
+```
+
+The default `clojure -M:test` and `clojure -T:build test` exclude these slow
+integration tests.
 
 ### GraalVM native-image
 
 The `:native` alias builds a self-contained executable that excludes the
-JVM-only Proximum HNSW backend and the LangChain4j in-process ONNX embedder.
-Instead it uses the pure-Clojure **KG + BM25 memory backend** and the bundled
-**stub LLM** (or an HTTP LLM when `--model`/`--base-url` are supplied).
+JVM-only Proximum HNSW backend, the LangChain4j embedder, and the live web
+providers. Instead it uses the KG + BM25 memory backend and the bundled stub
+LLM (or an HTTP LLM when `--model`/`--base-url` are supplied).
 
-Requirements:
-- [GraalVM JDK](https://www.graalvm.org/downloads/) installed locally
-- `GRAALVM_HOME` exported
-
-Build:
+Requirements: [GraalVM JDK](https://www.graalvm.org/downloads/) and
+`GRAALVM_HOME` exported. Build:
 
 ```bash
 export GRAALVM_HOME=/path/to/graalvm
 clojure -T:native native
-```
-
-The binary is written to `target/lateralus-v2-native`. Run it with the native
-config:
-
-```bash
 ./target/lateralus-v2-native --config resources/lateralus/native.edn "hello"
-echo "one-shot via stdin" | ./target/lateralus-v2-native --config resources/lateralus/native.edn
 ```
 
 What the build does:
-- Creates `target/lateralus-v2-native.jar` from a filtered classpath that omits
-  `src/kschltz/agent/memory/proximum_backend.clj`,
-  `src/kschltz/agent/memory/langchain4j_embedding.clj`,
-  `src/kschltz/agent/tools/web/mojeek.clj`, and
-  `src/kschltz/agent/tools/web/ddg.clj`.
+- Creates `target/lateralus-v2-native.jar` from a filtered classpath omitting
+  `proximum_backend.clj`, `langchain4j_embedding.clj`, `mojeek.clj`, and
+  `ddg.clj`.
 - Compiles Clojure with `-Dclojure.compiler.direct-linking=true` and
   `*warn-on-reflection*` enabled.
-- Invokes `native-image` with `--features=clj_easy.graal_build_time.InitClojureClasses`
-  so Clojure classes are initialized at build time correctly.
+- Invokes `native-image` with `--features=clj_easy.graal_build_time.InitClojureClasses`.
 
-Notes and limitations:
-- The default `resources/lateralus/config.edn` still selects Proximum +
-  LangChain4j for the normal JVM run. Native-image users must pass
-  `--config resources/lateralus/native.edn`.
-- The native config uses a **noop embedder**; memory recall is keyword-based
-  (BM25 + small KG). If you need dense embeddings in native-image, configure
-  an HTTP embedder (`:method :http`) in a custom config.
-- The binary has not been exercised on CI in this repository yet; manual
-  verification on a host with GraalVM is required.
+Notes:
+- Native-image users must pass `--config resources/lateralus/native.edn`.
+- The native config uses a **noop embedder**; recall is keyword-based
+  (BM25 + small KG). For dense embeddings in native-image, configure an HTTP
+  embedder (`:method :http`).
+- The binary has not been exercised on CI; manual verification on a host with
+  GraalVM is required.
 
 ## Project structure
 
 | Path | Description |
 |------|-------------|
-| [`goals/lateralus-v2-rewrite/`](goals/lateralus-v2-rewrite/) | Active goal — facts, plan, interview artifacts |
-| [`docs/architecture.md`](docs/architecture.md) | Architecture overview, component graph, and plugin slot vocabulary |
-| [`docs/interceptor-loop-design-note.md`](docs/interceptor-loop-design-note.md) | Historical interceptor-chain thesis (superseded, kept for context) |
+| [`goals/`](goals/) | Goal folders (facts / plan / interview artifacts): `lateralus-v2-rewrite` (active), `mcp-client-tools`, `dynamic-mcp-tool-setup`, `clojure-structured-edit-tools`, `lateralus-file-editing`, `interceptor-runtime-file-harness` |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture overview, component graph, plugin slot vocabulary |
+| [`docs/transitions.md`](docs/transitions.md) | Staged state transitions + session-config tools |
+| [`docs/runtime-tools.md`](docs/runtime-tools.md) | Runtime tool factory (`tool_define`/`tool_promote`) + workflow artifact engine |
+| [`docs/runtime-eval.md`](docs/runtime-eval.md) | `clojure_eval` / `clojure_add_lib` / `clojure_loaded_libs` |
+| [`docs/web.md`](docs/web.md) | Web tools: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
+| [`docs/mcp.md`](docs/mcp.md) | MCP client tools: stdio + Streamable HTTP, naming, guards, e2e |
+| [`docs/workbench-2way.md`](docs/workbench-2way.md) | Portal 2-way loop: `portal_selected` read-back, `/api/portal-event` callback, trust model |
+| [`docs/secrets.md`](docs/secrets.md) | Secrets plugin: `{{secret:label}}` handles, sealed AES-GCM store, workbench UI/API |
+| [`docs/skills.md`](docs/skills.md) | Skill packs: Malli-enforced `.edn` skills, tiered progressive disclosure |
 | [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
-| [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and current `:kg-bm25` default |
-| [`docs/web.md`](docs/web.md) | Web tool design: `:none` default, `:mojeek`/`:ddg` opt-in, guards, native-image story |
-| [`docs/transitions.md`](docs/transitions.md) | Staged state transitions + `set_llm_config` / `list_llm_models` |
+| [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and the `:kg-bm25` native default |
+| [`docs/network-boundaries.md`](docs/network-boundaries.md) | Protocol isolation + Malli instrumentation matrix |
+| [`docs/stream.md`](docs/stream.md) | Streaming bus design |
+| [`docs/transitions.md`](docs/transitions.md) | Transition algebra reference |
 | [`docs/dynamic-mcp-tool-setup.md`](docs/dynamic-mcp-tool-setup.md) | Exploration: mid-session MCP tool setup via transitions |
-| [`docs/runtime-eval.md`](docs/runtime-eval.md) | Runtime-eval tool suite: `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` |
-| [`docs/mcp.md`](docs/mcp.md) | MCP client tools: stdio servers, naming, guards, offline/live e2e |
 | [`src/kschltz/lateralus.clj`](src/kschltz/lateralus.clj) | `-main` entry point; delegates to CLI |
 | [`src/kschltz/agent/cli.clj`](src/kschltz/agent/cli.clj) | Argument parsing, Integrant init/halt, runtime invocation |
 | [`src/kschltz/agent/cli/spinner.clj`](src/kschltz/agent/cli/spinner.clj) | CLI spinner / progress indicator |
+| [`src/kschltz/agent/cli/profile/`](src/kschltz/agent/cli/profile/) | Interactive AWS-style profile gate + tool-group checklist |
 | [`src/kschltz/agent/runtime.clj`](src/kschltz/agent/runtime.clj) | Outer loop: ctx creation + chain call + state merge |
+| [`src/kschltz/agent/runtime_reload.clj`](src/kschltz/agent/runtime_reload.clj) | Allowlisted namespace reload + chain rebuild |
 | [`src/kschltz/agent/system.clj`](src/kschltz/agent/system.clj) | Integrant component definitions, default config, Malli `ig/assert-key` validation |
 | [`src/kschltz/agent/chain.clj`](src/kschltz/agent/chain.clj) | Interceptor engine |
 | [`src/kschltz/agent/plugin.clj`](src/kschltz/agent/plugin.clj) | Plugin assembly and slot-order contract |
 | [`src/kschltz/agent/plugins/base.clj`](src/kschltz/agent/plugins/base.clj) | Default base plugin with the standard exchange chain |
 | [`src/kschltz/agent/plugins/memory.clj`](src/kschltz/agent/plugins/memory.clj) | Memory plugin: recall (`:enrich`) and persist (`:persist`) |
 | [`src/kschltz/agent/plugins/tools.clj`](src/kschltz/agent/plugins/tools.clj) | Tool plugin: seeds `:agent/tool-registry` |
-| [`src/kschltz/agent/loop.clj`](src/kschltz/agent/loop.clj) | Tool-calling loop interceptors |
+| [`src/kschltz/agent/plugins/secrets.clj`](src/kschltz/agent/plugins/secrets.clj) | Secrets plugin: `:guard` tool wrap + redaction sweep |
+| [`src/kschltz/agent/plugins/skills.clj`](src/kschltz/agent/plugins/skills.clj) | Skills plugin: catalog in compose slot + tool registration |
+| [`src/kschltz/agent/plugins/summarizer.clj`](src/kschltz/agent/plugins/summarizer.clj) | Summarizer plugin (context compaction) |
+| [`src/kschltz/agent/plugins/workbench.clj`](src/kschltz/agent/plugins/workbench.clj) | CHAT \| Portal workbench plugin |
+| [`src/kschltz/agent/workbench/`](src/kschltz/agent/workbench/) | Workbench implementation: `hub`, `http`, `portal`, `jvm`, settings/sessions/secrets HTTP, tools, guidance |
+| [`src/kschltz/agent/secrets.clj`](src/kschltz/agent/secrets.clj) | `SecretStore` protocol, sealed-file store, substitution + redaction |
+| [`src/kschltz/agent/skills.clj`](src/kschltz/agent/skills.clj) | Skills: Malli schema, fail-closed loader, catalog + tools |
 | [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
 | [`src/kschltz/agent/transitions.clj`](src/kschltz/agent/transitions.clj) | Allowlisted state-transition algebra |
-| [`src/kschltz/agent/transitions/interceptors.clj`](src/kschltz/agent/transitions/interceptors.clj) | Harvest/apply transition interceptors |
-| [`src/kschltz/agent/tools/config.clj`](src/kschltz/agent/tools/config.clj) | `set_llm_config` + `list_llm_models` tools |
-| [`src/kschltz/agent/tools/config/catalog.clj`](src/kschltz/agent/tools/config/catalog.clj) | `ModelCatalog` protocol (HTTP / stub) |
-| [`src/kschltz/agent/tools/filesystem.clj`](src/kschltz/agent/tools/filesystem.clj) | Read-only filesystem `Tool` implementations |
-| [`src/kschltz/agent/tools/runtime/protocol.clj`](src/kschltz/agent/tools/runtime/protocol.clj) | `ClojureRuntime` protocol (runtime-eval boundary) |
-| [`src/kschltz/agent/tools/runtime/schemas.clj`](src/kschltz/agent/tools/runtime/schemas.clj) | Runtime-eval Malli schemas + config |
-| [`src/kschltz/agent/tools/runtime/jvm.clj`](src/kschltz/agent/tools/runtime/jvm.clj) | In-process `ClojureRuntime` impl (eval + `add-libs`), Malli-instrumented |
-| [`src/kschltz/agent/tools/runtime/tools.clj`](src/kschltz/agent/tools/runtime/tools.clj) | `clojure_eval`, `clojure_add_lib`, `clojure_loaded_libs` Tool implementations |
-| [`src/kschltz/agent/tools/web/protocol.clj`](src/kschltz/agent/tools/web/protocol.clj) | `WebProvider` protocol |
-| [`src/kschltz/agent/tools/web/schemas.clj`](src/kschltz/agent/tools/web/schemas.clj) | Web tool Malli schemas |
-| [`src/kschltz/agent/tools/web/guards.clj`](src/kschltz/agent/tools/web/guards.clj) | URL/query/snippet guard pipeline |
-| [`src/kschltz/agent/tools/web/none.clj`](src/kschltz/agent/tools/web/none.clj) | `:none` provider (air-gapped default) |
-| [`src/kschltz/agent/tools/web/mojeek.clj`](src/kschltz/agent/tools/web/mojeek.clj) | `:mojeek` live provider (JVM-only, opt-in) |
-| [`src/kschltz/agent/tools/web/ddg.clj`](src/kschltz/agent/tools/web/ddg.clj) | `:ddg` live provider (JVM-only, opt-in; impersonator TLS fingerprint) |
-| [`src/kschltz/agent/tools/web/web.clj`](src/kschltz/agent/tools/web/web.clj) | `web_search`, `web_fetch`, `web_extract` Tool implementations |
+| [`src/kschltz/agent/tools/`](src/kschltz/agent/tools/) | Tool namespaces: `filesystem.clj`, `config/`, `runtime/`, `web/`, `workflow/`, plus MCP tool glue |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |
-| [`src/kschltz/agent/llm/client.clj`](src/kschltz/agent/llm/client.clj) | `LlmClient` protocol + stub + HTTP wrapper |
-| [`src/kschltz/agent/llm/schemas.clj`](src/kschltz/agent/llm/schemas.clj) | OpenAI-shaped request/response Malli schemas |
-| [`src/kschltz/agent/memory/protocol.clj`](src/kschltz/agent/memory/protocol.clj) | `MemoryBackend` protocol |
-| [`src/kschltz/agent/memory/embedding.clj`](src/kschltz/agent/memory/embedding.clj) | `Embedder` protocol + noop implementation |
-| [`src/kschltz/agent/memory/http_embedding.clj`](src/kschltz/agent/memory/http_embedding.clj) | OpenAI-compatible HTTP `Embedder` |
-| [`src/kschltz/agent/memory/langchain4j_embedding.clj`](src/kschltz/agent/memory/langchain4j_embedding.clj) | LangChain4j in-process ONNX `Embedder` |
-| [`src/kschltz/agent/memory/proximum_backend.clj`](src/kschltz/agent/memory/proximum_backend.clj) | Proximum HNSW `MemoryBackend` |
-| [`src/kschltz/agent/memory/kg_bm25.clj`](src/kschltz/agent/memory/kg_bm25.clj) | KG + BM25 `MemoryBackend` facade |
-| [`src/kschltz/agent/memory/bm25.clj`](src/kschltz/agent/memory/bm25.clj) | BM25 scoring |
-| [`src/kschltz/agent/memory/knowledge_graph.clj`](src/kschltz/agent/memory/knowledge_graph.clj) | Entity knowledge graph |
-| [`src/kschltz/agent/memory/store/file.clj`](src/kschltz/agent/memory/store/file.clj) | File-backed store for KG-BM25 |
-| [`src/kschltz/agent/memory/noop_backend.clj`](src/kschltz/agent/memory/noop_backend.clj) | noop `MemoryBackend` |
+| [`src/kschltz/agent/llm/`](src/kschltz/agent/llm/) | `LlmClient` protocol, stub + HTTP impl, OpenAI-shaped schemas |
+| [`src/kschltz/agent/memory/`](src/kschltz/agent/memory/) | `MemoryBackend`/`Embedder` protocols + Proximum, KG-BM25, LangChain4j, HTTP, noop impls |
 | [`resources/lateralus/config.edn`](resources/lateralus/config.edn) | JVM runtime default config (Proximum + LangChain4j + file-tools) |
-| [`resources/lateralus/native.edn`](resources/lateralus/native.edn) | Native-image runtime config (KG-BM25 + noop embedder + file-tools) |
+| [`resources/lateralus/native.edn`](resources/lateralus/native.edn) | Native-image config (KG-BM25 + noop embedder + file-tools) |
+| [`resources/lateralus/demo-workbench.edn`](resources/lateralus/demo-workbench.edn) | Ollama + CHAT \| Portal workbench profile (with commented secrets opt-in) |
+| [`resources/lateralus/`](resources/lateralus/) | Other runnable profiles (Ollama local/cloud, MCP, native, stub) |
 | [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) | Short contributor guide |
 
 ## Status
 
-Implemented:
-- Steps 1–5: bootstrap, chain engine, plugin system, Integrant system, real HTTP-backed `LlmClient` + Malli schemas
-- Step 6: memory plugin interceptors + noop `MemoryBackend`; **Proximum HNSW backend** + **LangChain4j in-process ONNX embedder** as the JVM runtime default; **KG + BM25 backend** as the native-image default
-- Step 7: agent outer loop + traceability (synchronous MVP design)
-- Step 8: clean-slate CLI
-- Step 9: **GraalVM native-image build** with the KG + BM25 backend and a filtered classpath that excludes JVM-only Proximum / LangChain4j sources
-- Step 10: docs, JVM distributable, quality-gate tests
+Implemented steps 1–10: bootstrap, chain engine, plugin system, Integrant
+system with Malli pre-init validation, HTTP-backed `LlmClient`, memory plugin
+with Proximum HNSW + LangChain4j ONNX defaults (KG + BM25 for native), the
+tool-calling loop, clean-slate CLI with interactive profile gate, GraalVM
+native-image build, docs and quality-gate tests.
 
 Recently completed:
-- [006] Replace shallow state merge with deep `merge-state`
-- [007] Pre-wire dependencies into context instead of `bind-llm-client`
-- [008] Refactor KG-BM25 backend into focused namespaces
-- [009] Add Malli pre-init validation to Integrant components (`ig/assert-key` for `:lateralus/llm-client`, `:lateralus/embedder`, and `:lateralus/memory-backend`)
-- [011] Promote tool-calling loop into the base plugin + filesystem tools example
-- [web] Revive web tool: `:none` default, `:mojeek`/`:ddg` opt-in live providers, full guard pipeline (SSRF/UA/redirect), Integrant wiring, docs
-- [runtime-eval] Clojure runtime-eval tool suite: `clojure_eval` (persistent runtime ns + timeout), `clojure_add_lib` (Clojure 1.12 runtime dependency loading), `clojure_loaded_libs`, behind the `ClojureRuntime` protocol with a Malli-instrumented network boundary
+- **Workbench CHAT \| Portal** — session persistence, settings UI (LLM/system/
+  loop/memory/tools), secrets-management UI, live tool panel; `settings_http`,
+  `session_http`, `secrets_http` surfaces
+- **Portal 2-way loop** — `portal_selected` read-back and `/api/portal-event`
+  artifact call-back; interactive-artifact guidance
+- **Secrets plugin** — sealed `LATSEC1` store, `{{secret:label}}` substitution,
+  output redaction sweep, `secret_list_handles`, opt-in Integrant wiring
+- **Skill packs** — `.edn` skills with Malli-closed schema, tiered progressive
+  disclosure (`load_skill` / `read_skill_file`), fail-closed loading
+- **Runtime tool factory + workflow engine** — `tool_define`/`tool_promote`,
+  `:needs`/`:produces` artifact DAG scheduling
+- **MCP client + management tools** — stdio + Streamable HTTP, mid-session
+  upsert/refresh/remove, SSRF guards
+- Dynamic tool setup (`dynamic-mcp-tool-setup` goal), Clojure structured-edit
+  tools, interceptor/runtime/file harness e2e
 
 Deferred:
 - Async worker thread for the runtime
-- Environment-variable support for `LATERALUS_V2_*`
-- Multi-agent communication plugin (`docs/file-backed-comms-plan-consensus.md`)
+- Tier-3 *scripts in skills* (skill-declared scripts executed via existing
+  shell/eval tools so stdout enters context without script text)
+- Multi-agent communication plugin
 
 ## License
 

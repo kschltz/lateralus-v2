@@ -1,5 +1,6 @@
 (ns kschltz.agent.workbench.hub-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [kschltz.agent.stream.bus :as stream.bus]
             [kschltz.agent.workbench.hub :as hub]))
 
@@ -77,3 +78,25 @@
               :refs [{:id "abc" :preview "{:x 1}" :label "table"}]})]
       (is (re-find #"@portal/abc" s))
       (is (re-find #"table" s)))))
+
+(deftest portal-event-roundtrip
+  "portal-event lands in the transcript AND the inbox, so a running
+   session loop sees it exactly like a human message."
+  (let [h (hub/create-hub {:session-id "pe-test"})]
+    (let [res (hub/portal-event! h {:control "vote" :value "yes"})]
+      (is (true? (:ok res))))
+    (is (= ["⟨portal-event⟩ {\"control\":\"vote\",\"value\":\"yes\"}"]
+           (->> (hub/snapshot h) :turns (map :text) (filter #(str/starts-with? % "⟨portal-event⟩")))))
+    (let [msg (with-open [_ (java.io.StringWriter.)]
+                (hub/await-human! h {:timeout-ms 2000}))]
+      (is (str/starts-with? (:text msg) "⟨portal-event⟩"))
+      (is (str/includes? (:text msg) "vote")))))
+
+(deftest portal-event-validation
+  (let [h (hub/create-hub {:session-id "pev-test"})]
+    (is (thrown? clojure.lang.ExceptionInfo (hub/portal-event! h "not-a-map")))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (hub/portal-event! h {:blob (vec (range 5000))}))
+        "oversized serialized payload rejected")
+    (let [n (count ((comp :turns deref :state) h))]
+      (is (zero? n) "rejected events never reach the transcript"))))

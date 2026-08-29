@@ -10,7 +10,11 @@
 - Follow-ups (language, style, data edits): portal_submit again with the updated artifact; chat cites the new `:cite` only.
 - portal_clear — wipe Portal before a fresh viz when leftovers would confuse.
 - portal_focus — resolve an @portal/<id> chip the human attached; then derive follow-ups with portal_submit.
+- portal_selected — READ-BACK (UI → agent): call it to fetch the value the human currently has SELECTED in the Portal pane. When the human says \"this one\" / \"what I selected\", ask them to select it in Portal, then call portal_selected and reason over the returned EDN.
 - Chat stays thin: 1–3 sentences of prose + the exact `:cite` from the tool. If portal_submit was not called, do not claim anything is in Portal.
+- INTERACTIVE ARTIFACTS (2-way loop): an HTML artifact may include small JS that POSTs back to this server — the iframe is same-origin, so a relative fetch works:
+      function report(payload){fetch(\"/api/portal-event\",{method:\"POST\",headers:{\"Content-Type\":\"application/json\"},body:JSON.stringify(payload)});}
+  Wire buttons/sliders/inputs to report({control: \"<name>\", value: <small JSON>}). Rules: (a) payload = one short named object, never a data blob (4KB cap, or the POST 400s); (b) the event surfaces to you on the next exchange prefixed ⟨portal-event⟩ — acknowledge it by portal_submit-ing an updated artifact that SHOWS the new state, so the human sees the loop closed; (c) never use report() to send secrets or raw file contents back — it lands in the chat transcript. portal_selected is for \"human points at data\"; /api/portal-event is for \"human acts on the UI\".
 - When unsure whether chat or Portal is enough, choose Portal.")
 
 (def self-update-system-guidance

@@ -69,6 +69,8 @@
   (-clear-portal! [_]
     (portal/clear! portal viz-atom)
     {:ok true})
+  (-portal-selection [_]
+    (portal/selection portal))
   (-snapshot [_]
     (hub/snapshot hub))
   (-tools [_]
@@ -142,14 +144,25 @@
                             (if-let [r @runtime-atom]
                               (do (require 'kschltz.agent.workbench.settings-http)
                                   ((resolve 'kschltz.agent.workbench.settings-http/list-models) r q))
-                              {:models [] :error "runtime not attached yet"}))}}))
+                              {:models [] :error "runtime not attached yet"}))
+               :secret-ops
+               (let [store (:secret-store opts)]
+                 {:view-fn   (fn []
+                               (require 'kschltz.agent.workbench.secrets-http)
+                               ((resolve 'kschltz.agent.workbench.secrets-http/secrets-view) store))
+                  :put-fn    (fn [op]
+                               (require 'kschltz.agent.workbench.secrets-http)
+                               ((resolve 'kschltz.agent.workbench.secrets-http/put-secret!) store op))
+                  :delete-fn (fn [label]
+                               (require 'kschltz.agent.workbench.secrets-http)
+                               ((resolve 'kschltz.agent.workbench.secrets-http/delete-secret!) store label))})}}))
     (sessions/persist-current! sess-store hub nil)
     (hub/publish-turn! hub
                        {:role :system
                         :text (str "Workbench ready — CHAT left | PORTAL right ("
                                    (:url server)
                                    "). Agents should optimistically use "
-                                  "portal_submit for HTML/SVG charts, tables, "
+                                   "portal_submit for HTML/SVG charts, tables, "
                                    "and other rich visuals; cite only :cite "
                                    "from the tool (chat stays thin).")})
     (binding [*out* *err*]

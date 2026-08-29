@@ -43,9 +43,10 @@
 
 (def default-blocked-paths
   "Path segments the write tools refuse to touch by default. These are
-   version-control internals and build/cache output trees that an agent
-   should almost never edit directly."
-  #{".git" "target" "node_modules" ".svn" "CVS"})
+   version-control internals, build/cache output trees, and the
+   lateralus sealed secret store, all things an agent should almost
+   never edit or read directly."
+  #{".git" "target" "node_modules" ".svn" "CVS" ".lateralus"})
 
 (defn within-write-dir?
   "Return true if `path` is inside `write-dir`.

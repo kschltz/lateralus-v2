@@ -34,6 +34,8 @@
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.memory :as plugins.memory]
+            [kschltz.agent.plugins.secrets :as plugins.secrets]
+            [kschltz.agent.plugins.skills :as plugins.skills]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.plugins.workbench :as plugins.workbench]
             [kschltz.agent.tools.filesystem :as tools.filesystem]
@@ -53,6 +55,8 @@
             [kschltz.agent.stream.wiring]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
             [kschltz.agent.logging :as logging]
+            [kschltz.agent.secrets :as secrets]
+            [kschltz.agent.skills :as skills]
             [kschltz.agent.cli.ui :as ui]
             [kschltz.agent.cli.thinking :as thinking]
             [kschltz.agent.portal.schemas :as portal.schemas]
@@ -247,6 +251,29 @@
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
 
+(def ^:private SecretStoreConfig
+  "Malli schema for :lateralus/secret-store."
+  [:map
+   [:impl {:optional true} [:= :sealed-file]]
+   [:path {:optional true} :string]
+   [:passphrase {:optional true} :string]
+   [:passphrase-env {:optional true} :string]])
+
+(def ^:private SkillsStoreConfig
+  "Malli schema for :lateralus/skills-store."
+  [:map
+   [:path :string]])
+
+(def ^:private SkillsPluginConfig
+  "Malli schema for :lateralus/skills-plugin."
+  [:map
+   [:store some?]])
+
+(def ^:private SecretPluginConfig
+  "Malli schema for :lateralus/secret-plugin."
+  [:map
+   [:store some?]])
+
 ;; ---- Component definitions ----
 
 (defmethod ig/init-key :lateralus/llm-client [_ {:keys [impl] :as opts}]
@@ -353,7 +380,7 @@
   (plugins.workbench/workbench-plugin workbench))
 
 (defmethod ig/init-key :lateralus/workbench-tools [_ {:keys [workbench]}]
- "Portal tool registry (`portal_submit`, `portal_clear`, `portal_focus`)
+  "Portal tool registry (`portal_submit`, `portal_clear`, `portal_focus`)
    derived from a live workbench. Empty map when workbench is disabled."
   (let [build #(if workbench
                  ((requiring-resolve
@@ -382,10 +409,28 @@
         :noop      (noop-memory/backend)
         :kg-bm25   (kg-bm25-memory/backend (dissoc opts :embedder))
         :proximum  (let [backend (resolve 'kschltz.agent.memory.proximum-backend/backend)]
-                    (backend (cond-> opts
-                               (not (contains? opts :embedder))
-                               (assoc :embedder (embedding/noop-embedder))))))
+                     (backend (cond-> opts
+                                (not (contains? opts :embedder))
+                                (assoc :embedder (embedding/noop-embedder))))))
       {:memory-backend/impl method})))
+
+(defmethod ig/assert-key :lateralus/skills-store [_ config]
+  (assert-malli! :lateralus/skills-store SkillsStoreConfig config))
+
+(defmethod ig/assert-key :lateralus/skills-plugin [_ config]
+  (assert-malli! :lateralus/skills-plugin SkillsPluginConfig config))
+
+(defmethod ig/init-key :lateralus/skills-store [_ {:keys [path]}]
+  (skills/load-skills-dir path))
+
+(defmethod ig/init-key :lateralus/skills-plugin [_ {:keys [store]}]
+  (plugins.skills/skills-plugin {:store store}))
+
+(defmethod ig/init-key :lateralus/secret-store [_ opts]
+  (secrets/sealed-file-store opts))
+
+(defmethod ig/init-key :lateralus/secret-plugin [_ {:keys [store]}]
+  (plugins.secrets/secrets-plugin {:store store}))
 
 (defmethod ig/init-key :lateralus/plugins [_ plugins]
   ;; The base plugin is prepended automatically so user plugins are
@@ -436,12 +481,12 @@
    #(tools.filesystem/filesystem-registry opts)))
 
 (defmethod ig/init-key :lateralus/self-awareness-tools [_ {:keys [workspace-root]}]
- "Returns the self-awareness tool registry (`self_status`,
+  "Returns the self-awareness tool registry (`self_status`,
    `runtime_describe`). The tools read from the interceptor context, so
    they can be built at system init time like any other tool."
- (rebuildable-registry
-  (tools.self/self-awareness-registry workspace-root)
-  #(tools.self/self-awareness-registry workspace-root)))
+  (rebuildable-registry
+   (tools.self/self-awareness-registry workspace-root)
+   #(tools.self/self-awareness-registry workspace-root)))
 
 (defmethod ig/init-key :lateralus/config-tools
   [_ {:keys [catalog] :or {catalog :http}}]
@@ -460,7 +505,7 @@
      #(tools.config/config-registry {:catalog cat}))))
 
 (defmethod ig/init-key :lateralus/clojure-tools [_ opts]
- "Returns the Clojure structured-editing tool registry (clojure_query,
+  "Returns the Clojure structured-editing tool registry (clojure_query,
   clojure_add_require, clojure_remove_def, clojure_rename_symbol,
   clojure_insert_form, clojure_edit_def, clojure_format_file,
   clojure_lint)."
@@ -469,7 +514,7 @@
    #(tools.clojure/clojure-registry opts)))
 
 (defmethod ig/init-key :lateralus/runtime-tools [_ opts]
- "Returns the runtime-eval tool registry (clojure_eval, clojure_add_lib,
+  "Returns the runtime-eval tool registry (clojure_eval, clojure_add_lib,
   clojure_loaded_libs). These run Clojure code in-process and load Maven
    dependencies at runtime; gate them with `:enabled?` / `:network?`.
    JVM-only — not wired into the native-image config (GraalVM cannot

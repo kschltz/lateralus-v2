@@ -21,13 +21,23 @@
  :lateralus/cli-ui              {:enabled? :auto :theme :default}
  :lateralus/thinking            {:mode :preview}
  :lateralus/workbench           {:enabled? true
-                       :stream-bus #ig/ref :lateralus/stream-bus
+                                 :stream-bus #ig/ref :lateralus/stream-bus
                                  :host "127.0.0.1"
                                  :port 7860
                                  :portal? true
                                  :open-browser? false
                                  :app false
                                  :window-title "lateralus"}
+ ;; Secrets store + UI management: opt-in. Requires the
+ ;; LATERALUS_SECRETS_PASSPHRASE env var (manage from the workbench UI
+ ;; via Settings → Secrets, or a REPL via kschltz.agent.secrets).
+ ;; :lateralus/secret-store  {:path ".lateralus/secrets.sealed"
+ ;;                           :passphrase-env "LATERALUS_SECRETS_PASSPHRASE"}
+ ;; :lateralus/secret-plugin {:store #ig/ref :lateralus/secret-store}
+ ;; …then add :secret-store #ig/ref :lateralus/secret-store to
+ ;; :lateralus/workbench below (and add the tool redaction sweep by
+ ;; listing :lateralus/secret-plugin AFTER :lateralus/tools-plugin in
+ ;; :lateralus/plugins).
  :lateralus/workbench-plugin    {:workbench #ig/ref :lateralus/workbench}
  :lateralus/workbench-tools     {:workbench #ig/ref :lateralus/workbench}
  :lateralus/web-tools      {:provider :ddg}
@@ -47,8 +57,7 @@
     :startup-timeout-ms 30000
     :request-timeout-ms 30000
     :max-result-bytes 2097152}}
- :dynamic {:enabled? true}
-}
+  :dynamic {:enabled? true}}
  :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/factory-session      {:workspace-root "." :dynamic {:enabled? true}}
  :lateralus/factory-tools        {:session #ig/ref :lateralus/factory-session}
@@ -64,8 +73,8 @@
                                   #ig/ref :lateralus/factory-tools
                                   #ig/ref :lateralus/workflow-tools]
  :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
-                                    :mcp-session #ig/ref :lateralus/mcp-tools
-                                    :factory-session #ig/ref :lateralus/factory-session}
+                                  :mcp-session #ig/ref :lateralus/mcp-tools
+                                  :factory-session #ig/ref :lateralus/factory-session}
  :lateralus/stream-bus           {}
  :lateralus/stream-plugin        {:bus #ig/ref :lateralus/stream-bus}
  :lateralus/plugins              [#ig/ref :lateralus/memory-plugin

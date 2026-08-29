@@ -405,3 +405,27 @@
       ((requiring-resolve 'portal.api/selected) portal)
       (catch Throwable _
         nil))))
+
+(defn selection
+  "Portal selection data for read-back tools. Returns
+   {:last X :selected [X ...]} where `:last` is the value the session
+   currently holds (deref of the session atom — the single most recent
+   selection) and `:selected` is every value in a multi-selection.
+   Nil-tolerant and exception-tolerant: Portal versions differ, and a
+   missing inspector must degrade to {:last nil :selected []}."
+  [portal]
+  (if-not portal
+    {:last nil :selected []}
+    (let [last*
+          (try
+            (deref portal)
+            (catch Throwable _ nil))
+          selected*
+          (try
+            ((requiring-resolve 'portal.api/selected) portal)
+            (catch Throwable _ nil))]
+      {:last last*
+       :selected (cond
+                   (sequential? selected*) (vec selected*)
+                   (some? selected*) [selected*]
+                   :else [])})))

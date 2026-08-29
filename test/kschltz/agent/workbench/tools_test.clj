@@ -62,3 +62,68 @@
              (tool/invoke-tool (get reg "portal_clear") {} {})
              true)]
     (is (true? (:ok out)))))
+
+(deftest portal-selected-reads-selection-back
+  (let [h  (hub/create-hub {})
+        wb (reify proto/Workbench
+             (-url [_] "u")
+             (-portal-url [_] nil)
+             (-publish! [_ _])
+             (-await-human! [_ _])
+             (-attach-selection! [_] nil)
+             (-submit-portal! [_ _ _])
+             (-clear-portal! [_] {:ok true})
+             (-portal-selection [_]
+               {:last {:answer 42}
+                :selected [{:a 1} {:b 2}]})
+             (-snapshot [_] {})
+             (-tools [_] {})
+             (-close! [_] nil))
+        reg (tools/registry wb)
+        out (json/parse-string
+             (tool/invoke-tool (get reg "portal_selected") {} {})
+             true)]
+    (is (contains? reg "portal_selected") "registry exposes the read-back tool")
+    (is (true? (:ok out)))
+    (is (= 2 (:count out)))
+    (is (= "{:answer 42}" (:edn (:last out))))
+    (is (= ["{:a 1}" "{:b 2}"] (:selected out)))))
+
+(deftest portal-selected-truncates-and-handles-empty
+  (let [big (vec (range 500))
+        wb  (reify proto/Workbench
+              (-portal-selection [_]
+                {:last {:big big}
+                 :selected (vec (repeat 30 {:x 1}))})
+              (-url [_] "u") (-portal-url [_] nil)
+              (-publish! [_ _]) (-await-human! [_ _])
+              (-attach-selection! [_]) (-submit-portal! [_ _ _])
+              (-clear-portal! [_]) (-snapshot [_])
+              (-tools [_]) (-close! [_]))
+        reg (tools/registry wb)
+        out (json/parse-string
+             (tool/invoke-tool (get reg "portal_selected") {:limit 1000} {})
+             true)]
+    (is (true? (:ok out)))
+    (is (true? (:truncated out)))
+    (is (= 20 (count (:selected out))))
+    (is (str/includes? (:hint out) "select fewer"))
+    (is (<= (count (:edn (:last out))) 100))
+    ;; empty selection degrades to {:ok false} without throwing
+    (let [empty-wb (reify proto/Workbench
+                     (-portal-selection [_] {:last nil :selected []})
+                     (-url [_] "u") (-portal-url [_] nil)
+                     (-publish! [_ _]) (-await-human! [_ _])
+                     (-attach-selection! [_]) (-submit-portal! [_ _ _])
+                     (-clear-portal! [_]) (-snapshot [_])
+                     (-tools [_]) (-close! [_]))]
+      (is (false? (:ok (json/parse-string
+                        (tool/invoke-tool
+                         (get (tools/registry empty-wb) "portal_selected")
+                         {} {})
+                        true)))))))
+
+(deftest portal-selection-nil-tolerant
+  (require 'kschltz.agent.workbench.portal)
+  (let [out ((ns-resolve 'kschltz.agent.workbench.portal 'selection) nil)]
+    (is (= {:last nil :selected []} out))))

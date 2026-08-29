@@ -50,7 +50,8 @@
    [:open? {:optional true} :boolean]
    [:stream-bus {:optional true} :any]
    [:session-id {:optional true} :string]
-   [:sessions-dir {:optional true} :string]])
+   [:sessions-dir {:optional true} :string]
+   [:secret-store {:optional true} some?]])
 
 (def PortalSubmitKind
   [:enum "html" "table" "vega" "markdown" "code" "auto"
@@ -64,6 +65,12 @@
 
 (def PortalClearInput
   [:map {:closed true}])
+
+(def PortalSelectedInput
+  "Args for `portal_selected`: pull the Portal selection back into the
+   model's context. `:limit` caps each serialized value (chars)."
+  [:map {:closed true}
+   [:limit {:optional true} [:int {:min 100 :max 100000}]]])
 
 (def PortalFocusInput
   [:map

@@ -345,7 +345,7 @@
 
    Portal asset/RPC routes (`/rpc`, `/main.js`, `/?<session-uuid>`, …) are
    delegated to Portal's in-process handler so the iframe is same-origin."
-  [hub {:keys [attach-selection! on-message session-ops settings-ops]}]
+  [hub {:keys [attach-selection! on-message session-ops settings-ops secret-ops]}]
   (fn [req]
     (let [uri    (or (:uri req) "/")
           path   (first (str/split uri #"\?"))
@@ -395,71 +395,107 @@
                    (if (seq (:error view))
                      (json-response 400 view)
                      (json-response view))))))
+           (when (str/starts-with? (str path) "/api/secrets")
+             (when secret-ops
+               (cond
+                 (and (= method :get) (= path "/api/secrets"))
+                 (json-response ((:view-fn secret-ops)))
+
+                 (and (#{:put :post} method) (= path "/api/secrets"))
+                 (let [op     (read-json-body req)
+                       result ((:put-fn secret-ops) op)]
+                   (if (:ok result)
+                     (json-response result)
+                     (json-response 400 result)))
+
+                 (and (= method :delete) (= path "/api/secrets"))
+                 (let [q      (parse-query uri)
+                       result ((:delete-fn secret-ops) (:label q))]
+                   (if (:ok result)
+                     (json-response result)
+                     (json-response 400 result)))
+
+                 :else
+                 (json-response 404 {:error "not found"}))))
            (cond
-            (and (= method :get) (= path "/"))
-            (static-file "index.html")
+             (and (= method :get) (= path "/"))
+             (static-file "index.html")
 
-            (and (= method :get) (= path "/app.js"))
-            (static-file "app.js")
+             (and (= method :get) (= path "/app.js"))
+             (static-file "app.js")
 
-            (and (= method :get) (= path "/app.css"))
-            (static-file "app.css")
+             (and (= method :get) (= path "/app.css"))
+             (static-file "app.css")
 
-            (and (= method :get) (= path "/turn.js"))
-            (static-file "turn.js")
+             (and (= method :get) (= path "/turn.js"))
+             (static-file "turn.js")
 
-            (and (= method :get) (= path "/turn.css"))
-            (static-file "turn.css")
+             (and (= method :get) (= path "/turn.css"))
+             (static-file "turn.css")
 
-            (and (= method :get) (turn-id-from-path path))
-            (static-file "turn.html")
+             (and (= method :get) (turn-id-from-path path))
+             (static-file "turn.html")
 
-            (and (= method :get) (= path "/api/state"))
-            (json-response (client-snapshot hub req))
+             (and (= method :get) (= path "/api/state"))
+             (json-response (client-snapshot hub req))
 
-            (and (= method :get) (= path "/api/events"))
-            (handle-sse hub req)
+             (and (= method :get) (= path "/api/events"))
+             (handle-sse hub req)
 
-            (and (= method :get) (= path "/api/turns/current"))
-            (let [bus (stream-bus-of hub)
-                  id  (when (stream/stream-bus? bus)
-                        (or (stream.bus/current-id bus)
-                            (stream.bus/latest-id bus)))
-                  snap (when (and id (stream/stream-bus? bus))
-                         (stream.bus/snapshot bus id))]
-              (if snap
-                (json-response snap)
-                (json-response 404 {:error "no turn yet"})))
+             (and (= method :get) (= path "/api/turns/current"))
+             (let [bus (stream-bus-of hub)
+                   id  (when (stream/stream-bus? bus)
+                         (or (stream.bus/current-id bus)
+                             (stream.bus/latest-id bus)))
+                   snap (when (and id (stream/stream-bus? bus))
+                          (stream.bus/snapshot bus id))]
+               (if snap
+                 (json-response snap)
+                 (json-response 404 {:error "no turn yet"})))
 
-            (and (= method :get) (turn-events-path? path))
-            (handle-turn-sse hub req (api-turn-id path))
+             (and (= method :get) (turn-events-path? path))
+             (handle-turn-sse hub req (api-turn-id path))
 
-            (and (= method :get) (api-turn-id path))
-            (let [bus (stream-bus-of hub)
-                  id  (api-turn-id path)
-                  snap (when (stream/stream-bus? bus)
-                         (stream.bus/snapshot bus id))]
-              (if snap
-                (json-response snap)
-                (json-response 404 {:error "turn not found" :id id})))
+             (and (= method :get) (api-turn-id path))
+             (let [bus (stream-bus-of hub)
+                   id  (api-turn-id path)
+                   snap (when (stream/stream-bus? bus)
+                          (stream.bus/snapshot bus id))]
+               (if snap
+                 (json-response snap)
+                 (json-response 404 {:error "turn not found" :id id})))
 
-            (and (= method :post) (= path "/api/message"))
-            (let [body (read-json-body req)
-                  msg  (schemas/decode-message
-                        {:text (str (:text body))
-                         :refs (vec (or (:refs body) []))})]
-              (hub/enqueue-human! hub msg)
-              (when on-message (on-message msg))
-              (json-response {:ok true}))
+             (and (= method :post) (= path "/api/message"))
+             (let [body (read-json-body req)
+                   msg  (schemas/decode-message
+                         {:text (str (:text body))
+                          :refs (vec (or (:refs body) []))})]
+               (hub/enqueue-human! hub msg)
+               (when on-message (on-message msg))
+               (json-response {:ok true}))
 
-            (and (= method :post) (= path "/api/attach-selection"))
-            (let [ref (when attach-selection! (attach-selection!))]
-              (if ref
-                (json-response {:ok true :ref ref})
-                (json-response 404 {:ok false :error "no portal selection"})))
+             (and (= method :post) (= path "/api/portal-event"))
+             ;; 2-way loop: artifacts rendered by portal_submit POST
+             ;; small JSON interaction events back here (same-origin
+             ;; iframe). hub/portal-event! validates + enqueues them
+             ;; as agent-visible input; errors surface as 400.
+             (let [body (read-json-body req)
+                   result (try
+                            (hub/portal-event! hub (if (and (map? body) (contains? body :payload)) (:payload body) body))
+                            (catch clojure.lang.ExceptionInfo e
+                              {:ok false :error (.getMessage e)}))]
+               (if (:ok result)
+                 (json-response result)
+                 (json-response 400 result)))
 
-            :else
-            (json-response 404 {:error "not found" :path path}))))
+             (and (= method :post) (= path "/api/attach-selection"))
+             (let [ref (when attach-selection! (attach-selection!))]
+               (if ref
+                 (json-response {:ok true :ref ref})
+                 (json-response 404 {:ok false :error "no portal selection"})))
+
+             :else
+             (json-response 404 {:error "not found" :path path}))))
         (catch clojure.lang.ExceptionInfo e
           (json-response 400 {:error (ex-message e)
                               :data  (ex-data e)}))

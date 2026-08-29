@@ -139,6 +139,17 @@
         <button type="button" id="settings-save-memory" class="save-btn">Apply memory policy</button>
       </details>
 
+      <details id="secrets-details">
+        <summary>Secrets</summary>
+        <p class="session-hint" id="secrets-hint">Values are never shown again after saving. Tools reference them as <code>{{secret:label}}</code>.</p>
+        <ul id="secrets-list" class="tools-list"></ul>
+        <label>Label <small>(letters, digits, dot, dash, underscore, slash)</small></label>
+        <input id="secrets-label" type="text" placeholder="prod-api-key" />
+        <label>Value</label>
+        <input id="secrets-value" type="password" placeholder="paste value" autocomplete="off" />
+        <button type="button" id="secrets-save" class="save-btn">Add / replace secret</button>
+      </details>
+
       <details>
         <summary>Tools</summary>
         <ul id="tools-list" class="tools-list"></ul>

@@ -42,6 +42,8 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/workflow-tools    ──▶  workflow_register/seed/run/status/clear│
 │  :lateralus/tool-registry     ──▶  merged vector of tool-name -> Tool registries  │
 │  :lateralus/tools-plugin      ──▶  seeds `:agent/tool-registry` (+ MCP + factory) │
+│  :lateralus/secret-store      ──▶  sealed AES-GCM secretDepot (opt-in)       │
+│  :lateralus/secret-plugin     ──▶  wrap registry w/ secret handles + redact │
 │  :lateralus/cli-ui            ──▶  optional CliRenderer (prompt/response colors; not a chain plugin) │
 │  :lateralus/plugins       ──▶  assembled plugin maps (base plugin auto-prepended) │
 │  :lateralus/agent         ──▶  agent-map + exchange-chain + pre-wired deps │

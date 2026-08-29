@@ -41,7 +41,12 @@
      HTML/SVG doc, multi-chart = one page), tables (array of maps), markdown,
      code, hiccup. Optional kind: html|table|vega|markdown|code|auto.
      Returns JSON with :cite \"@portal/<full-uuid>\" — paste that exact cite
-     in a short chat reply. Never invent ids. Prefer this over pasting into chat.")
+     in a short chat reply. Never invent ids. Prefer this over pasting into
+     chat. INTERACTIVE: HTML artifacts may include a tiny JS helper that
+     POSTs interaction events back to /api/portal-event (same-origin
+     iframe) — the human's clicks arrive as ⟨portal-event⟩ input on the
+     next exchange. See the guidance boilerplate; keep event payloads
+     small and named.")
   (-input-schema [_] schemas/PortalSubmitInput)
   (-output-schema [_] :string)
   (-invoke [_ args _ctx]
@@ -86,9 +91,65 @@
                                :id id
                                :label label})))))
 
+(defn- preview-of
+  "Short single-line preview (bounded by portal/max-value-chars)."
+  [value]
+  (let [s (pr-str value)]
+    (if (> (count s) 160)
+      (str (subs s 0 157) "...")
+      s)))
+
+(def ^:private default-selection-limit 20000)
+(def ^:private max-selected-count 20)
+
+(defn- clamp-str
+  [s limit]
+  (let [s (str s)]
+    (if (> (count s) limit)
+      (subs s 0 limit)
+      s)))
+
+(defn- selection-payload
+  "Serialize the Portal selection for the model. Values are pr-str'd
+   (JSON-safe) and clamped; the count of dropped/extra selections is
+   reported so the model knows when to ask the human to select less."
+  [workbench {:keys [limit] :or {limit default-selection-limit}}]
+  (let [{:keys [last selected]} (wb/portal-selection (resolve-wb workbench))
+        per-value (max 100 (int (/ limit (inc (min max-selected-count
+                                                   (count selected))))))]
+    (cond-> {:ok (boolean (or (some? last) (seq selected)))
+             :count (count selected)}
+      (some? last)
+      (assoc :last {:edn (clamp-str (pr-str last) per-value)
+                    :preview (preview-of last)})
+      (seq selected)
+      (assoc :selected (mapv #(clamp-str (pr-str %) per-value)
+                                (take max-selected-count selected)))
+      (> (count selected) max-selected-count)
+      (assoc :truncated true
+             :hint (str (+ (count selected) (- max-selected-count))
+                        " more selected values not shown; ask the human to select fewer")))))
+
+(defrecord PortalSelectedTool [workbench]
+  tool/Tool
+  (-name [_] "portal_selected")
+  (-description [_]
+    "Read the value(s) the human currently has SELECTED in the Portal pane
+     back into the conversation (UI → agent, the reverse of portal_submit).
+     Ask the human to select a value in Portal, then call this to inspect
+     it. Returns the most recent selected value (:last) plus any
+     multi-selection (:selected), serialized as EDN strings and clamped.
+     Use before portal_focus when the human points at something not yet
+     attached as a ref.")
+  (-input-schema [_] schemas/PortalSelectedInput)
+  (-output-schema [_] :string)
+  (-invoke [_ args _ctx]
+    (json/generate-string (selection-payload workbench args))))
+
 (defn registry
   "Tool registry for a live workbench instance (or atom/delay of one)."
   [workbench]
-  {"portal_submit" (->PortalSubmitTool workbench)
-   "portal_clear"  (->PortalClearTool workbench)
-   "portal_focus"  (->PortalFocusTool workbench)})
+  {"portal_submit"   (->PortalSubmitTool workbench)
+   "portal_clear"    (->PortalClearTool workbench)
+   "portal_selected" (->PortalSelectedTool workbench)
+   "portal_focus"    (->PortalFocusTool workbench)})

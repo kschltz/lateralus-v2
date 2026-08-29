@@ -82,6 +82,31 @@
                                   #ig/ref :lateralus/tools-plugin
                                   #ig/ref :lateralus/factory-plugin
                                   #ig/ref :lateralus/stream-plugin]
+
+ ;; Secrets plugin (use-without-seeing) — opt-in. Requires the
+ ;; passphrase env var to be set (default LATERALUS_SECRETS_PASSPHRASE),
+ ;; so the default config leaves it commented. Tools reference secrets
+ ;; with {{secret:label}} handles in their arguments; the values are
+ ;; resolved inside the tool invocation only and the sealed store is
+ ;; blocked from file tools. Manage secrets from a REPL via
+ ;; kschltz.agent.secrets (put!/get/delete!). If enabled, place
+ ;; :lateralus/secret-plugin AFTER :lateralus/tools-plugin so the
+ ;; wrapping :guard interceptor sees the seeded registry.
+ ;; :lateralus/secret-store  {:path ".lateralus/secrets.sealed"
+ ;;                           :passphrase-env "LATERALUS_SECRETS_PASSPHRASE"}
+ ;; :lateralus/secret-plugin {:store #ig/ref :lateralus/secret-store
+ ;;                           ; :advertise-handle-tool? false → no
+ ;;                           ; secret_list_handles tool, no guidance hint
+ ;;                           }
+
+ ;; Skill packs (progressive disclosure) — opt-in. One pure-data .edn
+ ;; skill per file in :path (Malli-validated SkillSchema), so one bad
+ ;; file fails startup. Tier 1 (name+description) is the only content
+ ;; in the system prompt; bodies load on demand via load_skill as tool
+ ;; results. Declare AFTER :lateralus/secret-plugin in the plugins
+ ;; vector if both are enabled.
+ ;; :lateralus/skills-store  {:path "skills"}
+ ;; :lateralus/skills-plugin {:store #ig/ref :lateralus/skills-store}
  :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
                                   :llm-client     #ig/ref :lateralus/llm-client
                                   :llm-config     #ig/ref :lateralus/llm-config
@@ -89,4 +114,4 @@
                                   :memory-backend #ig/ref :lateralus/memory-backend
                                   :cli-ui         #ig/ref :lateralus/cli-ui
                                   :thinking       #ig/ref :lateralus/thinking
-                                 :loop-opts        #ig/ref :lateralus/loop-opts}}
+                                  :loop-opts        #ig/ref :lateralus/loop-opts}}

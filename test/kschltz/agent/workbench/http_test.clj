@@ -1,6 +1,7 @@
 (ns kschltz.agent.workbench.http-test
   (:require [cheshire.core :as json]
             [clojure.string :as string]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.llm.stream :as llm.stream]
             [kschltz.agent.stream.bus :as stream.bus]
@@ -215,3 +216,22 @@
                  true)]
       (is (= id (:id after)))
       (is (false? (:live? after))))))
+
+(deftest handler-portal-event
+  "The 2-way loop over HTTP: an artifact's fetch POST reaches the hub
+   inbox and transcript; bad payloads are 400s, not 500s."
+  (let [h (hub/create-hub {:session-id "pe-http-test"})
+        handler (http/make-handler h {})]
+    (let [res (handler {:request-method :post :uri "/api/portal-event"
+                        :body (json/generate-string {:payload {:control "slider" :value 42}})})]
+      (is (= 200 (:status res)))
+      (is (true? (-> res :body (json/parse-string true) :ok))))
+    (let [msg (hub/await-human! h {:timeout-ms 2000})]
+      (is (str/starts-with? (:text msg) "⟨portal-event⟩"))
+      (is (str/includes? (:text msg) "slider")))
+    (let [res (handler {:request-method :post :uri "/api/portal-event"
+                        :body (json/generate-string "not-a-map")})]
+      (is (= 400 (:status res))))
+    (let [res (handler {:request-method :post :uri "/api/portal-event"
+                        :body (json/generate-string {:blob (vec (range 5000))})})]
+      (is (= 400 (:status res))))))

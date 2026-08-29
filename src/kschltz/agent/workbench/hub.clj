@@ -1,6 +1,7 @@
 (ns kschltz.agent.workbench.hub
   "In-memory workbench session: chat transcript, human inbox, portal refs."
-  (:require [clojure.string :as str]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [kschltz.agent.session.protocol :as session]
             [kschltz.agent.stream.protocol :as stream]
             [kschltz.agent.workbench.schemas :as schemas])
@@ -18,13 +19,13 @@
    :stream-bus    stream-bus
    :session-store session-store
    :state         (atom {:session-id    session-id
-                      :session-title (or session-title session-id)
-                      :status        :idle
-                      :status-detail nil
-                      :turns         []
-                      :refs          {}
-                      :portal-url    nil
-                      :rev           0})})
+                         :session-title (or session-title session-id)
+                         :status        :idle
+                         :status-detail nil
+                         :turns         []
+                         :refs          {}
+                         :portal-url    nil
+                         :rev           0})})
 
 (defn- bump!
   [state-atom f]
@@ -106,6 +107,40 @@
     (.put ^LinkedBlockingQueue (:inbox hub)
           {:text text :refs refs})
     {:ok true}))
+
+(def ^:private max-portal-event-chars 4096)
+
+(defn portal-event!
+  "Receive an interaction event from an artifact rendered in Portal and
+   route it into the conversation as agent-visible input.
+   
+   This completes the 2-way loop: `portal_submit` renders an interactive
+   HTML artifact (with a small JS helper that POSTs to
+   /api/portal-event), the human clicks/types in the UI, and the event
+   lands here — published as a user turn prefixed with the
+   ⟨portal-event⟩ marker and enqueued in the same inbox as chat
+   messages, so the running session loop wakes and the model sees it on
+   the next exchange.
+   
+   Trust model: like chat input, an event only exists because the
+   human invoked a control in the artifact. The model authored the JS,
+   but nothing runs without a human action. Payload discipline: must be
+   a JSON map (shallow-by-convention), serialized form capped at
+   `max-portal-event-chars` — oversized or non-map payloads are
+   rejected with an ex-info the route turns into a 400."
+  [hub payload]
+  (let [fail #(throw (ex-info % {:kind :invalid-portal-event}))]
+    (when-not (map? payload)
+      (fail "portal event payload must be a JSON object (map)"))
+    (let [json (json/generate-string payload)]
+      (when (> (count json) max-portal-event-chars)
+        (fail (str "portal event too large (max " max-portal-event-chars
+                   " chars serialized)")))
+      (let [text (str "⟨portal-event⟩ " json)]
+        (publish-turn! hub {:role :user :text text :refs []})
+        (set-status! hub :queued "portal event accepted — starting soon")
+        (.put ^LinkedBlockingQueue (:inbox hub) {:text text :refs []})
+        {:ok true :chars (count json)}))))
 
 (defn await-human!
   "Park until a human message arrives. Returns {:text :refs}.

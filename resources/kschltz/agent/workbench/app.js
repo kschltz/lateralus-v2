@@ -861,6 +861,83 @@
     }
   }
 
+  // ---- Secrets (labels only; values never come back) ----
+  const secretValueEl = document.getElementById("secrets-value");
+
+  async function fetchSecrets() {
+    const res = await fetch("/api/secrets", { cache: "no-store" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "secrets unavailable");
+    return body;
+  }
+
+  function renderSecrets(view) {
+    const list = document.getElementById("secrets-list");
+    if (!list || !view) return;
+    const $ = (id) => document.getElementById(id);
+    const labels = view.labels || [];
+    if (view.enabled) {
+      list.innerHTML = labels.length
+        ? labels.map((l) => `<li>
+            <span class="tool-name">${esc(l)}</span>
+            <span class="tool-desc">stored — value hidden</span>
+            <button type="button" class="meta-btn secret-del" data-label="${esc(l)}">delete</button>
+          </li>`).join("")
+        : "<li><span class='tool-desc'>No secrets stored.</span></li>";
+    } else {
+      list.innerHTML = `<li><span class='tool-desc'>${esc(view.error || "secret store not configured")}</span></li>`;
+    }
+    if ($("secrets-details")) {
+      const fields = list.parentElement.querySelectorAll("input");
+      fields.forEach((el) => { el.disabled = !view.enabled; });
+      const save = $("secrets-save");
+      if (save) save.disabled = !view.enabled;
+    }
+  }
+
+  on("secrets-save", async () => {
+    const $ = (id) => document.getElementById(id);
+    const label = ($("secrets-label") || {}).value?.trim() || "";
+    const value = (secretValueEl || {}).value || "";
+    if (!label || !value) {
+      setSettingsStatus("label and value are both required", "err");
+      return;
+    }
+    setSettingsStatus("saving secret…");
+    try {
+      const res = await fetch("/api/secrets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ label, value }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) throw new Error(body.error || "save failed");
+      if (secretValueEl) secretValueEl.value = "";
+      setSettingsStatus(`secret '${label}' stored ✓ (tools: {\u007Bsecret:${label}\u007D})`, "ok");
+      renderSecrets(await fetchSecrets());
+    } catch (e) {
+      setSettingsStatus(e.message || "failed", "err");
+    }
+  });
+
+  document.addEventListener("click", async (e) => {
+    const btn = e.target && e.target.closest && e.target.closest("button.secret-del");
+    if (!btn) return;
+    const label = btn.dataset.label;
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/secrets?label=" + encodeURIComponent(label), { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) throw new Error(body.error || "delete failed");
+      setSettingsStatus(`secret '${label}' deleted ✓`, "ok");
+      renderSecrets(await fetchSecrets());
+    } catch (err) {
+      setSettingsStatus(err.message || "failed", "err");
+      btn.disabled = false;
+    }
+  });
+
   async function openSettingsPanel() {
     if (!settingsPanel) return;
     settingsPanel.hidden = false;
@@ -869,6 +946,7 @@
     setSettingsStatus("loading…");
     try {
       renderSettings(await fetchSettings());
+      try { renderSecrets(await fetchSecrets()); } catch (_) { /* secrets optional */ }
       setSettingsStatus("");
     } catch (e) {
       setSettingsStatus(e.message || "failed to load settings", "err");
