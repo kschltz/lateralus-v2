@@ -194,3 +194,20 @@
       (is (= "explosion" (:message parsed)))
       (is (str/includes? (:error parsed) "Tool execution error"))
       (is (str/includes? (:error parsed) "explosion")))))
+
+
+(deftest truncated-args-legible-error
+  (testing "unterminated JSON arguments produce an actionable split hint,"
+    " not a confusing schema error"
+    (let [t (reify tool/Tool
+              (-name [_] "echo")
+              (-description [_] "echo")
+              (-input-schema [_] [:map [:x :int]])
+              (-output-schema [_] :string)
+              (-invoke [_ args _] (:x args)))
+          {:keys [result]}
+          (first (tool/execute-tools {"echo" t} {}
+                   [{:function {:name "echo"
+                                :arguments "{\"x\": 1, \"payload\": \"<html>trunc"}}]))]
+      (is (str/includes? result "TRUNCATED"))
+      (is (str/includes? result "split")))))

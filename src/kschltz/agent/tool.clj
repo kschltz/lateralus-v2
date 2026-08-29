@@ -76,11 +76,20 @@
   (json-safe schema))
 
 (defn- parse-arguments
-  "Parse the JSON arguments string that the model returned."
+  "Parse the JSON arguments string that the model returned. Returns
+   [:ok m] on success, [:truncated n] when the JSON is unparseable —
+   which, for large string args (a 10KB+ portal_submit HTML), almost
+   always means the model's output was CUT mid-argument (the run noted
+   in the session logs: JsonParseException at column 13732, twice in a
+   row). Returning `{}` instead made Malli report a useless
+   `missing required key` error and the model re-emitted the same giant
+   blob, looping forever. [:truncated n] carries the byte size so the
+   error can tell the model to SPLIT or shrink."
   [arguments]
   (try
-    (json/parse-string arguments true)
-    (catch Throwable _ {})))
+    [:ok (json/parse-string arguments true)]
+    (catch Throwable _
+      [:truncated (count (str arguments))])))
 
 (defn- validation-error
   "Build a model-visible error string from a Malli explanation.
@@ -207,9 +216,11 @@
                 args-str (get-in call [:function :arguments])]
             (if tool
               {:call   call
-               :result (invoke-tool tool
-                                   (parse-arguments args-str)
-                                   ctx)}
+               :result (let [[tag args] (parse-arguments args-str)]
+                         (if (= tag :truncated)
+                           (format "Tool '%s' arguments could not be parsed (unterminated JSON, %s chars) — the tool call was likely TRUNCATED at the model's output limit. Do NOT re-emit it whole: split the payload into smaller pieces and send them in separate calls."
+                                   name args)
+                           (invoke-tool tool args ctx)))}
               {:call call
                :result (format "Tool '%s' is not available in this session. Available tools: %s"
                                name
