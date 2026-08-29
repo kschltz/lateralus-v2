@@ -1,6 +1,7 @@
 (ns kschltz.agent.tools.factory.plugin
   "Partial plugin: seed the factory session and run runtime interceptors."
-  (:require [kschltz.agent.tools.factory.protocol :as proto]))
+  (:require [clojure.string :as str]
+            [kschltz.agent.tools.factory.protocol :as proto]))
 
 (def system-guidance
   "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then invoke the new name this exchange (same turn is ok). Do not clojure_eval a substitute. After define, call the new tool with a real test input before telling the human it works.")
@@ -15,9 +16,28 @@
    :slot :guard
    :enter (fn [ctx]
             (when (proto/runtime-tool-store? session)
-              (proto/-rehydrate! session
-                                 (get-in ctx [:agent/state :agent/runtime-tools])))
-            (assoc ctx :agent/factory-session session))})
+              (let [{:keys [errors]} (proto/-rehydrate!
+                                      session
+                                      (get-in ctx [:agent/state
+                                                   :agent/runtime-tools]))
+                    notice
+                    (when (seq errors)
+                      (str "RUNTIME TOOL COMPILE FAILURES — these tools were"
+                           " defined but never registered, so calls to them\n"
+                           " return 'not available'. Re-define with the fix:\n"
+                           (str/join
+                            "\n"
+                            (map (fn [{:keys [name error]}]
+                                   (str "- " name ": " error))
+                                 errors))))]
+                (cond-> (assoc ctx :agent/factory-session session)
+                  notice
+                  (update :agent/system-append
+                          (fn [prior]
+                            (cond
+                              (string? prior) (str prior "\n\n" notice)
+                              (sequential? prior) (conj (vec prior) notice)
+                              :else notice)))))))})
 
 (defn- guidance-interceptor
   []

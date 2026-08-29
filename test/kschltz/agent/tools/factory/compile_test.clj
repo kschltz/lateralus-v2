@@ -28,3 +28,13 @@
 (deftest compile-fn-requires-ifn
   (is (thrown-with-msg? Exception #"function"
                         (compile/compile-fn "42"))))
+(deftest compile-fn-reads-fn-literals-and-regexes
+  ;; regression: clojure.edn/read raised "No dispatch macro for: (" on
+  ;; model bodies using #(…) and #"…" — the tool then silently vanished
+  ;; at every rehydrate (sessions 675706dd / 92150f99).
+  (let [f (compile/compile-fn
+           "(fn [args _ctx] (mapv #(clojure.string/upper-case (str %)) (re-seq #\"[a-z]+\" (str (:text args)))))")]
+    (is (= ["AB" "CD"] (f {:text "ab cd"} nil)))))
+
+(deftest read-form-still-blocks-reader-eval
+  (is (thrown? Exception (compile/compile-fn "#=(+ 1 2)"))))

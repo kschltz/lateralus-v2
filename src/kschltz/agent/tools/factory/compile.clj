@@ -1,9 +1,15 @@
 (ns kschltz.agent.tools.factory.compile
-  "In-process ToolCompiler: EDN schema + eval of invoke / interceptor fns.
+  "In-process ToolCompiler: schema + eval of invoke / interceptor fns.
 
    Uses Clojure 1.12 `add-libs` (via `ClojureRuntime`) when a spec names
-   extra Maven/Git coords. Reader-eval is off; evaluation is explicit."
+   extra Maven/Git coords. `*read-eval*` is off; evaluation is explicit.
+   Invoke/interceptor bodies are read with the FULL Clojure reader (not
+   `clojure.edn`) so `#(fn-literal)` and `#\"regex\"` forms — which
+   model-written bodies routinely contain — parse. `clojure.edn` raises
+   `No dispatch macro for: (` there and the tool then silently failed at
+   every rehydrate (regression: sessions 675706dd / 92150f99)."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.runtime.jvm :as jvm]
@@ -13,11 +19,14 @@
   (:import [java.io PushbackReader StringReader]))
 
 (defn- read-form
-  "Read one EDN/Clojure form with `*read-eval*` disabled."
+  "Read one Clojure/EDN form with `*read-eval*` disabled. Uses the full
+   reader (not `clojure.edn`) because invoke/interceptor bodies
+   legitimately contain `#(fn-literal)` and `#\"regex\"` dispatch macros;
+   `*read-eval*` false still blocks `#=` reader eval."
   [source]
   (binding [*read-eval* false]
-    (edn/read {:eof nil :readers *data-readers*}
-              (PushbackReader. (StringReader. (str source))))))
+    (read {:eof nil :readers *data-readers*}
+          (PushbackReader. (StringReader. (str source))))))
 
 (defn parse-input-schema
   "Parse an EDN Malli schema string. Throws `ex-info` `{:phase :compile}`."

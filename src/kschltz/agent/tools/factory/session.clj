@@ -181,8 +181,13 @@
                                    {:name name
                                     :error (:error compiled)})))))
                    {:rehydrated [] :errors []}
-                   specs)]
-      (assoc results :ok (empty? (:errors results)))))
+                   specs)
+          ;; Remember the failures so the UI/model can be told — these
+          ;; used to be swallowed, which made tool_define look like a
+          ;; fake success (define ok, tool silently missing forever).
+          errors (:errors results)]
+      (swap! state assoc :last-compile-errors errors)
+      (assoc results :ok (empty? errors))))
 
   (-dynamic-enabled? [_]
     (dynamic-enabled? config)))

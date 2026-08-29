@@ -34,10 +34,19 @@
 (defn refresh-live-tools
   "Re-merge static ∪ MCP ∪ factory registries onto ctx and patch
    in-flight `:llm/request :tools` so the next LLM call (including
-   ReAct follow-ups that skip :compose) sees newly defined tools."
+   ReAct follow-ups that skip :compose) sees newly defined tools.
+
+   Also rehydrates the factory session from `:agent/runtime-tools` so a
+   tool_define committed mid-exchange is callable in that SAME exchange
+   (previously rehydrate only ran at exchange start, so the promised
+   'same turn is ok' silently failed on the first follow-up)."
   [ctx]
   (let [session (:agent/mcp-session ctx)
         factory (:agent/factory-session ctx)
+        _ (when (factory.proto/runtime-tool-store? factory)
+            (factory.proto/-rehydrate! factory
+                                       (get-in ctx [:agent/state
+                                                    :agent/runtime-tools])))
         static (or (:agent/static-tool-registry ctx) {})
         reg (-> (live-registry static session factory)
                 (apply-tool-overlay (:agent/state ctx)))

@@ -1,5 +1,6 @@
 (ns kschltz.agent.tools.factory.session-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.factory.session :as session]))
@@ -46,3 +47,18 @@
     (let [ixs (proto/-interceptors store :observe)]
       (is (= 1 (count ixs)))
       (is (= {:flag true} ((:enter (first ixs)) {}))))))
+
+(deftest rehydrate-surfaces-compile-errors
+  ;; previously errors were swallowed, so tool_define looked like a fake
+  ;; success: define ok → tool silently missing forever.
+  (let [eng (session/factory-session nil)
+        r (proto/-rehydrate! eng {"broken" {:name "broken"
+                                            :description "x"
+                                            :input-schema "[:map [:a :int]]"
+                                            :invoke "(fn [args ctx] (map #(f %) args))"}})]
+    (is (false? (:ok r)))
+    (is (seq (:errors r)))
+    (is (string? (get-in r [:errors 0 :error])) "error text surfaced")
+    (is (str/includes? (str (get-in r [:errors 0 :error])) "failed to evaluate")))
+  (let [eng (session/factory-session nil)]
+    (is (:ok (proto/-rehydrate! eng {})) "empty specs rehydrate cleanly")))
