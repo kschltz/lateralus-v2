@@ -17,6 +17,7 @@
             [kschltz.agent.loop.act :as act]
             [kschltz.agent.loop.edits :as edits]
             [kschltz.agent.loop.retry :as retry]
+            [kschltz.agent.loop.rescue :as rescue]
             [kschltz.agent.loop.stall :as stall]
             [kschltz.agent.loop.summary :as summary]
             [kschltz.agent.loop.trim :as trim]
@@ -200,10 +201,20 @@
    :slot :tools
    :enter (fn [ctx]
             (let [loop-opts      (:agent/loop-opts ctx)
-                  all-calls      (or (:tool/calls ctx) [])
+                  registry       (or (:agent/tool-registry ctx) {})
+                  ;; announce-then-nothing rescue: the model often writes
+                  ;; the call as TEXT (`spotify_api({...})`) instead of the
+                  ;; structured tool_calls field. With no structured calls
+                  ;; at all, extract pseudo-calls of REGISTERED tools from
+                  ;; the response and execute them like real calls.
+                  raw-calls      (or (:tool/calls ctx) [])
+                  rescued?       (empty? raw-calls)
+                  rescued-calls  (when rescued?
+                                   (rescue/pseudo-calls registry
+                                                        (:exchange/response ctx)))
+                  all-calls      (if rescued? rescued-calls raw-calls)
                   already        (count (or (:agent/all-tool-results ctx) []))
                   limit          (tool-call-limit loop-opts already)
-                  registry       (or (:agent/tool-registry ctx) {})
                   capped-calls   (if (and limit (> (count all-calls) limit))
                                    (take limit all-calls)
                                    all-calls)
@@ -212,6 +223,10 @@
                   ctx'           (-> ctx
                                      (assoc :tool/calls capped-calls
                                             :tool/results results)
+                                     (cond->
+                                       rescued?
+                                       (assoc :agent/pseudo-call-rescued?
+                                              (seq rescued-calls)))
                                      (update :agent/all-tool-results (fnil into []) results))
                   any-unavailable? (some (fn [r]
                                            (str/includes? (str (:result r))

@@ -9,8 +9,12 @@
   (:require [clojure.string :as str]))
 
 (def max-act-nudge-attempts
-  "Cap on plan-then-act follow-up turns per exchange."
-  2)
+  "Cap on plan-then-act follow-up turns per exchange. One nudge, then
+   the planning prose is accepted as the turn's answer: two nudges on
+   weak/reasoning models just produced a second declaration and then a
+   summary-of-declarations (the churn seen in session 828434e7), so
+   more retries make announce-nothing *worse*, not better."
+  1)
 
 (def system-guidance
   "When tools can do the work, call them in this turn. Do not announce a plan and wait for another user message.")
