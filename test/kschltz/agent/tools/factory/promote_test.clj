@@ -38,7 +38,14 @@
         (is (empty? (:ephemeral (proto/-status store))))
         (let [reg-fn (ns-resolve (the-ns 'lateralus.promoted.add-two) 'registry)
               loaded (reg-fn)]
-          (is (= "3" (tool/invoke-tool (get loaded "add_two") {:a 1 :b 2} {})))))
+          (is (= "3" (tool/invoke-tool (get loaded "add_two") {:a 1 :b 2} {}))))
+        (remove-ns 'lateralus.promoted.add-two)
+        (.delete tool-clj)
+        (let [fresh (session/factory-session {:workspace-root root})
+              restored (get (proto/-registry fresh) "add_two")]
+          (is (tool/tool? restored)
+              "catalog embeds the spec so a missing generated source can be recovered")
+          (is (= "3" (tool/invoke-tool restored {:a 1 :b 2} {})))))
       (finally
         (doseq [f (reverse (file-seq (io/file root)))]
           (.delete f))))))
