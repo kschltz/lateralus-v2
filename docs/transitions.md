@@ -143,10 +143,15 @@ exchanges. Integrant tools, MCP session tools, and `tool_define` overlays can be
 selected. `set_tool_enabled`, `runtime_describe`, and factory control tools
 are protected recovery tools.
 
-### `tool_define` / `tool_forget` / `tool_promote`
+### `tool_define` / `tool_test` / `tool_forget` / `tool_promote`
 
-Define a real in-process `Tool` from a persistable spec, drop it, or write it
-to disk as a reusable plugin. See [`docs/runtime-tools.md`](runtime-tools.md).
+Define a real in-process `Tool` from a persistable spec, test it through the
+guarded registry, drop it, or write it to disk as a reusable plugin.
+`tool_test` records a passing exact-output assertion against the current
+spec fingerprint; redefinition invalidates it and `tool_promote` refuses
+untested specs. Runtime-tool maps replace (rather than deep-merge) in the
+outer runtime so forget/promote removals are durable. See
+[`docs/runtime-tools.md`](runtime-tools.md).
 
 ### `set_memory_policy`
 

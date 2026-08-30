@@ -17,16 +17,17 @@ an uberjar workbench cannot persist eval'd vars into `src/`.
 The factory is the missing bridge:
 
 1. **Define** — compile a persistable spec into a `Tool`.
-2. **Use** — the new name is callable this exchange. A parallel call in the
-   same batch is retried after apply; if the model only defined the tool,
-   the follow-up turn is nudged to test it.
-3. **Promote** — write on-disk Tool + plugin source. Explicit only.
+2. **Test** — `tool_test` invokes the tool through the current guarded
+   registry with real arguments and requires an exact expected string.
+3. **Promote** — write on-disk Tool + plugin source. Promotion is explicit
+   and requires a passing test of the current spec fingerprint.
 
 ## Tools
 
 | Tool | Role |
 |------|------|
 | `tool_define` | Propose `:register-runtime-tool`. Compile + overlay happen in apply. |
+| `tool_test` | Invoke with real arguments; record exact-output evidence for the current spec. |
 | `tool_list_runtime` | Read-only inventory of ephemeral + promoted overlay names. |
 | `tool_forget` | Drop a runtime tool from the session overlay. |
 | `tool_promote` | Write files + catalog. `target=workspace` (default) or `project`. |
@@ -59,7 +60,8 @@ The factory is the missing bridge:
 `:as-plugin true` also writes an interceptor plugin that seeds the Tool
 and, when present, the custom enter/leave/error fns.
 
-Defining a tool never writes files. Promotion is always explicit.
+Defining a tool never writes files. Redefinition invalidates prior test
+evidence. Promotion is always explicit and refuses an untested current spec.
 
 ## Integrant
 
@@ -103,4 +105,17 @@ or `{:op :literal :values {…}}`. No network I/O except through a
   emit transitions; apply reconciles the store (same pattern as MCP).
 
 Specs persist on `:agent/runtime-tools` in `:agent/state-delta` so the
-next exchange can rehydrate without files.
+next exchange can rehydrate without files. The outer runtime replaces this
+map wholesale when touched, so forget/promote removals cannot be resurrected
+by deep merge. Rehydrate synchronizes the process-global factory overlay to
+the active Workbench session: absent and changed ephemeral entries are
+removed before missing/current specs are compiled.
+
+Promoted catalog entries retain both generated source metadata and the
+validated ToolSpec. Generated source remains primary; the spec is a recovery
+recipe when a workspace path moves or disappears.
+
+When the secrets plugin is active, it transforms the complete effective
+registry and publishes that transform for same-exchange live-tool refreshes.
+Runtime-created tools therefore receive `{{secret:label}}` substitution and
+result redaction under the same use-without-seeing boundary as static tools.

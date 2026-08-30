@@ -10,16 +10,18 @@ The model never holds a secret value. It references secrets by
 redaction happen inside the tool boundary:
 
 1. **Wrap (`:guard` slot)** — after `plugins.tools` seeds
-   `:agent/tool-registry`, `plugins.secrets` wraps every static
-   `Tool`: model-supplied handles resolve to plaintext at
+   `:agent/tool-registry`, `plugins.secrets` wraps every effective
+   `Tool` (static, MCP, and runtime factory): model-supplied handles resolve to plaintext at
    `:tool/-invoke` time only (substituted args never land on the ctx,
-   only inside the delegate invocation).
+   only inside the delegate invocation). The plugin leaves a registry
+   transform on the exchange context so same-exchange live-tool refreshes
+   reapply the boundary.
 2. **Redact (wrapped `invoke` + `:tools` sweep)** — tool result
    strings are scanned for every stored secret value and replaced with
    `[REDACTED:label]` before they can enter `:tool/results`, in-flight
    messages, the tool transcript, the response, or `:agent/state-delta`
-   (i.e. history + memory persistence). The sweep also covers live
-   MCP/factory tools the wrapper cannot reach.
+   (i.e. history + memory persistence). The sweep remains a second layer
+   for every static and live tool result.
 3. **Read guard (file tools)** — the sealed store path segment
    `.lateralus` is in `file-safety/default-blocked-paths`, so
    `file_read`/`file_search` and the write tools cannot touch it.

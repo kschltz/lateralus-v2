@@ -75,6 +75,11 @@ Examples:
 # Workbench + profile gate
 clojure -M:workbench:run -i
 
+# Workbench + Ollama Cloud (requires OLLAMA_API_KEY and
+# LATERALUS_SECRETS_PASSPHRASE)
+clojure -M:workbench:run -i \
+  --config resources/lateralus/ollama-cloud-workbench.edn
+
 # Named session with an explicit EDN config
 clojure -M:run -s my-session --config resources/lateralus/demo-ollama.edn "Hello"
 
@@ -114,7 +119,7 @@ The default registries give the model, among others:
 | Web | `web_search`, `web_fetch`, `web_extract` |
 | Session config | `set_llm_config`, `set_system_message`, `set_loop_policy`, `set_tool_enabled`, `set_memory_policy`, `list_llm_models`, `reload_runtime` |
 | Introspection | `self_status`, `runtime_describe` |
-| Dynamic tools | `tool_define`, `tool_list_runtime`, `tool_forget`, `tool_promote` |
+| Dynamic tools | `tool_define`, `tool_test`, `tool_list_runtime`, `tool_forget`, `tool_promote` |
 | Workflows | `workflow_register_action`, `workflow_seed`, `workflow_run`, `workflow_status`, `workflow_clear` |
 | Workbench/Portal | `portal_submit`, `portal_clear`, `portal_selected`, `portal_focus` |
 | MCP management | `mcp_list_servers`, `mcp_upsert_server`, `mcp_refresh_server`, `mcp_remove_server` |
@@ -216,10 +221,13 @@ dependency loading. See [`docs/runtime-eval.md`](docs/runtime-eval.md).
 ## Runtime tool factory + workflows
 
 `tool_define` compiles a real protocol `Tool` mid-session (callable on the
-next turn), `tool_list_runtime` inventories ephemeral + promoted names,
-`tool_forget` drops one, `tool_promote` explicitly writes on-disk Tool +
-plugin source (`target=workspace|project`). This is the bridge between
-`clojure_eval` scratch code and persistent capabilities — see
+next turn). `tool_test` runs it through the current guarded registry and
+records an exact-output pass against the current spec; redefinition
+invalidates the pass. `tool_list_runtime` inventories lifecycle state,
+`tool_forget` drops one, and `tool_promote` writes a tested Tool + optional
+plugin source (`target=workspace|project`). Session switches synchronize the
+ephemeral overlay, while promoted catalogs retain a recovery spec. This is
+the bridge between scratch code and persistent capabilities — see
 [`docs/runtime-tools.md`](docs/runtime-tools.md).
 
 `:lateralus/workflow-tools` is an in-process artifact engine: actions declare

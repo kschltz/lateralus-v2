@@ -34,8 +34,8 @@ Lateralus v2 is a single-user LLM agent built around three ideas:
 │  :lateralus/web-tools        ──▶  web `Tool` registry (web_search, web_fetch, web_extract)│
 │  :lateralus/mcp-tools        ──▶  McpSession (boot seed + live overlay)   │
 │  :lateralus/mcp-session-tools──▶  mcp_* control tools                     │
-│  :lateralus/factory-session   ──▶  RuntimeToolStore (tool_define overlay) │
-│  :lateralus/factory-tools     ──▶  tool_define / forget / list / promote  │
+│  :lateralus/factory-session   ──▶  RuntimeToolStore (session-synced overlay)│
+│  :lateralus/factory-tools     ──▶  define / test / forget / list / promote│
 │  :lateralus/factory-plugin    ──▶  seed session + runtime interceptors    │
 │  :lateralus/stream-bus        ──▶  live/historic response metadata        │
 │  :lateralus/stream-plugin     ──▶  wrap LLM + emit thinking/token events  │
