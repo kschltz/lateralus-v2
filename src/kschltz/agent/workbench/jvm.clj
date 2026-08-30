@@ -80,6 +80,57 @@
     (portal/close! portal)
     nil))
 
+(defn handler-ops
+  "Build HTTP callback capabilities. Kept explicit so API groups remain
+   siblings; `http/make-handler` destructures `:settings-ops` and
+   `:secret-ops` independently."
+  [{:keys [workbench-ref runtime-atom secret-store session-store hub]}]
+  {:attach-selection!
+   (fn [] (proto/-attach-selection! @workbench-ref))
+   :session-ops
+   {:list-sessions #(sessions/list-sessions session-store)
+    :create-session #(sessions/create! session-store hub @runtime-atom %)
+    :activate-session #(sessions/activate! session-store hub @runtime-atom %)
+    :rename-session #(sessions/rename! session-store hub %1 %2)
+    :delete-session #(sessions/delete! session-store hub %)}
+   :settings-ops
+   {:view-fn
+    (fn []
+      (when-let [r @runtime-atom]
+        (require 'kschltz.agent.workbench.settings-http)
+        ((resolve 'kschltz.agent.workbench.settings-http/settings-view) r)))
+    :apply-fn
+    (fn [op]
+      (if-let [r @runtime-atom]
+        (do
+          (require 'kschltz.agent.workbench.settings-http)
+          ((resolve 'kschltz.agent.workbench.settings-http/apply-op!)
+           hub r op))
+        {:ok false :error "runtime not attached yet"}))
+    :models-fn
+    (fn [q]
+      (if-let [r @runtime-atom]
+        (do
+          (require 'kschltz.agent.workbench.settings-http)
+          ((resolve 'kschltz.agent.workbench.settings-http/list-models) r q))
+        {:models [] :error "runtime not attached yet"}))}
+   :secret-ops
+   {:view-fn
+    (fn []
+      (require 'kschltz.agent.workbench.secrets-http)
+      ((resolve 'kschltz.agent.workbench.secrets-http/secrets-view)
+       secret-store))
+    :put-fn
+    (fn [op]
+      (require 'kschltz.agent.workbench.secrets-http)
+      ((resolve 'kschltz.agent.workbench.secrets-http/put-secret!)
+       secret-store op))
+    :delete-fn
+    (fn [label]
+      (require 'kschltz.agent.workbench.secrets-http)
+      ((resolve 'kschltz.agent.workbench.secrets-http/delete-secret!)
+       secret-store label))}})
+
 (defn start!
   "Start the workbench plugin. opts — see `schemas/WorkbenchConfig`.
 
@@ -121,41 +172,12 @@
     (reset! handler
             (http/make-handler
              hub
-             {:attach-selection!
-              (fn [] (proto/-attach-selection! @wb-ref))
-              :session-ops
-              {:list-sessions     #(sessions/list-sessions sess-store)
-               :create-session    #(sessions/create! sess-store hub @runtime-atom %)
-               :activate-session  #(sessions/activate! sess-store hub @runtime-atom %)
-               :rename-session    #(sessions/rename! sess-store hub %1 %2)
-               :delete-session    #(sessions/delete! sess-store hub %)}
-              :settings-ops
-              {:view-fn   (fn []
-                            (when-let [r @runtime-atom]
-                              (require 'kschltz.agent.workbench.settings-http)
-                              ((resolve 'kschltz.agent.workbench.settings-http/settings-view) r)))
-               :apply-fn  (fn [op]
-                            (if-let [r @runtime-atom]
-                              (do (require 'kschltz.agent.workbench.settings-http)
-                                  ((resolve 'kschltz.agent.workbench.settings-http/apply-op!)
-                                   hub r op))
-                              {:ok false :error "runtime not attached yet"}))
-               :models-fn (fn [q]
-                            (if-let [r @runtime-atom]
-                              (do (require 'kschltz.agent.workbench.settings-http)
-                                  ((resolve 'kschltz.agent.workbench.settings-http/list-models) r q))
-                              {:models [] :error "runtime not attached yet"}))
-               :secret-ops
-               (let [store (:secret-store opts)]
-                 {:view-fn   (fn []
-                               (require 'kschltz.agent.workbench.secrets-http)
-                               ((resolve 'kschltz.agent.workbench.secrets-http/secrets-view) store))
-                  :put-fn    (fn [op]
-                               (require 'kschltz.agent.workbench.secrets-http)
-                               ((resolve 'kschltz.agent.workbench.secrets-http/put-secret!) store op))
-                  :delete-fn (fn [label]
-                               (require 'kschltz.agent.workbench.secrets-http)
-                               ((resolve 'kschltz.agent.workbench.secrets-http/delete-secret!) store label))})}}))
+             (handler-ops
+              {:workbench-ref wb-ref
+               :runtime-atom runtime-atom
+               :secret-store (:secret-store opts)
+               :session-store sess-store
+               :hub hub})))
     (sessions/persist-current! sess-store hub nil)
     (hub/publish-turn! hub
                        {:role :system
