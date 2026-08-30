@@ -104,6 +104,24 @@
        :tool-name tool-name
        :removed (boolean had?)}))
 
+  (-record-test! [_ tool-name tested-spec-id]
+    (when-not (dynamic-enabled? config)
+      (raise :disabled
+             "Dynamic tool factory is disabled; set :dynamic {:enabled? true} on :lateralus/factory-session"
+             {}))
+    (let [entry (get-in @state [:ephemeral tool-name])
+          current-spec-id (some-> entry :spec proto/spec-id)]
+      (when-not entry
+        (raise :unknown (str "unknown ephemeral runtime tool: " tool-name)
+               {:tool-name tool-name}))
+      (when-not (= current-spec-id tested-spec-id)
+        (raise :stale-test
+               (str "tool_test result is stale for current spec: " tool-name)
+               {:tool-name tool-name}))
+      (swap! state assoc-in [:ephemeral tool-name :tested-spec-id]
+             tested-spec-id)
+      {:ok true :tool-name tool-name :tested true}))
+
   (-promote! [_ tool-name opts]
     (when-not (dynamic-enabled? config)
       (raise :disabled
@@ -114,6 +132,12 @@
           spec (:spec entry)]
       (when-not spec
         (raise :unknown (str "unknown runtime tool: " tool-name)
+               {:tool-name tool-name}))
+      (when (and (get-in @state [:ephemeral tool-name])
+                 (not= (proto/spec-id spec) (:tested-spec-id entry)))
+        (raise :untested
+               (str "runtime tool must pass tool_test before promotion: "
+                    tool-name)
                {:tool-name tool-name}))
       (let [status (promote/promote-spec
                     spec
@@ -157,6 +181,12 @@
     (let [st @state]
       {:dynamic-enabled? (dynamic-enabled? config)
        :ephemeral (vec (sort (keys (:ephemeral st))))
+       :tested (->> (:ephemeral st)
+                    (keep (fn [[name {:keys [spec tested-spec-id]}]]
+                            (when (= tested-spec-id (proto/spec-id spec))
+                              name)))
+                    sort
+                    vec)
        :promoted (vec (sort (keys (:promoted st))))
        :tool-count (+ (count (:ephemeral st)) (count (:promoted st)))}))
 

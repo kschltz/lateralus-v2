@@ -4,7 +4,8 @@
             [kschltz.agent.transitions :as tr]))
 
 (def factory-ops
-  #{:register-runtime-tool :forget-runtime-tool :promote-runtime-tool})
+  #{:register-runtime-tool :forget-runtime-tool
+    :record-runtime-tool-test :promote-runtime-tool})
 
 (defn factory-op?
   [op]
@@ -29,6 +30,7 @@
   (try
     (when (and (contains? #{:register-runtime-tool
                             :forget-runtime-tool
+                            :record-runtime-tool-test
                             :promote-runtime-tool}
                           (:op op))
                (not (proto/-dynamic-enabled? store)))
@@ -41,6 +43,8 @@
             (proto/-define! store (:spec op) {:reserved-names (reserved-names ctx store)})
             :forget-runtime-tool
             (proto/-forget! store (:tool-name op))
+            :record-runtime-tool-test
+            (proto/-record-test! store (:tool-name op) (:spec-id op))
             :promote-runtime-tool
             (proto/-promote! store (:tool-name op)
                              {:as-plugin (:as-plugin op)
@@ -67,6 +71,7 @@
   (case (:op op)
     :register-runtime-tool "tool_define"
     :forget-runtime-tool "tool_forget"
+    :record-runtime-tool-test "tool_test"
     :promote-runtime-tool "tool_promote"
     "tool_define"))
 

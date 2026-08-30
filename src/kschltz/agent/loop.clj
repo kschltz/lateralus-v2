@@ -144,7 +144,8 @@
   "Factory control tools keep full JSON Schema under `:compact` so a
    local model can actually author a Tool instead of falling back to
    clojure_eval."
-  #{"tool_define" "tool_promote" "tool_forget" "tool_list_runtime"})
+  #{"tool_define" "tool_test" "tool_promote"
+    "tool_forget" "tool_list_runtime"})
 
 (defn- outgoing-tool-definition
   [compact? t]

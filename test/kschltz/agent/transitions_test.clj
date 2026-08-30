@@ -149,7 +149,7 @@
         register {:op :register-runtime-tool :spec spec}
         record-test {:op :record-runtime-tool-test
                      :tool-name "add_two"
-                     :spec-id "sha256:test"}
+                     :spec-id (str "sha256:" (apply str (repeat 64 "0")))}
         promote {:op :promote-runtime-tool :tool-name "add_two" :target :workspace}
         {:keys [state applied]} (tr/apply-transitions
                                  {}

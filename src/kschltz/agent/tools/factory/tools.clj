@@ -3,7 +3,8 @@
 
    Mutating tools propose closed transitions. Compile, registry overlay,
    and disk promotion run in the transitions apply interceptor."
-  (:require [clojure.string :as str]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.transitions :as tr]
@@ -41,6 +42,12 @@
 (def ToolNameInput
   [:map {:closed true}
    [:name proto/portable-tool-name]])
+
+(def TestInput
+  [:map {:closed true}
+   [:name proto/portable-tool-name]
+   [:arguments :map]
+   [:expected-output :string]])
 
 (def ListInput
   [:map {:closed true}])
@@ -106,6 +113,66 @@
         :before (proto/-status session)
         :transition {:op :forget-runtime-tool :tool-name name}}))))
 
+(defn- invocation-error?
+  [tool-name actual]
+  (or (and (str/starts-with? actual (str "Tool '" tool-name "'"))
+           (str/includes? actual " validation failed:"))
+      (= "execution"
+         (try
+           (:phase (json/parse-string actual true))
+           (catch Throwable _ nil)))))
+
+(defrecord ToolTestTool [session]
+  tool/Tool
+  (-name [_] "tool_test")
+  (-description [_]
+    "Test one tool_define tool before promotion. Calls it with arguments through the current guarded registry and passes only when its string result exactly equals expected-output. A passing test is tied to the current tool spec; redefining the tool invalidates it. Inspect actual on failure, fix or adjust the tool, and test again before tool_promote.")
+  (-input-schema [_] TestInput)
+  (-output-schema [_] :string)
+  (-invoke [_ {:keys [name arguments expected-output]} ctx]
+    (if-not (proto/runtime-tool-store? session)
+      (tr/encode-result {:ok false :tool "tool_test"
+                         :error "No factory session on context"})
+      (let [spec (get (proto/-specs session) name)
+            runtime-tool (get (proto/-registry session) name)
+            effective-tool (or (tool/resolve-tool
+                                (:agent/tool-registry ctx) name)
+                               runtime-tool)]
+        (cond
+          (nil? spec)
+          (tr/encode-result {:ok false :tool "tool_test"
+                             :phase "unknown"
+                             :error (str "Unknown ephemeral runtime tool: " name)})
+
+          (nil? effective-tool)
+          (tr/encode-result {:ok false :tool "tool_test"
+                             :phase "unavailable"
+                             :error (str "Runtime tool is not callable: " name)})
+
+          :else
+          (let [actual (tool/invoke-tool effective-tool arguments ctx)
+                passed? (and (not (invocation-error? name actual))
+                             (= expected-output actual))]
+            (tr/encode-result
+             (cond-> {:ok passed?
+                      :tool "tool_test"
+                      :tool-name name
+                      :expected expected-output
+                      :actual actual}
+               (not passed?)
+               (assoc :phase (if (invocation-error? name actual)
+                               "execution"
+                               "assertion")
+                      :error (if (invocation-error? name actual)
+                               "Tool invocation failed"
+                               "Actual output did not exactly match expected-output"))
+               passed?
+               (assoc :pending "same-exchange"
+                      :transition
+                      {:op :record-runtime-tool-test
+                       :tool-name name
+                       :spec-id (proto/spec-id spec)})))))))))
+
 (defrecord ToolListRuntimeTool [session]
   tool/Tool
   (-name [_] "tool_list_runtime")
@@ -153,6 +220,7 @@
   (if-not (proto/runtime-tool-store? session)
     {}
     {"tool_define"        (->ToolDefineTool session)
+     "tool_test"          (->ToolTestTool session)
      "tool_forget"        (->ToolForgetTool session)
      "tool_list_runtime"  (->ToolListRuntimeTool session)
      "tool_promote"       (->ToolPromoteTool session)}))
