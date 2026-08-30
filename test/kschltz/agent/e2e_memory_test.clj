@@ -116,6 +116,18 @@
                              "\n")
                         :append true)
         ;; #endregion
+        ;; #region agent log
+        _         (spit "/opt/cursor/logs/debug.log"
+                        (str (json/generate-string
+                              {:hypothesisId "H3"
+                               :location "e2e_memory_test.clj:recall-aware-handler:transport"
+                               :message "fake LLM response transport selected"
+                               :data {:streamRequested (true? (:stream body))
+                                      :responseContentType "application/json"}
+                               :timestamp (System/currentTimeMillis)})
+                             "\n")
+                        :append true)
+        ;; #endregion
         ]
     {:status 200
      :headers {"Content-Type" "application/json"}
