@@ -26,6 +26,18 @@
     (is (thrown-with-msg? Exception #"collides"
                           (proto/-define! store spec {:reserved-names #{"add_two"}})))))
 
+(deftest promotion-requires-a-passing-test-of-current-spec
+  (let [store (session/factory-session {})]
+    (proto/-define! store spec {})
+    (is (thrown-with-msg? Exception #"must pass tool_test"
+                          (proto/-promote! store "add_two" {})))
+    (is (= {:ok true :tool-name "add_two" :tested true}
+           (proto/-record-test! store "add_two" (proto/spec-id spec))))
+    (is (= ["add_two"] (:tested (proto/-status store))))
+    (proto/-define! store (assoc spec :invoke "(fn [_args _ctx] \"changed\")") {})
+    (is (empty? (:tested (proto/-status store)))
+        "redefining a tool invalidates prior test evidence")))
+
 (deftest forget-and-rehydrate
   (let [store (session/factory-session {})]
     (proto/-define! store spec {})

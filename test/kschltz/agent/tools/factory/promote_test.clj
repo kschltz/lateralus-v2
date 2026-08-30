@@ -18,6 +18,7 @@
         store (session/factory-session {:workspace-root root})]
     (try
       (proto/-define! store spec {})
+      (proto/-record-test! store "add_two" (proto/spec-id spec))
       (let [status (proto/-promote! store "add_two"
                                     {:as-plugin true
                                      :target :workspace

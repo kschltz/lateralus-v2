@@ -2,6 +2,7 @@
   (:require [cheshire.core :as json]
             [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.factory.session :as session]
             [kschltz.agent.tools.factory.tools :as tools]
             [kschltz.agent.transitions :as tr]))
@@ -17,7 +18,8 @@
         reg (tools/factory-tools-registry store)
         define (get reg "tool_define")
         parsed (json/parse-string (tool/invoke-tool define spec {}) true)]
-    (is (= #{ "tool_define" "tool_forget" "tool_list_runtime" "tool_promote"}
+    (is (= #{"tool_define" "tool_test" "tool_forget"
+             "tool_list_runtime" "tool_promote"}
            (set (keys reg))))
     (is (true? (:ok parsed)))
     (is (= "register-runtime-tool" (get-in parsed [:transition :op])))
@@ -46,3 +48,31 @@
         parsed (json/parse-string (tool/invoke-tool t {} {}) true)]
     (is (true? (:ok parsed)))
     (is (nil? (:transition parsed)))))
+
+(deftest test-tool-records-only-an-exact-passing-result
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        reg (tools/factory-tools-registry store)
+        test-tool (get reg "tool_test")
+        ctx {:agent/tool-registry
+             (merge reg (proto/-registry store))}
+        passing (json/parse-string
+                 (tool/invoke-tool test-tool
+                                   {:name "add_two"
+                                    :arguments {:a 1 :b 2}
+                                    :expected-output "3"}
+                                   ctx)
+                 true)
+        failing (json/parse-string
+                 (tool/invoke-tool test-tool
+                                   {:name "add_two"
+                                    :arguments {:a 1 :b 2}
+                                    :expected-output "4"}
+                                   ctx)
+                 true)]
+    (is (true? (:ok passing)))
+    (is (= "3" (:actual passing)))
+    (is (= "record-runtime-tool-test" (get-in passing [:transition :op])))
+    (is (false? (:ok failing)))
+    (is (= "3" (:actual failing)))
+    (is (nil? (:transition failing)))))
