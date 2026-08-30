@@ -8,7 +8,9 @@
             [kschltz.agent.plugins.secrets :as plugins.secrets]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.secrets :as secrets]
-            [kschltz.agent.tool :as tool]))
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.factory.protocol :as factory.proto]
+            [kschltz.agent.tools.factory.session :as factory.session]))
 
 (defrecord EchoTool []
   tool/Tool
@@ -17,6 +19,12 @@
   (-input-schema [_] [:map])
   (-output-schema [_] :string)
   (-invoke [_ args _ctx] (pr-str args)))
+
+(def runtime-echo-spec
+  {:name "runtime_echo"
+   :description "Echo runtime tool arguments"
+   :input-schema "[:map]"
+   :invoke "(fn [args _ctx] (pr-str args))"})
 
 (def store-path
   (str (System/getProperty "java.io.tmpdir") "/latsec-plugin/secrets.sealed"))
@@ -48,6 +56,15 @@
       ((:enter seed) c)
       ((:enter wrap) c))))
 
+(defn- factory-chain-ixs
+  [factory]
+  (let [chain (plugin/assemble-chain
+               [(plugins.base/base-plugin)
+                (plugins.tools/tools-plugin {} {:factory-session factory})
+                (plugins.secrets/secrets-plugin {:store @store})])]
+    {:seed (some #(when (= :kschltz.agent.plugins.tools/seed-registry (:name %)) %) chain)
+     :wrap (some #(when (= :kschltz.agent.plugins.secrets/wrap-registry (:name %)) %) chain)}))
+
 (deftest wraps-static-registry-tools-on-guard
   (testing "after seeding, the registry tools are wrapped (slots + behavior)"
     (let [ctx (seed-and-wrap-ctx)
@@ -67,6 +84,37 @@
           (is (not (str/includes? out "sk-wrap-value-77"))))))
     ;; the store must contain the secret for this test to be meaningful
     (is (secrets/-secret-exists? @store "tok"))))
+
+(deftest wraps-live-factory-tools-on-guard
+  (let [factory (factory.session/factory-session {})
+        _ (factory.proto/-define! factory runtime-echo-spec {})
+        _ (secrets/-put-secret! @store "factory-token" "sk-factory-value-123")
+        {:keys [seed wrap]} (factory-chain-ixs factory)
+        ctx (as-> {:llm/request {:messages []}} c
+              ((:enter seed) c)
+              ((:enter wrap) c))
+        out (tool/invoke-tool
+             (get-in ctx [:agent/tool-registry "runtime_echo"])
+             {:token "{{secret:factory-token}}"}
+             ctx)]
+    (is (str/includes? out "[REDACTED:factory-token]"))
+    (is (not (str/includes? out "sk-factory-value-123")))))
+
+(deftest same-exchange-factory-refresh-keeps-secret-wrapping
+  (let [factory (factory.session/factory-session {})
+        _ (secrets/-put-secret! @store "refresh-token" "sk-refresh-value-456")
+        {:keys [seed wrap]} (factory-chain-ixs factory)
+        wrapped-ctx (as-> {:llm/request {:messages [] :tools []}} c
+                      ((:enter seed) c)
+                      ((:enter wrap) c))
+        _ (factory.proto/-define! factory runtime-echo-spec {})
+        refreshed (plugins.tools/refresh-live-tools wrapped-ctx)
+        out (tool/invoke-tool
+             (get-in refreshed [:agent/tool-registry "runtime_echo"])
+             {:token "{{secret:refresh-token}}"}
+             refreshed)]
+    (is (str/includes? out "[REDACTED:refresh-token]"))
+    (is (not (str/includes? out "sk-refresh-value-456")))))
 
 (deftest redact-sweep-scrubs-context
   (testing ":tools-slot enter scrubbs tool results, transcript, and messages"
