@@ -192,6 +192,17 @@
 
   (-rehydrate! [_ specs]
     (let [specs (or specs {})
+          current (:ephemeral @state)
+          removed (->> current
+                       (keep (fn [[name {:keys [spec]}]]
+                               (when (or (not (contains? specs name))
+                                         (not= spec (get specs name)))
+                                 name)))
+                       sort
+                       vec)
+          _ (when (seq removed)
+              (swap! state update :ephemeral
+                     #(apply dissoc (or % {}) removed)))
           existing (set (concat (keys (:ephemeral @state))
                                 (keys (:promoted @state))))
           results (reduce
@@ -210,8 +221,8 @@
                            (update acc :errors conj
                                    {:name name
                                     :error (:error compiled)})))))
-                   {:rehydrated [] :errors []}
-                   specs)
+                   {:rehydrated [] :removed removed :errors []}
+                   (sort-by key specs))
           ;; Remember the failures so the UI/model can be told — these
           ;; used to be swallowed, which made tool_define look like a
           ;; fake success (define ok, tool silently missing forever).

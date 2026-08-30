@@ -80,8 +80,8 @@
   (-status [store]
     "Serializable inventory. MUST NOT raise.")
   (-rehydrate! [store specs]
-    "Compile any specs not already live. Returns status. Missing/invalid
-     specs are reported, not raised.")
+    "Synchronize ephemeral tools to `specs`: remove absent/stale entries,
+     then compile missing/changed specs. Errors are reported, not raised.")
   (-dynamic-enabled? [store]
     "True when agent-driven define/forget/promote is allowed."))
 
