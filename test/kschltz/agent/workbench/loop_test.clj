@@ -9,24 +9,35 @@
             [kschltz.agent.workbench.loop :as loop]
             [kschltz.agent.workbench.protocol :as proto]))
 
+(deftype SessionWorkbench [h closed?]
+  clojure.lang.ILookup
+  (valAt [_ k]
+    (case k
+      :hub h
+      :session-store nil
+      nil))
+  (valAt [this k not-found]
+    (or (.valAt this k) not-found))
+  proto/Workbench
+  (-url [_] "http://unit.test")
+  (-portal-url [_] nil)
+  (-publish! [_ event] (hub/publish-turn! h event))
+  (-await-human! [_ opts] (hub/await-human! h opts))
+  (-attach-selection! [_] nil)
+  (-submit-portal! [_ _ _] nil)
+  (-clear-portal! [_] {:ok true})
+  (-portal-selection [_] nil)
+  (-snapshot [_] (hub/snapshot h))
+  (-tools [_] {})
+  (-close! [_] (reset! closed? true)))
+
 (deftest run-session-var-exists
   (is (fn? loop/run-session!)))
 
 (deftest full-session-runs-runtime-and-publishes-assistant
   (let [h (hub/create-hub {:session-id "full-run-unit"})
         closed? (atom false)
-        wb (reify proto/Workbench
-             (-url [_] "http://unit.test")
-             (-portal-url [_] nil)
-             (-publish! [_ event] (hub/publish-turn! h event))
-             (-await-human! [_ opts] (hub/await-human! h opts))
-             (-attach-selection! [_] nil)
-             (-submit-portal! [_ _ _] nil)
-             (-clear-portal! [_] {:ok true})
-             (-portal-selection [_] nil)
-             (-snapshot [_] (hub/snapshot h))
-             (-tools [_] {})
-             (-close! [_] (reset! closed? true)))
+        wb (->SessionWorkbench h closed?)
         agent-runtime
         (runtime/start
          {:agent/llm-client (llm.client/stub-client)
