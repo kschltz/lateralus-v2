@@ -88,6 +88,20 @@
         answer    (if (seq recalls)
                     (str "I remember: " (first recalls))
                     (str "No memory yet: " last-user))
+        streaming? (true? (:stream body))
+        response-body
+        (if streaming?
+          (str "data: "
+               (json/generate-string
+                {:model (:model body)
+                 :choices [{:delta {:role "assistant" :content answer}
+                            :finish_reason "stop"}]})
+               "\n\ndata: [DONE]\n\n")
+          (json/generate-string
+           {:model (:model body)
+            :choices [{:message {:role "assistant" :content answer}}]}))
+        response-content-type
+        (if streaming? "text/event-stream" "application/json")
         ;; #region agent log
         _         (spit "/opt/cursor/logs/debug.log"
                         (str (json/generate-string
@@ -128,12 +142,22 @@
                              "\n")
                         :append true)
         ;; #endregion
+        ;; #region agent log
+        _         (spit "/opt/cursor/logs/debug.log"
+                        (str (json/generate-string
+                              {:hypothesisId "H3"
+                               :location "e2e_memory_test.clj:recall-aware-handler:fixed-transport"
+                               :message "fake LLM actual response transport"
+                               :data {:streamRequested streaming?
+                                      :responseContentType response-content-type}
+                               :timestamp (System/currentTimeMillis)})
+                             "\n")
+                        :append true)
+        ;; #endregion
         ]
     {:status 200
-     :headers {"Content-Type" "application/json"}
-     :body (json/generate-string
-            {:model (:model body)
-             :choices [{:message {:role "assistant" :content answer}}]})}))
+     :headers {"Content-Type" response-content-type}
+     :body response-body}))
 
 (def ^:private state (atom nil))
 
