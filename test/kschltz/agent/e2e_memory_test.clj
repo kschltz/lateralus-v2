@@ -87,12 +87,24 @@
                        (map second))
         answer    (if (seq recalls)
                     (str "I remember: " (first recalls))
-                    (str "No memory yet: " last-user))]
+                    (str "No memory yet: " last-user))
+        streaming? (true? (:stream body))
+        response-body
+        (if streaming?
+          (str "data: "
+               (json/generate-string
+                {:model (:model body)
+                 :choices [{:delta {:role "assistant" :content answer}
+                            :finish_reason "stop"}]})
+               "\n\ndata: [DONE]\n\n")
+          (json/generate-string
+           {:model (:model body)
+            :choices [{:message {:role "assistant" :content answer}}]}))
+        response-content-type
+        (if streaming? "text/event-stream" "application/json")]
     {:status 200
-     :headers {"Content-Type" "application/json"}
-     :body (json/generate-string
-            {:model (:model body)
-             :choices [{:message {:role "assistant" :content answer}}]})}))
+     :headers {"Content-Type" response-content-type}
+     :body response-body}))
 
 (def ^:private state (atom nil))
 

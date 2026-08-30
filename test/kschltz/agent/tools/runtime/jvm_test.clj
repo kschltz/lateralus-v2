@@ -205,12 +205,12 @@
   (testing "add-lib resolves a real Maven coordinate and the eval runtime
             can then require and use it"
     (let [rt    (jvm/jvm-runtime {})
-          added (proto/-add-libs rt '{org.clojure/data.json {:mvn/version "2.5.0"}} {})]
+          added (proto/-add-libs rt '{org.clojure/data.csv {:mvn/version "1.1.0"}} {})]
       (is (nil? (:error added)) (str "add-libs error: " (:error added)))
-      (is (some #(str/includes? % "data.json") (:added added)))
-      (let [res (proto/-eval rt "(require '[clojure.data.json :as json]) (json/write-str {:a 1})" {})]
+      (is (some #(str/includes? % "data.csv") (:added added)))
+      (let [res (proto/-eval rt "(require '[clojure.data.csv :as csv]) (with-out-str (csv/write-csv *out* [[\"a\" \"b\"]]))" {})]
         (is (nil? (:error res)))
-        (is (str/includes? (:value res) "a"))))))
+        (is (str/includes? (:value res) "a,b"))))))
 
 (deftest eval-code-signals-reader-eval-disabled
   (testing "audit 2026-07 rec #8: the result envelope carries
