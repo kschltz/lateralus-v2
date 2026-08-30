@@ -198,7 +198,10 @@
         entry (cond-> {:name name
                        :ns (str tool-ns)
                        :path tool-path
-                       :target (keyword target)}
+                       :target (keyword target)
+                       ;; The source artifact is primary; the validated spec
+                       ;; is a recovery recipe when paths move or disappear.
+                       :spec spec}
                 plugin-ns (assoc :plugin-ns (str plugin-ns)
                                  :plugin-path plugin-path))
         catalog (write-catalog! root (upsert-catalog (read-catalog root) entry))]
