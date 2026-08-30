@@ -22,7 +22,8 @@
             [kschltz.agent.plugins.summarizer :as plugins.summarizer]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.runtime :as runtime]
-            [kschltz.agent.tool :as tool]))
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.transitions :as transitions]))
 
 ;; ---- Helpers ----
 
@@ -86,6 +87,22 @@
           :agent/session-id
           :agent/token-usage
           :agent/last-request-messages))
+
+(def runtime-tool-spec
+  {:name "add_two"
+   :description "Add two integers"
+   :input-schema "[:map [:a :int] [:b :int]]"
+   :invoke "(fn [args _ctx] (str (+ (:a args) (:b args))))"})
+
+(defn- transition-chain
+  [op]
+  [{:name ::runtime-tool-transition
+    :leave
+    (fn [ctx]
+      (let [before (:agent/state ctx)
+            after (transitions/apply-transition before op)]
+        (assoc ctx :agent/state-delta
+               (transitions/durable-delta before after [op]))))}])
 
 ;; ---- Tests ----
 
@@ -197,6 +214,30 @@
       (runtime/send-message runtime "third")
       (is (= {:n 3 :config {:turn 2 :extra :three}} (user-state runtime))
           "scalar :extra is last-write-wins; nested :turn keeps its prior value"))))
+
+(deftest forget-runtime-tool-replaces-durable-tool-map
+  (let [op {:op :forget-runtime-tool :tool-name "add_two"}
+        runtime (runtime/start
+                 {:initial-state
+                  {:agent/runtime-tools {"add_two" runtime-tool-spec}}
+                  :exchange-chain (transition-chain op)})]
+    (runtime/send-message runtime "forget add_two")
+    (is (= {} (:agent/runtime-tools (runtime/export-state runtime)))
+        "an empty post-forget map must remove the prior durable spec")))
+
+(deftest promote-runtime-tool-replaces-durable-tool-map
+  (let [op {:op :promote-runtime-tool
+            :tool-name "add_two"
+            :target :workspace}
+        runtime (runtime/start
+                 {:initial-state
+                  {:agent/runtime-tools {"add_two" runtime-tool-spec}}
+                  :exchange-chain (transition-chain op)})]
+    (runtime/send-message runtime "promote add_two")
+    (is (= {} (:agent/runtime-tools (runtime/export-state runtime)))
+        "promotion must remove the ephemeral durable spec")
+    (is (= ["add_two"]
+           (:agent/promoted-tools (runtime/export-state runtime))))))
 
 (deftest session-loop-policy-overrides-boot-policy-on-later-exchanges
   (let [seen (atom [])
