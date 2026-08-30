@@ -143,8 +143,12 @@
 
 (deftest wrap-cache-identity-stable
   (testing "same static registry identity → same wrapped tool instances"
-    (let [ctx1 (seed-and-wrap-ctx)
-          ctx2 (seed-and-wrap-ctx)]
+    (let [{:keys [seed wrap]} (assembled-chain-ixs)
+          build-ctx #(as-> {:llm/request {:messages []}} c
+                       ((:enter seed) c)
+                       ((:enter wrap) c))
+          ctx1 (build-ctx)
+          ctx2 (build-ctx)]
       (is (identical? (get (:agent/tool-registry ctx1) "echo")
                       (get (:agent/tool-registry ctx2) "echo"))))))
 (deftest handles-tool-is-advertised
