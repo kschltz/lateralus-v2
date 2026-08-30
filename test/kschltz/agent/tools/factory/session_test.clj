@@ -49,6 +49,26 @@
       (is (= "3" (tool/invoke-tool (get (proto/-registry store) "add_two")
                                    {:a 1 :b 2} {}))))))
 
+(deftest rehydrate-synchronizes-the-session-ephemeral-set
+  (let [store (session/factory-session {})]
+    (proto/-define! store spec {})
+    (is (contains? (proto/-registry store) "add_two"))
+    (let [synced (proto/-rehydrate! store {})]
+      (is (true? (:ok synced)))
+      (is (= ["add_two"] (:removed synced)))
+      (is (empty? (proto/-registry store))
+          "a Workbench session with no specs must not inherit another session's tool"))))
+
+(deftest rehydrate-replaces-a-changed-spec
+  (let [store (session/factory-session {})
+        changed (assoc spec :invoke "(fn [_args _ctx] \"changed\")")]
+    (proto/-define! store spec {})
+    (let [synced (proto/-rehydrate! store {"add_two" changed})
+          live (get (proto/-registry store) "add_two")]
+      (is (true? (:ok synced)))
+      (is (= ["add_two"] (:rehydrated synced)))
+      (is (= "changed" (tool/invoke-tool live {:a 1 :b 2} {}))))))
+
 (deftest interceptor-is-stored-by-slot
   (let [store (session/factory-session {})
         ix-spec (assoc spec
