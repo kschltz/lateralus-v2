@@ -96,7 +96,9 @@
         _ (factory.proto/-define! factory runtime-echo-spec {})
         _ (secrets/-put-secret! @store "factory-token" "sk-factory-value-123")
         {:keys [seed wrap]} (factory-chain-ixs factory)
-        ctx (as-> {:llm/request {:messages []}} c
+        ctx (as-> {:agent/state
+                   {:agent/runtime-tools {"runtime_echo" runtime-echo-spec}}
+                   :llm/request {:messages []}} c
               ((:enter seed) c)
               ((:enter wrap) c))
         out (tool/invoke-tool
@@ -114,7 +116,10 @@
                       ((:enter seed) c)
                       ((:enter wrap) c))
         _ (factory.proto/-define! factory runtime-echo-spec {})
-        refreshed (plugins.tools/refresh-live-tools wrapped-ctx)
+        refreshed (plugins.tools/refresh-live-tools
+                   (assoc-in wrapped-ctx
+                             [:agent/state :agent/runtime-tools "runtime_echo"]
+                             runtime-echo-spec))
         out (tool/invoke-tool
              (get-in refreshed [:agent/tool-registry "runtime_echo"])
              {:token "{{secret:refresh-token}}"}

@@ -4,6 +4,7 @@
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.apply :as apply]
+            [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.factory.session :as session]
             [kschltz.agent.transitions :as tr]
             [kschltz.agent.transitions.interceptors :as tr.ix]))
@@ -43,9 +44,10 @@
 
 (deftest refresh-live-tools-merges-factory-registry
   (let [store (session/factory-session {})
-        _ (kschltz.agent.tools.factory.protocol/-define! store spec {})
+        _ (proto/-define! store spec {})
         ctx (plugins.tools/refresh-live-tools
-             {:agent/static-tool-registry {}
+             {:agent/state {:agent/runtime-tools {"add_two" spec}}
+              :agent/static-tool-registry {}
               :agent/factory-session store
               :llm/request {:tools []}})]
     (is (contains? (:agent/tool-registry ctx) "add_two"))))
