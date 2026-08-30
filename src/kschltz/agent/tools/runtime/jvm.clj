@@ -20,7 +20,8 @@
    functions are Malli-instrumented (input + output) via `m/=>` plus
    `malli.instrument/instrument!` scoped to this namespace, on top of the
    protocol that already isolates them."
-  (:require [kschltz.agent.tools.runtime.protocol :as proto]
+  (:require [cheshire.core :as json]
+            [kschltz.agent.tools.runtime.protocol :as proto]
             [kschltz.agent.tools.runtime.schemas :as schemas]
             [malli.core :as m]
             [malli.instrument :as mi])
@@ -281,11 +282,53 @@
   (try
     (let [add-libs (requiring-resolve 'clojure.repl.deps/add-libs)
           repl-var (resolve 'clojure.core/*repl*)
+          current-basis (requiring-resolve 'clojure.java.basis/current-basis)
+          select-requested (fn [basis]
+                             (into {}
+                                   (map (fn [[lib coord]] [(str lib) coord]))
+                                   (select-keys (:libs basis) (keys coords))))
+          basis-before (current-basis)
+          ;; #region agent log
+          _         (spit "/opt/cursor/logs/debug.log"
+                          (str (json/generate-string
+                                {:hypothesisId "H4,H5"
+                                 :location "tools/runtime/jvm.clj:add-libs*:before"
+                                 :message "runtime dependency load starting"
+                                 :data {:coords (into {}
+                                                      (map (fn [[lib coord]] [(str lib) coord]))
+                                                      coords)
+                                        :basisRequested (select-requested basis-before)
+                                        :dynamicClassloader (instance? DynamicClassLoader cl)
+                                        :classloaderUrlCount
+                                        (if (instance? DynamicClassLoader cl)
+                                          (count (.getURLs ^DynamicClassLoader cl))
+                                          nil)}
+                                 :timestamp (System/currentTimeMillis)})
+                               "\n")
+                          :append true)
+          ;; #endregion
           added    (with-classloader cl
                      (fn []
                        (if repl-var
                          (with-bindings {repl-var true} (add-libs coords))
-                         (add-libs coords))))]
+                         (add-libs coords))))
+          ;; #region agent log
+          _         (spit "/opt/cursor/logs/debug.log"
+                          (str (json/generate-string
+                                {:hypothesisId "H4,H5"
+                                 :location "tools/runtime/jvm.clj:add-libs*:after"
+                                 :message "runtime dependency load returned"
+                                 :data {:rawAdded (mapv str added)
+                                        :basisRequested (select-requested (current-basis))
+                                        :classloaderUrlCount
+                                        (if (instance? DynamicClassLoader cl)
+                                          (count (.getURLs ^DynamicClassLoader cl))
+                                          nil)}
+                                 :timestamp (System/currentTimeMillis)})
+                               "\n")
+                          :append true)
+          ;; #endregion
+          ]
       {:added        (mapv str added)
        :status       :ok
        :error        nil

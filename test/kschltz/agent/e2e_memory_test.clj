@@ -87,7 +87,36 @@
                        (map second))
         answer    (if (seq recalls)
                     (str "I remember: " (first recalls))
-                    (str "No memory yet: " last-user))]
+                    (str "No memory yet: " last-user))
+        ;; #region agent log
+        _         (spit "/opt/cursor/logs/debug.log"
+                        (str (json/generate-string
+                              {:hypothesisId "H1,H2"
+                               :location "e2e_memory_test.clj:recall-aware-handler:entry"
+                               :message "fake LLM request decoded"
+                               :data {:uri (:uri req)
+                                      :method (some-> (:request-method req) name)
+                                      :model (:model body)
+                                      :messageCount (count messages)
+                                      :roles (mapv :role messages)
+                                      :recallCount (count recalls)}
+                               :timestamp (System/currentTimeMillis)})
+                             "\n")
+                        :append true)
+        ;; #endregion
+        ;; #region agent log
+        _         (spit "/opt/cursor/logs/debug.log"
+                        (str (json/generate-string
+                              {:hypothesisId "H1,H2"
+                               :location "e2e_memory_test.clj:recall-aware-handler:exit"
+                               :message "fake LLM response composed"
+                               :data {:answerLength (count answer)
+                                      :recallPresent (boolean (seq recalls))}
+                               :timestamp (System/currentTimeMillis)})
+                             "\n")
+                        :append true)
+        ;; #endregion
+        ]
     {:status 200
      :headers {"Content-Type" "application/json"}
      :body (json/generate-string
@@ -157,6 +186,36 @@
           rt     (runtime/start agent "mem-session")
           out1   (runtime/send-message rt "My favorite color is blue")
           out2   (runtime/send-message rt "What is my favorite color?")
+          ;; #region agent log
+          _      (spit "/opt/cursor/logs/debug.log"
+                       (str (json/generate-string
+                             {:hypothesisId "H1,H3"
+                              :location "e2e_memory_test.clj:e2e-memory-recalls:out1"
+                              :message "first exchange returned"
+                              :data {:llmResponseType (some-> (:llm/response out1) class .getName)
+                                     :llmContentLength (count (schemas/extract-text (:llm/response out1)))
+                                     :exchangeContentLength (count (or (:exchange/response out1) ""))
+                                     :toolCallCount (count (or (:tool/calls out1) []))
+                                     :emptyRetryAttempts (or (:agent/empty-retry-attempts out1) 0)}
+                              :timestamp (System/currentTimeMillis)})
+                            "\n")
+                       :append true)
+          ;; #endregion
+          ;; #region agent log
+          _      (spit "/opt/cursor/logs/debug.log"
+                       (str (json/generate-string
+                             {:hypothesisId "H1,H3"
+                              :location "e2e_memory_test.clj:e2e-memory-recalls:out2"
+                              :message "second exchange returned"
+                              :data {:llmResponseType (some-> (:llm/response out2) class .getName)
+                                     :llmContentLength (count (schemas/extract-text (:llm/response out2)))
+                                     :exchangeContentLength (count (or (:exchange/response out2) ""))
+                                     :toolCallCount (count (or (:tool/calls out2) []))
+                                     :emptyRetryAttempts (or (:agent/empty-retry-attempts out2) 0)}
+                              :timestamp (System/currentTimeMillis)})
+                            "\n")
+                       :append true)
+          ;; #endregion
           _      (runtime/stop rt)
           _      (ig/halt! sys)]
       (is (some? (:llm/response out1))
