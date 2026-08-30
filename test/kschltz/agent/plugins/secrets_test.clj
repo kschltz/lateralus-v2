@@ -29,9 +29,14 @@
 (def store-path
   (str (System/getProperty "java.io.tmpdir") "/latsec-plugin/secrets.sealed"))
 
-(defn- cleanup! [_]
+(defn- cleanup!
+  [test-fn]
   (let [f (java.io.File. store-path)]
-    (when (.exists f) (.delete f))))
+    (when (.exists f) (.delete f))
+    (try
+      (test-fn)
+      (finally
+        (when (.exists f) (.delete f))))))
 
 (use-fixtures :each cleanup!)
 
@@ -67,7 +72,8 @@
 
 (deftest wraps-static-registry-tools-on-guard
   (testing "after seeding, the registry tools are wrapped (slots + behavior)"
-    (let [ctx (seed-and-wrap-ctx)
+    (let [_ (secrets/-put-secret! @store "tok" "sk-wrap-value-77")
+          ctx (seed-and-wrap-ctx)
           {:keys [wrap redact]} (assembled-chain-ixs)]
       (is (= :guard (:plugin/slot wrap)))
       (is (= :tools (:plugin/slot redact)))
