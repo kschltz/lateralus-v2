@@ -1,12 +1,64 @@
 (ns kschltz.agent.workbench.loop-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [kschltz.agent.llm.client :as llm.client]
+            [kschltz.agent.plugin :as plugin]
+            [kschltz.agent.plugins.base :as plugins.base]
+            [kschltz.agent.runtime :as runtime]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.loop :as loop]
             [kschltz.agent.workbench.protocol :as proto]))
 
 (deftest run-session-var-exists
   (is (fn? loop/run-session!)))
+
+(deftest full-session-runs-runtime-and-publishes-assistant
+  (let [h (hub/create-hub {:session-id "full-run-unit"})
+        closed? (atom false)
+        wb (reify proto/Workbench
+             (-url [_] "http://unit.test")
+             (-portal-url [_] nil)
+             (-publish! [_ event] (hub/publish-turn! h event))
+             (-await-human! [_ opts] (hub/await-human! h opts))
+             (-attach-selection! [_] nil)
+             (-submit-portal! [_ _ _] nil)
+             (-clear-portal! [_] {:ok true})
+             (-portal-selection [_] nil)
+             (-snapshot [_] (hub/snapshot h))
+             (-tools [_] {})
+             (-close! [_] (reset! closed? true)))
+        agent-runtime
+        (runtime/start
+         {:agent/llm-client (llm.client/stub-client)
+          :initial-state {:model "stub/v0"
+                          :agent/system-message "Unit full run"}
+          :exchange-chain
+          (plugin/assemble-chain [(plugins.base/base-plugin)])}
+         "full-run-unit")
+        session-run (future
+                      (loop/run-session! agent-runtime wb
+                                         {:stdin-feeder? false}))]
+    (hub/enqueue-human! h {:text "hello workbench" :refs []})
+    (let [snapshot
+          (loop [attempts 100]
+            (let [snapshot (hub/snapshot h)]
+              (if (or (and (= :waiting (:status snapshot))
+                           (some #(= :assistant (:role %))
+                                 (:turns snapshot)))
+                      (zero? attempts))
+                snapshot
+                (do (Thread/sleep 10)
+                    (recur (dec attempts))))))
+          assistant-turns (filter #(= :assistant (:role %))
+                                  (:turns snapshot))]
+      (is (= 1 (count assistant-turns)))
+      (is (str/includes? (:text (first assistant-turns))
+                         "lateralus-v2 stub LLM echoed: hello workbench"))
+      (is (= :waiting (:status snapshot))
+          "the completed exchange returns to the long-session waiting state"))
+    (hub/enqueue-human! h {:text "/quit" :refs []})
+    (is (= :quit (deref session-run 2000 ::timeout)))
+    (is (true? @closed?))))
 
 (deftest guard-assistant-event-sanitizes-fake-cites
   (let [h (hub/create-hub {})
