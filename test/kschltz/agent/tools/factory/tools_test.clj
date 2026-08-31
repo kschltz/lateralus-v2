@@ -1,5 +1,6 @@
 (ns kschltz.agent.tools.factory.tools-test
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as proto]
@@ -191,6 +192,79 @@
     (is (true? (:ok parsed)))
     (is (= "3" (:actual parsed)))
     (is (= "record-runtime-tool-test" (get-in parsed [:transition :op])))))
+
+(deftest test-tool-accepts-snake-case-expected-output
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 (get registry "tool_test")
+                 {:tool "add_two"
+                  :args {:a 1 :b 2}
+                  :expected_output "3"}
+                 {:agent/tool-registry
+                  (merge registry (proto/-registry store))})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "3" (:actual parsed)))))
+
+(deftest test-tool-defaults-unique-ephemeral-name
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 (get registry "tool_test")
+                 {:arguments {:a 1 :b 2}
+                  :expected-output "3"}
+                 {:agent/tool-registry
+                  (merge registry (proto/-registry store))})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "add_two" (:tool-name parsed)))))
+
+(deftest test-tool-probes-when-expected-output-is-missing
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 (get registry "tool_test")
+                 {:name "add_two"
+                  :arguments {:a 1 :b 2}}
+                 {:agent/tool-registry
+                  (merge registry (proto/-registry store))})
+                true)]
+    (is (false? (:ok parsed)))
+    (is (= "probe" (:phase parsed)))
+    (is (= "3" (:actual parsed)))
+    (is (nil? (:transition parsed)))
+    (is (str/includes? (str (:error parsed)) "expected-output"))))
+
+(deftest promote-accepts-tool-alias
+  (let [store (session/factory-session {})
+        promote (get (tools/factory-tools-registry store) "tool_promote")
+        _ (proto/-define! store spec {})
+        _ (proto/-record-test! store "add_two" (proto/spec-id spec))
+        parsed (json/parse-string
+                (tool/invoke-tool promote {:tool "add_two" :target "workspace"} {})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "add_two" (:tool-name parsed)))
+    (is (= "promote-runtime-tool" (get-in parsed [:transition :op])))))
+
+(deftest promote-defaults-unique-tested-name
+  (let [store (session/factory-session {})
+        promote (get (tools/factory-tools-registry store) "tool_promote")
+        _ (proto/-define! store spec {})
+        _ (proto/-record-test! store "add_two" (proto/spec-id spec))
+        parsed (json/parse-string
+                (tool/invoke-tool promote {:target "workspace"} {})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "add_two" (:tool-name parsed)))
+    (is (= "promote-runtime-tool" (get-in parsed [:transition :op])))))
 
 (deftest promote-tool-preflights-unknown-and-untested-tools
   (let [store (session/factory-session {})

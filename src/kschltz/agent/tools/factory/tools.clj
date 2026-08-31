@@ -166,10 +166,13 @@
 (def TestInput
   [:and
    [:map
-    [:name proto/portable-tool-name]
+    [:name {:optional true} proto/portable-tool-name]
+    [:tool {:optional true} proto/portable-tool-name]
     [:arguments {:optional true} :map]
     [:args {:optional true} :map]
-    [:expected-output :string]
+    [:expected-output {:optional true} :string]
+    [:expected_output {:optional true} :string]
+    [:expected {:optional true} :string]
     [:input-context {:optional true} :map]
     [:output-context {:optional true} :map]]
    [:fn {:error/message "tool_test requires arguments or args"}
@@ -182,16 +185,48 @@
   [:map])
 
 (def PromoteInput
-  [:and
-   [:map
-    [:name {:optional true} proto/portable-tool-name]
-    [:tool {:optional true} proto/portable-tool-name]
-    [:as-plugin {:optional true} :boolean]
-    [:target {:optional true} [:enum "workspace" "project" :workspace :project]]]
-   [:fn {:error/message "tool_promote requires name or tool"}
-    (fn [input]
-      (or (string? (:name input))
-          (string? (:tool input))))]])
+  [:map
+   [:name {:optional true} proto/portable-tool-name]
+   [:tool {:optional true} proto/portable-tool-name]
+   [:as-plugin {:optional true} :boolean]
+   [:target {:optional true} [:enum "workspace" "project" :workspace :project]]])
+
+(defn- unique-status-name
+  "When the session has exactly one name across `ks` status buckets, use it."
+  [session ks]
+  (when (proto/runtime-tool-store? session)
+    (let [status (proto/-status session)
+          names (into []
+                      (comp (mapcat #(or (get status %) []))
+                            (distinct))
+                      ks)]
+      (when (= 1 (count names))
+        (first names)))))
+
+(defn- coerce-control-input
+  [input]
+  (into {}
+        (map (fn [[k v]] [(kebab-key k) v]))
+        (or input {})))
+
+(defn- coerce-test-input
+  [session input]
+  (let [input (coerce-control-input input)
+        expected (or (:expected-output input)
+                     (:expected input))]
+    (cond-> (dissoc input :expected)
+      (string? expected) (assoc :expected-output expected)
+      (nil? (:name input))
+      (assoc :name (or (:tool input)
+                       (unique-status-name session [:ephemeral :tested]))))))
+
+(defn- coerce-promote-input
+  [session input]
+  (let [input (coerce-control-input input)]
+    (cond-> input
+      (nil? (:name input))
+      (assoc :name (or (:tool input)
+                       (unique-status-name session [:tested :ephemeral]))))))
 
 (defn- coerce-target
   [target]
@@ -261,52 +296,74 @@
   tool/Tool
   (-name [_] "tool_test")
   (-description [_]
-    "Test one tool_define tool before promotion. Calls it with arguments through the current guarded registry and passes only when its string result exactly equals expected-output. A passing test is tied to the current tool spec; redefining the tool invalidates it. Inspect actual on failure, fix or adjust the tool, and test again before tool_promote.")
+    "Test one tool_define tool before promotion. Calls it with arguments (or args) through the current guarded registry and passes only when its string result exactly equals expected-output (aliases: expected_output, expected). name may be omitted when this session has exactly one ephemeral tool; tool is an alias for name. Omit expected-output to probe: the result includes actual and does not mark the tool tested. A passing test is tied to the current tool spec; redefining the tool invalidates it. Inspect actual on failure, fix or adjust the tool, and test again before tool_promote.")
   (-input-schema [_] TestInput)
   (-output-schema [_] :string)
-  (-invoke [_ {:keys [name arguments args expected-output]} ctx]
+  (-invoke [_ raw-input ctx]
     (if-not (proto/runtime-tool-store? session)
       (tr/encode-result {:ok false :tool "tool_test"
                          :error "No factory session on context"})
-      (let [spec (get (proto/-specs session) name)
-            runtime-tool (get (proto/-registry session) name)
-            effective-tool (or (tool/resolve-tool
-                                (:agent/tool-registry ctx) name)
-                               runtime-tool)]
+      (let [{:keys [name arguments args expected-output]}
+            (coerce-test-input session raw-input)]
         (cond
-          (nil? spec)
-          (tr/encode-result {:ok false :tool "tool_test"
-                             :phase "unknown"
-                             :error (str "Unknown ephemeral runtime tool: " name)})
-
-          (nil? effective-tool)
-          (tr/encode-result {:ok false :tool "tool_test"
-                             :phase "unavailable"
-                             :error (str "Runtime tool is not callable: " name)})
+          (not (string? name))
+          (tr/encode-result
+           {:ok false :tool "tool_test" :phase "unknown"
+            :error "tool_test requires name, or exactly one ephemeral tool in this session"})
 
           :else
-          (let [actual (tool/invoke-tool effective-tool (or arguments args) ctx)
-                passed? (and (not (invocation-error? name actual))
-                             (= expected-output actual))]
-            (tr/encode-result
-             (cond-> {:ok passed?
-                      :tool "tool_test"
-                      :tool-name name
-                      :expected expected-output
-                      :actual actual}
-               (not passed?)
-               (assoc :phase (if (invocation-error? name actual)
-                               "execution"
-                               "assertion")
-                      :error (if (invocation-error? name actual)
-                               "Tool invocation failed"
-                               "Actual output did not exactly match expected-output"))
-               passed?
-               (assoc :pending "same-exchange"
-                      :transition
-                      {:op :record-runtime-tool-test
-                       :tool-name name
-                       :spec-id (proto/spec-id spec)})))))))))
+          (let [spec (get (proto/-specs session) name)
+                runtime-tool (get (proto/-registry session) name)
+                effective-tool (or (tool/resolve-tool
+                                    (:agent/tool-registry ctx) name)
+                                   runtime-tool)]
+            (cond
+              (nil? spec)
+              (tr/encode-result {:ok false :tool "tool_test"
+                                 :phase "unknown"
+                                 :error (str "Unknown ephemeral runtime tool: " name)})
+
+              (nil? effective-tool)
+              (tr/encode-result {:ok false :tool "tool_test"
+                                 :phase "unavailable"
+                                 :error (str "Runtime tool is not callable: " name)})
+
+              :else
+              (let [actual (tool/invoke-tool effective-tool (or arguments args) ctx)]
+                (cond
+                  (not (string? expected-output))
+                  (tr/encode-result
+                   {:ok false
+                    :tool "tool_test"
+                    :tool-name name
+                    :phase "probe"
+                    :actual actual
+                    :error (str "tool_test requires expected-output. "
+                                "If actual is correct, retry with expected-output "
+                                "set to that exact string.")})
+
+                  :else
+                  (let [passed? (and (not (invocation-error? name actual))
+                                     (= expected-output actual))]
+                    (tr/encode-result
+                     (cond-> {:ok passed?
+                              :tool "tool_test"
+                              :tool-name name
+                              :expected expected-output
+                              :actual actual}
+                       (not passed?)
+                       (assoc :phase (if (invocation-error? name actual)
+                                       "execution"
+                                       "assertion")
+                              :error (if (invocation-error? name actual)
+                                       "Tool invocation failed"
+                                       "Actual output did not exactly match expected-output"))
+                       passed?
+                       (assoc :pending "same-exchange"
+                              :transition
+                              {:op :record-runtime-tool-test
+                               :tool-name name
+                               :spec-id (proto/spec-id spec)})))))))))))))
 
 (defrecord ToolListRuntimeTool [session]
   tool/Tool
@@ -329,57 +386,66 @@
   tool/Tool
   (-name [_] "tool_promote")
   (-description [_]
-    "Promote a tool_define spec to reusable on-disk source. target=workspace (default) writes .lateralus/promoted/<name>/ and load-files it — works in Docker/uberjar when the workspace is writable. target=project writes src/kschltz/agent/tools/promoted/ plus a test ns (host source tree). as-plugin true also writes a real interceptor plugin. Explicit only — defining a tool does not write files.")
+    "Promote a tool_define spec to reusable on-disk source. name may be omitted when this session has exactly one tested tool; tool is an alias for name. target=workspace (default) writes .lateralus/promoted/<name>/ and load-files it — works in Docker/uberjar when the workspace is writable. target=project writes src/kschltz/agent/tools/promoted/ plus a test ns (host source tree). as-plugin true also writes a real interceptor plugin. Explicit only — defining a tool does not write files.")
   (-input-schema [_] PromoteInput)
   (-output-schema [_] :string)
-  (-invoke [_ {:keys [name tool as-plugin target]} _ctx]
-    (let [name (or name tool)]
-      (if-not (proto/runtime-tool-store? session)
+  (-invoke [_ raw-input _ctx]
+    (let [{:keys [name as-plugin target]} (coerce-promote-input session raw-input)]
+      (cond
+        (not (string? name))
+        (tr/encode-result
+         {:ok false :tool "tool_promote" :phase "unknown"
+          :error "tool_promote requires name or tool, or exactly one tested tool in this session"})
+
+        (not (proto/runtime-tool-store? session))
         (tr/encode-result {:ok false :tool "tool_promote" :error "No factory session on context"})
-        (if-not (proto/-dynamic-enabled? session)
-          (tr/encode-result {:ok false :tool "tool_promote"
-                             :error "Dynamic tool factory is disabled"
-                             :phase "disabled"})
-          (let [status (proto/-status session)
+
+        (not (proto/-dynamic-enabled? session))
+        (tr/encode-result {:ok false :tool "tool_promote"
+                           :error "Dynamic tool factory is disabled"
+                           :phase "disabled"})
+
+        :else
+        (let [status (proto/-status session)
               ephemeral (set (:ephemeral status))
               tested (set (:tested status))
               promoted (set (:promoted status))]
-            (cond
-              (contains? promoted name)
-              (tr/encode-result {:ok true
-                                 :tool "tool_promote"
-                                 :tool-name name
-                                 :phase "already-promoted"
-                                 :status status})
+          (cond
+            (contains? promoted name)
+            (tr/encode-result {:ok true
+                               :tool "tool_promote"
+                               :tool-name name
+                               :phase "already-promoted"
+                               :status status})
 
-              (not (contains? ephemeral name))
-              (tr/encode-result {:ok false
-                                 :tool "tool_promote"
-                                 :tool-name name
-                                 :phase "unknown"
-                                 :error (str "Unknown ephemeral runtime tool: " name
-                                             ". Call tool_define first.")
-                                 :status status})
+            (not (contains? ephemeral name))
+            (tr/encode-result {:ok false
+                               :tool "tool_promote"
+                               :tool-name name
+                               :phase "unknown"
+                               :error (str "Unknown ephemeral runtime tool: " name
+                                           ". Call tool_define first.")
+                               :status status})
 
-              (not (contains? tested name))
-              (tr/encode-result {:ok false
-                                 :tool "tool_promote"
-                                 :tool-name name
-                                 :phase "needs-test"
-                                 :error (str "Runtime tool must pass tool_test before promotion: "
-                                             name)
-                                 :status status})
+            (not (contains? tested name))
+            (tr/encode-result {:ok false
+                               :tool "tool_promote"
+                               :tool-name name
+                               :phase "needs-test"
+                               :error (str "Runtime tool must pass tool_test before promotion: "
+                                           name)
+                               :status status})
 
-              :else
-              (tr/encode-result
-               {:ok true
-                :tool "tool_promote"
-                :pending "same-exchange"
-                :tool-name name
-                :before status
-                :transition (cond-> {:op :promote-runtime-tool :tool-name name}
-                              (some? as-plugin) (assoc :as-plugin (boolean as-plugin))
-                              target (assoc :target (coerce-target target)))}))))))))
+            :else
+            (tr/encode-result
+             {:ok true
+              :tool "tool_promote"
+              :pending "same-exchange"
+              :tool-name name
+              :before status
+              :transition (cond-> {:op :promote-runtime-tool :tool-name name}
+                            (some? as-plugin) (assoc :as-plugin (boolean as-plugin))
+                            target (assoc :target (coerce-target target)))})))))))
 
 (defn factory-tools-registry
   "Control tools bound to `session`. Empty when session is missing."
