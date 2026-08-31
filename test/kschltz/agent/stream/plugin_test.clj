@@ -88,13 +88,13 @@
                                            :model "fake/v0"}}
                           "stream-tool-result-test")
         result (runtime/send-message rt "call the audit tool")
-        turn-id (:stream/turn-id result)]
-    (let [events (->> (:events (bus/snapshot b turn-id))
-                      (filter #(= "tool-result" (:type %)))
-                      vec)]
-      (is (= 1 (count events)))
-      (is (= "audit_echo" (:tool-name (first events))))
-      (is (= "guarded-result" (:tool-result (first events)))))))
+        turn-id (:stream/turn-id result)
+        events (->> (:events (bus/snapshot b turn-id))
+                    (filter #(= "tool-result" (:type %)))
+                    vec)]
+    (is (= 1 (count events)))
+    (is (= "audit_echo" (:tool-name (first events))))
+    (is (= "guarded-result" (:tool-result (first events))))))
 
 (deftest assembled-chain-emits-only-redacted-tool-result-content
   (let [path (str (System/getProperty "java.io.tmpdir")
