@@ -16,7 +16,8 @@
    `compose-tool-results` (harvest then apply), then compose — so
    mid-loop config / MCP changes take effect on the next LLM call and
    composed tool messages reflect reconcile success or failure."
-  (:require [kschltz.agent.plugins.tools :as tools.plugin]
+  (:require [cheshire.core :as json]
+            [kschltz.agent.plugins.tools :as tools.plugin]
             [kschltz.agent.tools.factory.apply :as factory.apply]
             [kschltz.agent.tools.factory.protocol :as factory.proto]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
@@ -258,6 +259,39 @@
                         (rewrite-results-for-outcomes outcomes)
                         (factory.apply/rewrite-results factory-outcomes))
             n (count (or (:tool/results ctx) []))
+            ;; #region agent log
+            _ (spit "/opt/cursor/logs/debug.log"
+                    (str (json/generate-string
+                          {:hypothesisId "D,E"
+                           :location "transitions/interceptors.clj:apply:after"
+                           :message "applied queued lifecycle transitions"
+                           :data
+                           {:sessionId (:exchange/session-id ctx)
+                            :turnId (:stream/turn-id ctx)
+                            :ops (mapv (fn [op]
+                                         {:op (str (:op op))
+                                          :toolName
+                                          (or (:tool-name op)
+                                              (get-in op [:spec :name]))})
+                                       ops)
+                            :factoryOutcomes
+                            (mapv (fn [{:keys [op outcome]}]
+                                    {:op (str (:op op))
+                                     :toolName
+                                     (or (:tool-name op)
+                                         (get-in op [:spec :name]))
+                                     :ok (boolean (:ok outcome))
+                                     :phase (:phase outcome)
+                                     :class (:class outcome)})
+                                  factory-outcomes)
+                            :factoryStatus
+                            (when has-factory? (factory.proto/-status factory))
+                            :runtimeToolNames
+                            (vec (sort (keys (:agent/runtime-tools state))))}
+                           :timestamp (System/currentTimeMillis)})
+                         "\n")
+                    :append true)
+            ;; #endregion
             ctx' (-> ctx
                      (assoc :agent/state state
                             :agent/loop-opts
