@@ -4,6 +4,7 @@
    Mutating tools propose closed transitions. Compile, registry overlay,
    and disk promotion run in the transitions apply interceptor."
   (:require [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as proto]
@@ -29,8 +30,14 @@
 
 (defn- object-schema->malli
   [schema]
-  (let [required (set (map #(keyword (name %)) (:required schema)))
-        properties (sort-by (comp name key) (:properties schema))]
+  (let [properties-map (or (:properties schema) (:keys schema) {})
+        required (into
+                  (set (map #(keyword (name %)) (:required schema)))
+                  (keep (fn [[k property]]
+                          (when (true? (:required property))
+                            (keyword (name k)))))
+                  properties-map)
+        properties (sort-by (comp name key) properties-map)]
     (into
      [:map]
      (map (fn [[raw-key property-schema]]
@@ -60,6 +67,22 @@
       :vector [:vector (json-schema->malli (:items schema))]
       :any)))
 
+(defn- normalize-input-schema
+  [schema]
+  (cond
+    (map? schema)
+    (json-schema->malli schema)
+
+    (string? schema)
+    (let [parsed (try
+                   (edn/read-string schema)
+                   (catch Throwable _ ::invalid))]
+      (if (and (map? parsed) (contains? parsed :type))
+        (json-schema->malli parsed)
+        schema))
+
+    :else schema))
+
 (defn normalize-tool-spec
   "Accept the shapes models actually emit; persist a closed ToolSpec."
   [spec]
@@ -69,12 +92,10 @@
         aliased (cond-> model-spec
                   (and (nil? (:input-schema model-spec))
                        (contains? model-spec :schema))
-                  (assoc :input-schema
-                         (let [schema (:schema model-spec)]
-                           (if (map? schema)
-                             (json-schema->malli schema)
-                             schema))))
-        spec (dissoc aliased :schema)]
+                  (assoc :input-schema (:schema model-spec)))
+        spec (cond-> (dissoc aliased :schema)
+               (some? (:input-schema aliased))
+               (update :input-schema normalize-input-schema))]
     (cond-> spec
       (and (some? (:input-schema spec)) (not (string? (:input-schema spec))))
       (update :input-schema pr-str)
@@ -90,10 +111,18 @@
    [:name proto/portable-tool-name]])
 
 (def TestInput
-  [:map {:closed true}
-   [:name proto/portable-tool-name]
-   [:arguments :map]
-   [:expected-output :string]])
+  [:and
+   [:map
+    [:name proto/portable-tool-name]
+    [:arguments {:optional true} :map]
+    [:args {:optional true} :map]
+    [:expected-output :string]
+    [:input-context {:optional true} :map]
+    [:output-context {:optional true} :map]]
+   [:fn {:error/message "tool_test requires arguments or args"}
+    (fn [input]
+      (or (map? (:arguments input))
+          (map? (:args input))))]])
 
 (def ListInput
   [:map {:closed true}])
@@ -175,7 +204,7 @@
     "Test one tool_define tool before promotion. Calls it with arguments through the current guarded registry and passes only when its string result exactly equals expected-output. A passing test is tied to the current tool spec; redefining the tool invalidates it. Inspect actual on failure, fix or adjust the tool, and test again before tool_promote.")
   (-input-schema [_] TestInput)
   (-output-schema [_] :string)
-  (-invoke [_ {:keys [name arguments expected-output]} ctx]
+  (-invoke [_ {:keys [name arguments args expected-output]} ctx]
     (if-not (proto/runtime-tool-store? session)
       (tr/encode-result {:ok false :tool "tool_test"
                          :error "No factory session on context"})
@@ -196,7 +225,7 @@
                              :error (str "Runtime tool is not callable: " name)})
 
           :else
-          (let [actual (tool/invoke-tool effective-tool arguments ctx)
+          (let [actual (tool/invoke-tool effective-tool (or arguments args) ctx)
                 passed? (and (not (invocation-error? name actual))
                              (= expected-output actual))]
             (tr/encode-result
