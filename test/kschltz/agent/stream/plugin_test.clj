@@ -94,7 +94,7 @@
                       vec)]
       (is (= 1 (count events)))
       (is (= "audit_echo" (:tool-name (first events))))
-      (is (= "guarded-result" (:tool-result (first events))))))
+      (is (= "guarded-result" (:tool-result (first events)))))))
 
 (deftest assembled-chain-emits-only-redacted-tool-result-content
   (let [path (str (System/getProperty "java.io.tmpdir")
