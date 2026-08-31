@@ -124,7 +124,7 @@
    the ctx unchanged, the dissoc is the de facto \"handled\" mark."
   [ctx interceptor]
   (if-some [f (:error interceptor)]
-    (let [{:keys [exception] :as error} (::error ctx)]
+    (let [{:keys [exception]} (::error ctx)]
       (try
         (-> (f (dissoc ctx ::error) exception)
             (check-instrumented interceptor :error))
