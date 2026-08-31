@@ -107,8 +107,11 @@
     cond
     case
     let
+    let*
     letfn
     fn
+    fn*
+    loop*
     do
     str
     pr-str
