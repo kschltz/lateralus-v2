@@ -1,8 +1,10 @@
 (ns kschltz.agent.tools.factory.compile
-  "In-process ToolCompiler: schema + eval of invoke / interceptor fns.
+  "ToolCompiler: schema + SCI sandbox or trusted in-process eval.
 
-   Uses Clojure 1.12 `add-libs` (via `ClojureRuntime`) when a spec names
-   extra Maven/Git coords. `*read-eval*` is off; evaluation is explicit.
+   Secret-enabled sessions force SCI with no host classes/context and reject
+   dependencies, requires, and interceptors. Trusted non-secret sessions may
+   use Clojure 1.12 `add-libs` (via `ClojureRuntime`) when a spec names extra
+   Maven/Git coords. `*read-eval*` is off; evaluation is explicit.
    Invoke/interceptor bodies are read with the FULL Clojure reader (not
    `clojure.edn`) so `#(fn-literal)` and `#\"regex\"` forms — which
    model-written bodies routinely contain — parse. `clojure.edn` raises

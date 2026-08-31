@@ -18,6 +18,13 @@ The CLI model picker and profile wizard use `ModelCatalog`; they do not call
 the HTTP model-list functions directly. Local file I/O and the optional local
 `clj-kondo` subprocess are not network boundaries.
 
+When a secret store is active, runtime-authored tools run in SCI and cannot
+open sockets, use Java interop, load dependencies, or receive the host
+interceptor context. Their only I/O path is
+`lateralus.runtime/call-tool`, which accepts operator-allowlisted host tool
+names. Secret handles resolve only inside a separately configured host-tool
+capability, so plaintext never enters model-authored code.
+
 New network-backed capabilities must add:
 
 1. A protocol consumed by tools/interceptors.

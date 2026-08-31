@@ -12,13 +12,11 @@
    passphrase comes from the environment (`:passphrase-env`), never
    from config text.
 
-   Trust model (honest version): this is a best-effort defense against
-   secret exfiltration from the model's context, not a security
-   boundary against process-level compromise. The broker/store share
-   the agent JVM; a determined in-process adversary (e.g. unrestricted
-   `clojure_eval`) can still reach the store. Keep `tools.runtime`
-   disabled or sandboxed when real secrets are in play, and prefer
-   excluding the key from the model registry entirely (see the plugin)."
+   Trust model: runtime-authored tools are untrusted and must remain in
+   the SCI sandbox; only operator-granted host tools may resolve selected
+   labels. Literal redaction is defense-in-depth, not the boundary. The
+   broker/store still share the JVM with trusted host code, so a malicious
+   host dependency or implementation remains outside this guarantee."
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.walk :as walk]

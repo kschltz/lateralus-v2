@@ -280,6 +280,12 @@
     [:map-of :string
      [:map [:labels [:or [:= :all] [:set :string]]]]]]])
 
+(defmethod ig/assert-key :lateralus/secret-store [_ config]
+  (assert-malli! :lateralus/secret-store SecretStoreConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/secret-plugin [_ config]
+  (assert-malli! :lateralus/secret-plugin SecretPluginConfig config))
+
 ;; ---- Component definitions ----
 
 (defmethod ig/init-key :lateralus/llm-client [_ {:keys [impl] :as opts}]

@@ -249,9 +249,15 @@
       (throw (ex-info
               "A factory session with a secret store must enable the sandbox"
               {:phase :sandbox :kind :unsafe-secret-factory-config})))
-    (cond-> config
-      (and secret-store? (= ::unset explicit))
-      (assoc-in [:sandbox :enabled?] true))))
+    (let [config (cond-> config
+                   (and secret-store? (= ::unset explicit))
+                   (assoc-in [:sandbox :enabled?] true))]
+      (when (and (true? (get-in config [:sandbox :enabled?]))
+                 (proto/tool-compiler? (:compiler config)))
+        (throw (ex-info
+                "Sandboxed factory sessions cannot inject a custom compiler"
+                {:phase :sandbox :kind :unsafe-custom-compiler})))
+      config)))
 
 (defn factory-session
   "Build a `RuntimeToolStore`.

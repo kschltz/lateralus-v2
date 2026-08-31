@@ -160,7 +160,7 @@
   tool/Tool
   (-name [_] "tool_define")
   (-description [_]
-    "Create a callable session tool now: name, description, input-schema (EDN Malli string or schema object), invoke (Clojure string of (fn [args ctx] result); one-argument (fn [args] result) is also accepted). Do not use clojure_eval. Network I/O must use existing protocol-backed web_* or MCP tools, never direct sockets/URL/slurp. Call tool_test after define; only a passing exact-output test permits tool_promote. Optional libs/require/alias and interceptor-slot plus interceptor-enter/leave/error. Emits a transition; compile + registry refresh happen before compose.")
+    "Create a callable session tool now: name, description, input-schema (EDN Malli string or schema object), invoke (Clojure string of (fn [args ctx] result); one-argument (fn [args] result) is also accepted). Do not use clojure_eval. In a secret-enabled Workbench, code runs in SCI: ctx is nil, Java/I/O/libs/require/interceptors are forbidden, and protocol I/O must use (lateralus.runtime/call-tool \"operator_allowlisted_tool\" args). Runtime tools receive {{secret:label}} handles, never plaintext. Call tool_test after define; only a passing exact-output test permits workspace spec promotion. Emits a transition; compile + registry refresh happen before compose.")
   (-input-schema [_] DefineInput)
   (-output-schema [_] :string)
   (-invoke [_ spec _ctx]

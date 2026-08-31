@@ -3,24 +3,19 @@
 
    Two interceptors:
 
-     :guard — AFTER `plugins.tools` seeded the registry on ctx (plugin
-              declaration order, same slot), wrap every static Tool in
-              the registry with `secrets/wrap-tool`: model-supplied
-              `{{secret:label}}` handles resolve to plaintext only
-              inside `-invoke`, and tool result strings are redacted
-              before they can enter `:tool/results` / messages.
+     :guard — AFTER `plugins.tools` seeded the registry on ctx, wrap every
+              effective Tool. Operator-granted trusted host tools resolve
+              selected labels; untrusted runtime tools retain opaque
+              handles. Every result is redacted before it can enter
+              `:tool/results` / messages.
 
      :tools — belt-and-braces sweep `:enter` that redacts stored values
               out of `:tool/results`, `:agent/all-tool-results`,
               `:agent/tool-transcript`, `:llm/request :messages`,
-              `:exchange/response`, and `:agent/state-delta`. Catches
-              live (MCP/factory) tools that the :guard wrapper cannot
-              reach and anything a tool echoed into the follow-up
-              request.
+              `:exchange/response`, and `:agent/state-delta`.
 
-   The needle set is computed lazily per exchange and cached; set the
-   plugin rebuild hook to pick up store mutations mid-session (runtime
-   reload does this for other plugins too).
+   Needle sets are recomputed so operator store mutations are reflected
+   immediately.
 
    One model-visible tool IS contributed (operator-turn-offable via
    `:advertise-handle-tool?`): `secret_list_handles`, which returns the

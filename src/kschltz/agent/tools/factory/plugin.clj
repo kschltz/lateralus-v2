@@ -4,7 +4,7 @@
             [kschltz.agent.tools.factory.protocol :as proto]))
 
 (def system-guidance
-  "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then use tool_test with real arguments and the exact expected output. A passing test is required before tool_promote and is invalidated by redefinition. Do not clojure_eval a substitute.")
+  "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then use tool_test with real arguments and the exact expected output. A passing test is required before tool_promote and is invalidated by redefinition. Do not clojure_eval a substitute. In a secret-enabled sandbox, runtime code receives opaque {{secret:label}} handles and nil ctx; use lateralus.runtime/call-tool for an operator-allowlisted protocol tool. Java, raw I/O, libs, require, and runtime interceptors are unavailable.")
 
 (def ^:private dispatch-slots
   "Slots that can host a runtime-defined interceptor without a rebuild."

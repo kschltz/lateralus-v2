@@ -123,7 +123,7 @@ The default registries give the model, among others:
 | Workflows | `workflow_register_action`, `workflow_seed`, `workflow_run`, `workflow_status`, `workflow_clear` |
 | Workbench/Portal | `portal_submit`, `portal_clear`, `portal_selected`, `portal_focus` |
 | MCP management | `mcp_list_servers`, `mcp_upsert_server`, `mcp_refresh_server`, `mcp_remove_server` |
-| Secrets (opt-in) | `secret_list_handles` |
+| Secrets (opt-in) | `secret_list_handles`, `secret_check` |
 | Skills (opt-in) | `load_skill`, `read_skill_file` |
 
 ## Session transitions
@@ -224,10 +224,13 @@ dependency loading. See [`docs/runtime-eval.md`](docs/runtime-eval.md).
 next turn). `tool_test` runs it through the current guarded registry and
 records an exact-output pass against the current spec; redefinition
 invalidates the pass. `tool_list_runtime` inventories lifecycle state,
-`tool_forget` drops one, and `tool_promote` writes a tested Tool + optional
-plugin source (`target=workspace|project`). Session switches synchronize the
-ephemeral overlay, while promoted catalogs retain a recovery spec. This is
-the bridge between scratch code and persistent capabilities — see
+`tool_forget` drops one, and `tool_promote` persists it. With secrets active,
+runtime code executes in SCI without host context/JVM I/O, receives opaque
+secret handles, and can compose only operator-allowlisted protocol tools;
+promotion stores a sandboxed workspace spec rather than host-loadable source.
+Non-secret operator profiles retain generated-source targets. Session switches
+synchronize the ephemeral overlay, while promoted catalogs retain a recovery
+spec. This is the bridge between scratch code and persistent capabilities — see
 [`docs/runtime-tools.md`](docs/runtime-tools.md).
 
 `:lateralus/workflow-tools` is an in-process artifact engine: actions declare
@@ -482,8 +485,9 @@ Recently completed:
   `session_http`, `secrets_http` surfaces
 - **Portal 2-way loop** — `portal_selected` read-back and `/api/portal-event`
   artifact call-back; interactive-artifact guidance
-- **Secrets plugin** — sealed `LATSEC1` store, `{{secret:label}}` substitution,
-  output redaction sweep, `secret_list_handles`, opt-in Integrant wiring
+- **Secrets plugin** — sealed `LATSEC1` store, deny-by-default per-tool/label
+  capabilities, untrusted-runtime plaintext isolation, output redaction sweep,
+  `secret_list_handles` / `secret_check`, opt-in Integrant wiring
 - **Skill packs** — `.edn` skills with Malli-closed schema, tiered progressive
   disclosure (`load_skill` / `read_skill_file`), fail-closed loading
 - **Runtime tool factory + workflow engine** — `tool_define`/`tool_promote`,

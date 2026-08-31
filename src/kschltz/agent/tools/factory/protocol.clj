@@ -1,10 +1,10 @@
 (ns kschltz.agent.tools.factory.protocol
   "Runtime tool factory protocols.
 
-   Workbench can define a Tool in-session (Clojure 1.12 eval / add-libs)
-   and later promote the spec to an on-disk plugin. Compile and I/O sit
-   behind these protocols so tests can stub them and implementations
-   stay Malli-instrumented."
+   Workbench can define a Tool in-session (SCI when secrets are active;
+   trusted Clojure eval/add-libs otherwise) and later promote the spec.
+   Compile and I/O sit behind these protocols so tests can stub them and
+   implementations stay Malli-instrumented."
   (:require [kschltz.agent.plugin :as plugin]
             [kschltz.agent.tool :as tool]
             [malli.core :as m]
