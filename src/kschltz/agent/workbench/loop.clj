@@ -2,8 +2,7 @@
   "Outer UI-session loop for the workbench plugin: park on web chat,
    run one agent exchange, publish artifacts back into the chat pane.
    The exchange chain itself is never parked."
-  (:require [cheshire.core :as json]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.session.manager :as sessions]
@@ -134,23 +133,6 @@
         event  (guard-assistant-event result workbench)
         original (with-turn-id (public-event event) result)
         original-turn-id (:turn-id original)]
-    ;; #region agent log
-    (spit "/opt/cursor/logs/debug.log"
-          (str (json/generate-string
-                {:hypothesisId "L"
-                 :location "workbench/loop.clj:run-exchange:guard"
-                 :message "evaluated Portal repair guard"
-                 :data {:turnId original-turn-id
-                        :needsRepair (boolean (::needs-repair? event))
-                        :claimsPortal (cite/claims-portal-delivery? (:exchange/response result))
-                        :submitSucceeded (cite/portal-submit-succeeded?
-                                          (tool-results result))
-                        :toolNames (mapv #(get-in % [:call :function :name])
-                                         (tool-results result))}
-                 :timestamp (System/currentTimeMillis)})
-               "\n")
-          :append true)
-    ;; #endregion
     (if-not (::needs-repair? event)
       original
       (do
@@ -162,20 +144,6 @@
         (let [repair (runtime/send-message runtime cite/repair-prompt)
               fixed  (guard-assistant-event repair workbench)
               repaired (with-turn-id (public-event fixed) repair)]
-          ;; #region agent log
-          (spit "/opt/cursor/logs/debug.log"
-                (str (json/generate-string
-                      {:hypothesisId "L"
-                       :location "workbench/loop.clj:run-exchange:repair"
-                       :message "linked original and repair turns"
-                       :data {:originalTurnId original-turn-id
-                              :repairTurnId (:turn-id repaired)
-                              :repairRole (some-> repaired :role name)
-                              :stillNeedsRepair (boolean (::needs-repair? fixed))}
-                       :timestamp (System/currentTimeMillis)})
-                     "\n")
-                :append true)
-          ;; #endregion
           repaired)))))
 
 (defn- session-command?
@@ -268,19 +236,6 @@
          (let [msg     (wb/await-human!* workbench {})
                prompt  (hub/format-prompt msg)
                trimmed (str/trim (str (:text msg)))]
-           ;; #region agent log
-           (spit "/opt/cursor/logs/debug.log"
-                 (str (json/generate-string
-                       {:hypothesisId "F,H,I"
-                        :location "workbench/loop.clj:run-session:dequeued"
-                        :message "dequeued Workbench message"
-                        :data {:sessionId (:session-id (hub/snapshot (:hub workbench)))
-                               :runtimeSessionId (runtime/session-id runtime)
-                               :textChars (count trimmed)}
-                        :timestamp (System/currentTimeMillis)})
-                      "\n")
-                 :append true)
-           ;; #endregion
            (cond
              (#{"/quit" "/exit"} trimmed)
              (do (wb/publish! workbench {:role :system :text "Goodbye."})
@@ -296,40 +251,11 @@
                (hub/set-status! h :running "model working…")
                (try
                  (let [event (run-exchange! runtime workbench prompt)]
-                   ;; #region agent log
-                   (spit "/opt/cursor/logs/debug.log"
-                         (str (json/generate-string
-                               {:hypothesisId "H,I"
-                                :location "workbench/loop.clj:run-session:exchange-returned"
-                                :message "Workbench exchange returned"
-                                :data {:sessionId (:session-id (hub/snapshot h))
-                                       :role (some-> event :role name)
-                                       :hasTurnId (boolean (:turn-id event))
-                                       :textChars (count (str (:text event)))}
-                                :timestamp (System/currentTimeMillis)})
-                              "\n")
-                         :append true)
-                   ;; #endregion
                    (wb/publish! workbench event)
                    (when-let [store (:session-store workbench)]
                      (sessions/persist-current! store h runtime))
                    (hub/set-status! h :waiting "ready for your next message"))
                  (catch Throwable t
-                   ;; #region agent log
-                   (spit "/opt/cursor/logs/debug.log"
-                         (str (json/generate-string
-                               {:hypothesisId "G,H,I"
-                                :location "workbench/loop.clj:run-session:error"
-                                :message "Workbench exchange threw"
-                                :data {:sessionId (:session-id (hub/snapshot h))
-                                       :exceptionClass (.getName (class t))
-                                       :hasMessage (boolean (some-> t ex-message seq))
-                                       :safeErrorData (select-keys (ex-data t)
-                                                                  [:kind :status :phase])}
-                                :timestamp (System/currentTimeMillis)})
-                              "\n")
-                         :append true)
-                   ;; #endregion
                    (let [msg (friendly-exchange-error t nil)]
                      (wb/publish! workbench
                                   {:role :error :text msg})

@@ -10,8 +10,7 @@
    Writes go through `kschltz.agent.transitions/apply-transition` onto
    the runtime state atom (the same algebra the chain commits), never
    ad-hoc mutation. Secrets are never returned: only `:api-key-set`."
-  (:require [cheshire.core :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.config.catalog :as catalog]
             [kschltz.agent.transitions :as tr]
@@ -85,24 +84,8 @@
     {:ok false :error (pr-str (tr/explain-transition op))}
 
     :else
-    (let [before @(:state runtime)
-          after  (swap! (:state runtime) tr/apply-transition op)]
-      ;; #region agent log
-      (spit "/opt/cursor/logs/debug.log"
-            (str (json/generate-string
-                  {:hypothesisId "K"
-                   :location "workbench/settings_http.clj:apply-op"
-                   :message "applied Workbench settings transition"
-                   :data {:sessionId (or (:agent/session-id after)
-                                         (:session-id runtime))
-                          :op (some-> op :op name)
-                          :requestedModel (:model op)
-                          :modelBefore (:model before)
-                          :modelAfter (:model after)}
-                   :timestamp (System/currentTimeMillis)})
-                 "\n")
-            :append true)
-      ;; #endregion
+    (do
+      (swap! (:state runtime) tr/apply-transition op)
       {:ok true :op (:op op)})))
 
 (defn list-models

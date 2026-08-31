@@ -231,26 +231,6 @@
             effective-tool (or (tool/resolve-tool
                                 (:agent/tool-registry ctx) name)
                                runtime-tool)]
-        ;; #region agent log
-        (spit "/opt/cursor/logs/debug.log"
-              (str (json/generate-string
-                    {:hypothesisId "E"
-                     :location "factory/tools.clj:tool-test:before"
-                     :message "resolved runtime tool for lifecycle test"
-                     :data {:sessionId (:exchange/session-id ctx)
-                            :turnId (:stream/turn-id ctx)
-                            :toolName name
-                            :factoryStatus (proto/-status session)
-                            :specPresent (boolean spec)
-                            :runtimeToolPresent (boolean runtime-tool)
-                            :contextToolPresent
-                            (boolean (tool/resolve-tool
-                                      (:agent/tool-registry ctx) name))
-                            :effectiveToolPresent (boolean effective-tool)}
-                     :timestamp (System/currentTimeMillis)})
-                   "\n")
-              :append true)
-        ;; #endregion
         (cond
           (nil? spec)
           (tr/encode-result {:ok false :tool "tool_test"

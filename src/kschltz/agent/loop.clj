@@ -10,8 +10,7 @@
    results; `:finalize` loops or ensures a textual response. Provider-
    neutral tool data lives on ctx; OpenAI-shaped messages are built only
    when composing the follow-up request."
-  (:require [cheshire.core :as json]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [kschltz.agent.chain :as chain]
             [kschltz.agent.interceptors :as ix]
             [kschltz.agent.llm.schemas :as schemas]
@@ -321,26 +320,6 @@
                                                         (seq results)
                                                         implemented?)
                                      :else (-continue? loop ctx))]
-              ;; #region agent log
-              (spit "/opt/cursor/logs/debug.log"
-                    (str (json/generate-string
-                          {:hypothesisId "B,C"
-                           :location "loop.clj:tool-loop-interceptor"
-                           :message "evaluated tool loop continuation"
-                           :data {:depth depth
-                                  :configuredMaxDepth ctx-max-depth
-                                  :resultTools
-                                  (mapv #(get-in % [:call :function :name])
-                                        results)
-                                  :resultCount (count results)
-                                  :allResultCount (count all-results)
-                                  :implemented (boolean implemented?)
-                                  :overTotal (boolean over-total?)
-                                  :shouldContinue (boolean should-continue?)}
-                           :timestamp (System/currentTimeMillis)})
-                         "\n")
-                    :append true)
-              ;; #endregion
               (cond
                 over-total?
                 (stall/persist ctx {:agent/loop-continuing? false

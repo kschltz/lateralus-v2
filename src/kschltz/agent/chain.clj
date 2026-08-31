@@ -37,7 +37,6 @@
    after every stage; a non-nil result throws with the offending
    interceptor's name and the explanation. With the flag off, validate
    is never called."
-  (:require [cheshire.core :as json])
   (:import [clojure.lang PersistentQueue]))
 
 (def ^:private empty-queue PersistentQueue/EMPTY)
@@ -126,22 +125,6 @@
   [ctx interceptor]
   (if-some [f (:error interceptor)]
     (let [{:keys [exception] :as error} (::error ctx)]
-      ;; #region agent log
-      (spit "/opt/cursor/logs/debug.log"
-            (str (json/generate-string
-                  {:hypothesisId "D"
-                   :location "chain.clj:try-error"
-                   :message "chain error reached handler"
-                   :data {:handler (str (:name interceptor))
-                          :throwingInterceptor (str (:interceptor/name error))
-                          :stage (str (:chain/stage error))
-                          :exceptionClass (some-> exception class .getName)
-                          :hasMessage (boolean (some-> exception ex-message seq))
-                          :safeErrorData (select-keys error [:kind :status :phase])}
-                   :timestamp (System/currentTimeMillis)})
-                 "\n")
-            :append true)
-      ;; #endregion
       (try
         (-> (f (dissoc ctx ::error) exception)
             (check-instrumented interceptor :error))

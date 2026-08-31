@@ -13,8 +13,7 @@
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.schemas :as schemas]
             [kschltz.agent.workbench.session-http :as session-http]
-            [org.httpkit.server :as http-kit])
-  (:import [java.lang ProcessHandle]))
+            [org.httpkit.server :as http-kit]))
   ;; http-kit is on the classpath only via the :workbench / :portal alias, which
   ;; is also the only path that loads this namespace (system.clj requires it
   ;; lazily via `requiring-resolve`). `with-channel` is a MACRO and cannot be
@@ -195,24 +194,6 @@
     (if-let [purl (:portal-url snap)]
       (assoc snap :portal-url (portal-url-for-request purl req))
       snap)))
-
-;; #region agent log
-(defn- log-session-affinity!
-  [endpoint expected actual]
-  (spit "/opt/cursor/logs/debug.log"
-        (str (json/generate-string
-              {:hypothesisId "M"
-               :location "workbench/http.clj:session-affinity"
-               :message "checked Workbench request session affinity"
-               :data {:endpoint endpoint
-                      :expectedSessionId expected
-                      :actualSessionId actual
-                      :matched (or (nil? expected)
-                                   (= (str expected) (str actual)))}
-               :timestamp (System/currentTimeMillis)})
-             "\n")
-        :append true))
-;; #endregion
 
 (defn- session-conflict-response
   [expected actual]
@@ -412,7 +393,6 @@
                    (locking hub
                      (let [expected (:session-id body*)
                            actual   (:session-id (hub/snapshot hub))]
-                       (log-session-affinity! "settings" expected actual)
                        (or (session-conflict-response expected actual)
                            (let [result ((:apply-fn settings-ops) op)]
                              (if (:ok result)
@@ -505,40 +485,11 @@
                (locking hub
                  (let [expected (:session-id body)
                        actual   (:session-id (hub/snapshot hub))]
-                   (log-session-affinity! "message" expected actual)
                    (or
                     (session-conflict-response expected actual)
                     (do
-                      ;; #region agent log
-                      (spit "/opt/cursor/logs/debug.log"
-                            (str (json/generate-string
-                                  {:hypothesisId "F,G,J"
-                                   :location "workbench/http.clj:api-message:before"
-                                   :message "received Workbench message request"
-                                   :data {:pid (.pid (ProcessHandle/current))
-                                          :sessionId (:session-id (hub/snapshot hub))
-                                          :status (some-> (hub/snapshot hub) :status name)
-                                          :textChars (count (:text msg))
-                                          :refCount (count (:refs msg))}
-                                   :timestamp (System/currentTimeMillis)})
-                                 "\n")
-                            :append true)
-                      ;; #endregion
                       (hub/enqueue-human! hub msg)
                       (when on-message (on-message msg))
-                      ;; #region agent log
-                      (spit "/opt/cursor/logs/debug.log"
-                            (str (json/generate-string
-                                  {:hypothesisId "F,G,J"
-                                   :location "workbench/http.clj:api-message:after"
-                                   :message "enqueued Workbench message request"
-                                   :data {:sessionId (:session-id (hub/snapshot hub))
-                                          :status (some-> (hub/snapshot hub) :status name)
-                                          :turnCount (count (:turns (hub/snapshot hub)))}
-                                   :timestamp (System/currentTimeMillis)})
-                                 "\n")
-                            :append true)
-                      ;; #endregion
                       (json-response {:ok true}))))))
 
              (and (= method :post) (= path "/api/portal-event"))
