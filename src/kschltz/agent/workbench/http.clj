@@ -196,6 +196,32 @@
       (assoc snap :portal-url (portal-url-for-request purl req))
       snap)))
 
+;; #region agent log
+(defn- log-session-affinity!
+  [endpoint expected actual]
+  (spit "/opt/cursor/logs/debug.log"
+        (str (json/generate-string
+              {:hypothesisId "M"
+               :location "workbench/http.clj:session-affinity"
+               :message "checked Workbench request session affinity"
+               :data {:endpoint endpoint
+                      :expectedSessionId expected
+                      :actualSessionId actual
+                      :matched (or (nil? expected)
+                                   (= (str expected) (str actual)))}
+               :timestamp (System/currentTimeMillis)})
+             "\n")
+        :append true))
+;; #endregion
+
+(defn- session-conflict-response
+  [expected actual]
+  (when (and expected (not= (str expected) (str actual)))
+    (json-response 409 {:ok false
+                        :error "active session changed — refresh and retry"
+                        :expected-session-id expected
+                        :actual-session-id actual})))
+
 (defn- sse-loop!
   [hub channel send! run? since req]
   (try
@@ -382,11 +408,16 @@
                  (and (= method :post) (= path "/api/settings"))
                  (let [body*  (read-json-body req)
                        op    (cond-> (:op body*)
-                               (map? (:op body*)) (update :op keyword))
-                       result ((:apply-fn settings-ops) op)]
-                   (if (:ok result)
-                     (json-response result)
-                     (json-response 400 result)))
+                               (map? (:op body*)) (update :op keyword))]
+                   (locking hub
+                     (let [expected (:session-id body*)
+                           actual   (:session-id (hub/snapshot hub))]
+                       (log-session-affinity! "settings" expected actual)
+                       (or (session-conflict-response expected actual)
+                           (let [result ((:apply-fn settings-ops) op)]
+                             (if (:ok result)
+                               (json-response result)
+                               (json-response 400 result)))))))
 
                  (and (= method :get) (= path "/api/settings/models"))
                  (let [q    (parse-query uri)
@@ -471,37 +502,44 @@
                    msg  (schemas/decode-message
                          {:text (str (:text body))
                           :refs (vec (or (:refs body) []))})]
-               ;; #region agent log
-               (spit "/opt/cursor/logs/debug.log"
-                     (str (json/generate-string
-                           {:hypothesisId "F,G,J"
-                            :location "workbench/http.clj:api-message:before"
-                            :message "received Workbench message request"
-                            :data {:pid (.pid (ProcessHandle/current))
-                                   :sessionId (:session-id (hub/snapshot hub))
-                                   :status (some-> (hub/snapshot hub) :status name)
-                                   :textChars (count (:text msg))
-                                   :refCount (count (:refs msg))}
-                            :timestamp (System/currentTimeMillis)})
-                          "\n")
-                     :append true)
-               ;; #endregion
-               (hub/enqueue-human! hub msg)
-               (when on-message (on-message msg))
-               ;; #region agent log
-               (spit "/opt/cursor/logs/debug.log"
-                     (str (json/generate-string
-                           {:hypothesisId "F,G,J"
-                            :location "workbench/http.clj:api-message:after"
-                            :message "enqueued Workbench message request"
-                            :data {:sessionId (:session-id (hub/snapshot hub))
-                                   :status (some-> (hub/snapshot hub) :status name)
-                                   :turnCount (count (:turns (hub/snapshot hub)))}
-                            :timestamp (System/currentTimeMillis)})
-                          "\n")
-                     :append true)
-               ;; #endregion
-               (json-response {:ok true}))
+               (locking hub
+                 (let [expected (:session-id body)
+                       actual   (:session-id (hub/snapshot hub))]
+                   (log-session-affinity! "message" expected actual)
+                   (or
+                    (session-conflict-response expected actual)
+                    (do
+                      ;; #region agent log
+                      (spit "/opt/cursor/logs/debug.log"
+                            (str (json/generate-string
+                                  {:hypothesisId "F,G,J"
+                                   :location "workbench/http.clj:api-message:before"
+                                   :message "received Workbench message request"
+                                   :data {:pid (.pid (ProcessHandle/current))
+                                          :sessionId (:session-id (hub/snapshot hub))
+                                          :status (some-> (hub/snapshot hub) :status name)
+                                          :textChars (count (:text msg))
+                                          :refCount (count (:refs msg))}
+                                   :timestamp (System/currentTimeMillis)})
+                                 "\n")
+                            :append true)
+                      ;; #endregion
+                      (hub/enqueue-human! hub msg)
+                      (when on-message (on-message msg))
+                      ;; #region agent log
+                      (spit "/opt/cursor/logs/debug.log"
+                            (str (json/generate-string
+                                  {:hypothesisId "F,G,J"
+                                   :location "workbench/http.clj:api-message:after"
+                                   :message "enqueued Workbench message request"
+                                   :data {:sessionId (:session-id (hub/snapshot hub))
+                                          :status (some-> (hub/snapshot hub) :status name)
+                                          :turnCount (count (:turns (hub/snapshot hub)))}
+                                   :timestamp (System/currentTimeMillis)})
+                                 "\n")
+                            :append true)
+                      ;; #endregion
+                      (json-response {:ok true}))))))
 
              (and (= method :post) (= path "/api/portal-event"))
              ;; 2-way loop: artifacts rendered by portal_submit POST

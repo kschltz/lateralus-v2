@@ -89,10 +89,14 @@
    (fn [] (proto/-attach-selection! @workbench-ref))
    :session-ops
    {:list-sessions #(sessions/list-sessions session-store)
-    :create-session #(sessions/create! session-store hub @runtime-atom %)
-    :activate-session #(sessions/activate! session-store hub @runtime-atom %)
-    :rename-session #(sessions/rename! session-store hub %1 %2)
-    :delete-session #(sessions/delete! session-store hub %)}
+    :create-session #(locking hub
+                       (sessions/create! session-store hub @runtime-atom %))
+    :activate-session #(locking hub
+                         (sessions/activate! session-store hub @runtime-atom %))
+    :rename-session #(locking hub
+                       (sessions/rename! session-store hub %1 %2))
+    :delete-session #(locking hub
+                       (sessions/delete! session-store hub %))}
    :settings-ops
    {:view-fn
     (fn []
