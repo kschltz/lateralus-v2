@@ -61,7 +61,7 @@
                                :dynamic {:enabled? true}
                                :secret-store #ig/ref :lateralus/secret-store
                                :sandbox {:enabled? true
-                                         :call-tools #{"secret_check"}}}
+                                         :call-tools #{"secret_check" "file_read"}}}
  :lateralus/factory-tools     {:session #ig/ref :lateralus/factory-session}
  :lateralus/factory-plugin    {:session #ig/ref :lateralus/factory-session}
  :lateralus/workflow-tools    {}

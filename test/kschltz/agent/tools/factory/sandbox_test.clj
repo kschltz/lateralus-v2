@@ -37,6 +37,18 @@
            Exception #"cannot invoke another runtime tool"
            (sandbox/call-tool "runtime_target" {}))))))
 
+(deftest call-tool-allows-file-read-but-always-denies-file-write
+  (let [ctx {:agent/tool-registry
+             {"file_read" (->HostTool "file_read")
+              "file_write" (->HostTool "file_write")}}]
+    (binding [sandbox/*invocation*
+              {:ctx ctx
+               :allowed-tools #{"file_read" "file_write"}}]
+      (is (= "{:path \"x\"}" (sandbox/call-tool "file_read" {:path "x"})))
+      (is (thrown-with-msg?
+           Exception #"not allowed"
+           (sandbox/call-tool "file_write" {:path "x"}))))))
+
 (deftest sandboxed-function-never-receives-host-context
   (let [seen (atom nil)
         f (fn [args ctx]

@@ -1,8 +1,11 @@
 (ns kschltz.agent.tools.factory.compile-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.compile :as compile]
-            [kschltz.agent.tools.factory.protocol :as proto]))
+            [kschltz.agent.tools.factory.protocol :as proto]
+            [kschltz.agent.tools.filesystem :as filesystem]))
 
 (deftest compile-spec-builds-invokable-tool
   (let [compiler (compile/jvm-compiler)
@@ -100,3 +103,35 @@
 
 (deftest read-form-still-blocks-reader-eval
   (is (thrown? Exception (compile/compile-fn "#=(+ 1 2)"))))
+
+(def ^:private workspace-snippet-spec
+  {:name "workspace_snippet"
+   :description "Confirm a workspace fixture marker via allowlisted file_read"
+   :input-schema "[:map [:path :string]]"
+   :invoke "(fn [args] (let [raw (lateralus.runtime/call-tool \"file_read\" {:path (:path args)})] (if (clojure.string/includes? raw \"SNIPPET:OK\") \"SNIPPET:OK\" \"MISSING\")))"})
+
+(deftest sandboxed-compiler-can-call-allowlisted-file-read
+  (let [root (.getCanonicalPath (io/file "."))
+        registry (filesystem/filesystem-registry {:workspace-root root})
+        compiler (compile/jvm-compiler nil {:sandbox? true
+                                            :call-tools #{"file_read"}})
+        result (proto/-compile-spec compiler workspace-snippet-spec)
+        fixture "resources/lateralus/self-tooling-fixture.txt"]
+    (is (true? (:ok result)))
+    (is (.isFile (io/file fixture)))
+    (is (= "SNIPPET:OK"
+           (tool/invoke-tool (:tool result)
+                             {:path fixture}
+                             {:agent/tool-registry registry})))))
+
+(deftest sandboxed-compiler-denies-file-read-without-allowlist
+  (let [root (.getCanonicalPath (io/file "."))
+        registry (filesystem/filesystem-registry {:workspace-root root})
+        compiler (compile/jvm-compiler nil {:sandbox? true :call-tools #{}})
+        result (proto/-compile-spec compiler workspace-snippet-spec)
+        actual (tool/invoke-tool (:tool result)
+                                 {:path "resources/lateralus/self-tooling-fixture.txt"}
+                                 {:agent/tool-registry registry})]
+    (is (true? (:ok result)))
+    (is (str/includes? actual "not allowed"))
+    (is (str/includes? actual "file_read"))))

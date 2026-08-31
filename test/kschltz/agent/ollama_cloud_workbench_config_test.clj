@@ -25,7 +25,7 @@
            (get-in config [:lateralus/factory-session :secret-store])))
       (is (true? (get-in config
                          [:lateralus/factory-session :sandbox :enabled?])))
-      (is (= #{"secret_check"}
+      (is (= #{"secret_check" "file_read"}
              (get-in config
                      [:lateralus/factory-session :sandbox :call-tools])))
       (is (= {:labels :all}
