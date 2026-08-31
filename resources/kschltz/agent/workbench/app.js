@@ -19,6 +19,7 @@
   let stickToBottom = true;
   let lastPortalUrl = null;
   let lastSessionId = null;
+  let settingsSessionId = null;
   const STICK_THRESHOLD_PX = 64;
 
   function nearBottom() {
@@ -301,6 +302,7 @@
   async function send() {
     const text = inputEl.value.trim();
     if (!text || busy) return;
+    const sessionId = lastSessionId;
     busy = true;
     lastStatus = "queued";
     setComposerEnabled(false);
@@ -317,7 +319,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ text, refs: attached }),
+        body: JSON.stringify({ text, refs: attached, "session-id": sessionId }),
       });
       if (!res.ok) {
         const body = await res.text();
@@ -812,7 +814,10 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({ op }),
+      body: JSON.stringify({
+        op,
+        "session-id": settingsSessionId || lastSessionId,
+      }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body.ok === false) {
@@ -823,6 +828,7 @@
 
   function renderSettings(view) {
     if (!view) return;
+    settingsSessionId = view["session-id"] || lastSessionId;
     const $ = (id) => document.getElementById(id);
     const llm = view.llm || {};
     if ($("set-model")) $("set-model").value = llm.model || "";
