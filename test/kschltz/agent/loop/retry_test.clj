@@ -53,9 +53,9 @@
     (is (= ["add_two"] (:agent/runtime-tool-test-nudge out)))
     (is (= "system" (:role last-msg)))
     (is (str/includes? (:content last-msg) "add_two"))
-    (is (str/includes? (:content last-msg) "invoke the tool"))))
+    (is (str/includes? (:content last-msg) "tool_test"))))
 
-(deftest no-nudge-when-define-and-invoke-both-ok
+(deftest no-nudge-when-define-and-tool-test-both-ok
   (let [envelope (tr/encode-result
                   {:ok true
                    :tool "tool_define"
@@ -64,11 +64,33 @@
         ctx {:llm/request {:messages []}
              :tool/results [{:call {:function {:name "tool_define"}}
                              :result envelope}
-                            {:call {:function {:name "add_two"}}
-                             :result "3"}]}
+                            {:call {:function {:name "tool_test"}}
+                             :result (tr/encode-result
+                                      {:ok true
+                                       :tool "tool_test"
+                                       :tool-name "add_two"
+                                       :actual "3"})}]}
         out (retry/nudge-untested-runtime-tools ctx)]
     (is (nil? (:agent/runtime-tool-test-nudge out)))
     (is (empty? (get-in out [:llm/request :messages])))))
+
+(deftest direct-call-does-not-satisfy-promotion-test-nudge
+  (let [define-result
+        (tr/encode-result
+         {:ok true
+          :tool "tool_define"
+          :tool-name "add_two"
+          :transition {:op :register-runtime-tool :spec spec}})
+        out (retry/nudge-untested-runtime-tools
+             {:llm/request {:messages []}
+              :tool/results
+              [{:call {:function {:name "tool_define"}}
+                :result define-result}
+               {:call {:function {:name "add_two"}}
+                :result "3"}]})]
+    (is (= ["add_two"] (:agent/runtime-tool-test-nudge out)))
+    (is (str/includes? (get-in out [:llm/request :messages 0 :content])
+                       "tool_test"))))
 
 (deftest same-turn-define-and-call-runs-new-tool
   (let [store (session/factory-session {})
