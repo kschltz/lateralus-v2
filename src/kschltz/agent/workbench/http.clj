@@ -13,7 +13,8 @@
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.schemas :as schemas]
             [kschltz.agent.workbench.session-http :as session-http]
-            [org.httpkit.server :as http-kit]))
+            [org.httpkit.server :as http-kit])
+  (:import [java.lang ProcessHandle]))
   ;; http-kit is on the classpath only via the :workbench / :portal alias, which
   ;; is also the only path that loads this namespace (system.clj requires it
   ;; lazily via `requiring-resolve`). `with-channel` is a MACRO and cannot be
