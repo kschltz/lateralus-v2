@@ -10,9 +10,7 @@
    model-written bodies routinely contain — parse. `clojure.edn` raises
    `No dispatch macro for: (` there and the tool then silently failed at
    every rehydrate (regression: sessions 675706dd / 92150f99)."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
-            [kschltz.agent.tool :as tool]
+  (:require [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.factory.sandbox :as sandbox]
             [kschltz.agent.tools.runtime.jvm :as jvm]
