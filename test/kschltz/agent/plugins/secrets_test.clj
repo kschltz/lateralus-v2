@@ -20,6 +20,16 @@
   (-output-schema [_] :string)
   (-invoke [_ args _ctx] (pr-str args)))
 
+(defrecord UntrustedEchoTool []
+  tool/Tool
+  (-name [_] "runtime_echo")
+  (-description [_] "echoes opaque runtime args")
+  (-input-schema [_] [:map])
+  (-output-schema [_] :string)
+  (-invoke [_ args _ctx] (pr-str args))
+  tool/ToolTrust
+  (-trust-tier [_] :untrusted-runtime))
+
 (def runtime-echo-spec
   {:name "runtime_echo"
    :description "Echo runtime tool arguments"
@@ -49,7 +59,9 @@
   (let [chain (plugin/assemble-chain
                [(plugins.base/base-plugin)
                 (plugins.tools/tools-plugin {"echo" (->EchoTool)})
-                (plugins.secrets/secrets-plugin {:store @store})])]
+                (plugins.secrets/secrets-plugin
+                 {:store @store
+                  :capabilities {"echo" {:labels #{"tok"}}}})])]
     {:seed   (some #(when (= :kschltz.agent.plugins.tools/seed-registry (:name %)) %) chain)
      :wrap   (some #(when (= :kschltz.agent.plugins.secrets/wrap-registry (:name %)) %) chain)
      :redact (some #(when (= :kschltz.agent.plugins.secrets/redact (:name %)) %) chain)}))
@@ -105,7 +117,7 @@
              (get-in ctx [:agent/tool-registry "runtime_echo"])
              {:token "{{secret:factory-token}}"}
              ctx)]
-    (is (str/includes? out "[REDACTED:factory-token]"))
+    (is (str/includes? out "{{secret:factory-token}}"))
     (is (not (str/includes? out "sk-factory-value-123")))))
 
 (deftest same-exchange-factory-refresh-keeps-secret-wrapping
@@ -124,8 +136,24 @@
              (get-in refreshed [:agent/tool-registry "runtime_echo"])
              {:token "{{secret:refresh-token}}"}
              refreshed)]
-    (is (str/includes? out "[REDACTED:refresh-token]"))
+    (is (str/includes? out "{{secret:refresh-token}}"))
     (is (not (str/includes? out "sk-refresh-value-456")))))
+
+(deftest untrusted-runtime-tools-never-receive-plaintext
+  (let [store @store
+        _ (secrets/-put-secret! store "runtime-token" "sk-runtime-plain-999")
+        plugin (plugins.secrets/secrets-plugin {:store store})
+        wrap (-> plugin first :enter)
+        ctx (wrap {:agent/static-tool-registry
+                   {"runtime_echo" (->UntrustedEchoTool)}
+                   :agent/tool-registry
+                   {"runtime_echo" (->UntrustedEchoTool)}})
+        out (tool/invoke-tool
+             (get-in ctx [:agent/tool-registry "runtime_echo"])
+             {:token "{{secret:runtime-token}}"}
+             ctx)]
+    (is (str/includes? out "{{secret:runtime-token}}"))
+    (is (not (str/includes? out "sk-runtime-plain-999")))))
 
 (deftest redact-sweep-scrubs-context
   (testing ":tools-slot enter scrubbs tool results, transcript, and messages"

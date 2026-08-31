@@ -19,7 +19,20 @@
       (is (ig/reflike?
            (get-in config [:lateralus/workbench :secret-store])))
       (is (= :none (get-in config [:lateralus/web-tools :provider])))
+      (is (false? (get-in config [:lateralus/runtime-tools :enabled?])))
       (is (false? (get-in config [:lateralus/runtime-tools :network?])))
+      (is (ig/reflike?
+           (get-in config [:lateralus/factory-session :secret-store])))
+      (is (true? (get-in config
+                         [:lateralus/factory-session :sandbox :enabled?])))
+      (is (= #{"secret_check"}
+             (get-in config
+                     [:lateralus/factory-session :sandbox :call-tools])))
+      (is (= {:labels :all}
+             (get-in config
+                     [:lateralus/secret-plugin
+                      :capabilities
+                      "secret_check"])))
       (is (= 10 (get-in config
                         [:lateralus/loop-opts :max-loop-depth])))
       (is (some #{(ig/ref :lateralus/factory-tools)}

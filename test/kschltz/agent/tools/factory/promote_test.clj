@@ -55,3 +55,35 @@
   (is (= "AddTwoTool" (promote/record-name "add_two")))
   (is (= 'kschltz.agent.tools.promoted.add-two
          (promote/project-ns "add_two"))))
+
+(deftest sandboxed-promotion-persists-spec-without-loading-host-source
+  (let [root (.getPath (io/file (System/getProperty "java.io.tmpdir")
+                                (str "lateralus-safe-promote-" (random-uuid))))
+        config {:workspace-root root
+                :sandbox {:enabled? true :call-tools #{}}}
+        store (session/factory-session config)]
+    (try
+      (proto/-define! store spec {})
+      (proto/-record-test! store "add_two" (proto/spec-id spec))
+      (let [status (proto/-promote! store "add_two"
+                                    {:target :workspace
+                                     :workspace-root root})
+            tool-clj (io/file root ".lateralus/promoted/add_two/tool.clj")
+            spec-edn (io/file root ".lateralus/promoted/add_two/spec.edn")
+            fresh (session/factory-session config)
+            restored (get (proto/-registry fresh) "add_two")]
+        (is (true? (:ok status)))
+        (is (true? (get-in status [:entry :sandboxed])))
+        (is (not (.exists tool-clj))
+            "sandboxed promotion must not emit host-loadable source")
+        (is (.isFile spec-edn))
+        (is (tool/tool? restored))
+        (is (= :untrusted-runtime (tool/trust-tier restored)))
+        (is (= "3" (tool/invoke-tool restored {:a 1 :b 2} {})))
+        (is (thrown-with-msg?
+             Exception #"sandbox"
+             (proto/-promote! store "add_two"
+                              {:target :project :workspace-root root}))))
+      (finally
+        (doseq [f (reverse (file-seq (io/file root)))]
+          (.delete f))))))

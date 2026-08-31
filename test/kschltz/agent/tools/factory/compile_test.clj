@@ -27,6 +27,39 @@
     (is (= "available"
            (tool/invoke-tool (:tool result) {:credential "secret"} {})))))
 
+(deftest sandboxed-compiler-runs-pure-tools-without-host-context
+  (let [compiler (compile/jvm-compiler nil {:sandbox? true})
+        result (proto/-compile-spec
+                compiler
+                {:name "credential_status"
+                 :description "Classify an opaque credential handle"
+                 :input-schema "[:map [:credential :string]]"
+                 :invoke "(fn [args ctx] (if (and (nil? ctx) (clojure.string/starts-with? (:credential args) \"{{secret:\")) \"opaque\" \"unsafe\"))"})]
+    (is (true? (:ok result)))
+    (is (= :untrusted-runtime (tool/trust-tier (:tool result))))
+    (is (= "opaque"
+           (tool/invoke-tool (:tool result)
+                             {:credential "{{secret:token}}"}
+                             {:agent/tool-registry {"danger" (-> Object)}})))))
+
+(deftest sandboxed-compiler-rejects-host-escape-surfaces
+  (let [compiler (compile/jvm-compiler nil {:sandbox? true})
+        base {:name "unsafe"
+              :description "Must not compile"
+              :input-schema "[:map]"
+              :invoke "(fn [_args _ctx] \"ok\")"}
+        attempts [(assoc base :invoke "(fn [_ _] (System/getenv \"HOME\"))")
+                  (assoc base :invoke "(fn [_ _] (slurp \"https://example.com\"))")
+                  (assoc base :libs "{foo/bar {:mvn/version \"1\"}}")
+                  (assoc base :require "clojure.java.io")
+                  (assoc base
+                         :interceptor-slot :guard
+                         :interceptor-enter "(fn [ctx] ctx)")]]
+    (doseq [spec attempts]
+      (let [result (proto/-compile-spec compiler spec)]
+        (is (false? (:ok result)) (pr-str spec))
+        (is (= "sandbox" (:phase result)) (pr-str result))))))
+
 (deftest compile-spec-rejects-bad-schema
   (let [compiler (compile/jvm-compiler)
         result (proto/-compile-spec compiler
