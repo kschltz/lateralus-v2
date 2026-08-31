@@ -16,6 +16,7 @@
             [kschltz.agent.tools.runtime.jvm :as jvm]
             [kschltz.agent.tools.runtime.protocol :as runtime]
             [malli.core :as m]
+            [malli.error :as me]
             [malli.instrument :as mi]
             [sci.core :as sci])
   (:import [java.io PushbackReader StringReader]))
@@ -30,22 +31,44 @@
     (read {:eof nil :readers *data-readers*}
           (PushbackReader. (StringReader. (str source))))))
 
+(defn- humanize-schema-error
+  "Model-facing explanation of a Malli schema construction failure.
+   Raw `:malli.core/invalid-schema` is not enough for a small model to
+   rewrite the spec; include the provided form, the Malli type, and a
+   concrete example of the accepted EDN shape."
+  [form t]
+  (let [data (ex-data t)
+        details (:data data)
+        malli-type (or (:type data) (ex-message t))
+        extra (cond
+                (some? (:entry details)) (str " (entry " (pr-str (:entry details)) ")")
+                (some? (:schema details)) (str " (schema " (pr-str (:schema details)) ")")
+                :else "")]
+    (str "input-schema is not a valid Malli schema. "
+         "Provided: " (pr-str form) ". "
+         "Malli: " (pr-str malli-type) extra ". "
+         "Fix: use EDN such as [:map [:handle :string]] — each map field "
+         "is a [key schema] vector and types are keywords "
+         "(:string, :int, :boolean), not JSON strings.")))
+
 (defn parse-input-schema
   "Parse an EDN Malli schema string. Throws `ex-info` `{:phase :compile}`."
   [edn-str]
   (let [form (try (read-form edn-str)
                   (catch Throwable t
                     (throw (ex-info (str "input-schema is not readable EDN: "
-                                         (ex-message t))
+                                         (ex-message t)
+                                         ". Write a string like \"[:map [:handle :string]]\".")
                                     {:phase :compile} t))))]
     (when (nil? form)
-      (throw (ex-info "input-schema EDN is empty" {:phase :compile})))
+      (throw (ex-info
+              "input-schema EDN is empty. Write a string like \"[:map [:handle :string]]\"."
+              {:phase :compile})))
     (try
       (m/schema form)
       (catch Throwable t
-        (throw (ex-info (str "input-schema is not a valid Malli schema: "
-                             (ex-message t))
-                        {:phase :compile} t))))
+        (throw (ex-info (humanize-schema-error form t)
+                        {:phase :compile :form form} t))))
     form))
 
 (defn parse-coords
@@ -286,7 +309,8 @@
   [runtime compiler-config spec]
   (when-not (proto/valid-tool-spec? spec)
     (throw (ex-info (str "invalid tool spec: "
-                         (pr-str (m/explain proto/ToolSpec spec)))
+                         (pr-str (some-> (m/explain proto/ToolSpec spec)
+                                         me/humanize)))
                     {:phase :compile})))
   (let [sandbox-config (:sandbox compiler-config)
         sandbox? (true? (:enabled? sandbox-config))

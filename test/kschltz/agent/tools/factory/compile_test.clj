@@ -68,7 +68,24 @@
                                      :input-schema "not-a-schema-!!!"
                                      :invoke "(fn [args _ctx] \"ok\")"})]
     (is (false? (:ok result)))
-    (is (= "compile" (:phase result)))))
+    (is (= "compile" (:phase result)))
+    (is (re-find #"Provided: not-a-schema-!!!" (:error result)))
+    (is (re-find #"\[:map \[:handle :string\]\]" (:error result)))
+    (is (not= ":malli.core/invalid-schema" (:error result)))))
+
+(deftest compile-spec-humanizes-flattened-map-schema
+  (let [compiler (compile/jvm-compiler)
+        result (proto/-compile-spec
+                compiler
+                {:name "bad"
+                 :description "x"
+                 :input-schema "[:map :handle :string]"
+                 :invoke "(fn [args _ctx] \"ok\")"})]
+    (is (false? (:ok result)))
+    (is (re-find #"Provided: \[:map :handle :string\]" (:error result)))
+    (is (re-find #":malli.core/invalid-entry" (:error result)))
+    (is (re-find #"entry :handle" (:error result)))
+    (is (re-find #"\[key schema\]" (:error result)))))
 
 (deftest compile-fn-requires-ifn
   (is (thrown-with-msg? Exception #"function"
