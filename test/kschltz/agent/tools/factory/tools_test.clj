@@ -54,6 +54,17 @@
     (is (= "[:map [:credential :string]]" (:input-schema normalized)))
     (is (proto/valid-tool-spec? normalized))))
 
+(deftest define-accepts-gemma-pseudo-schema-string
+  (let [normalized
+        (tools/normalize-tool-spec
+         {:name "credential_status"
+          :description "Classify credential presence"
+          :input-schema
+          "{:type :map :keys {:credential {:type :string :required true}}}"
+          :invoke "(fn [args ctx] (if (:credential args) \"available\" \"missing\"))"})]
+    (is (= "[:map [:credential :string]]" (:input-schema normalized)))
+    (is (proto/valid-tool-spec? normalized))))
+
 (deftest list-runtime-is-read-only
   (let [store (session/factory-session {})
         t (get (tools/factory-tools-registry store) "tool_list_runtime")
@@ -88,6 +99,26 @@
     (is (false? (:ok failing)))
     (is (= "3" (:actual failing)))
     (is (nil? (:transition failing)))))
+
+(deftest test-tool-tolerates-small-model-argument-aliases
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        test-tool (get registry "tool_test")
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 test-tool
+                 {:name "add_two"
+                  :args {:a 1 :b 2}
+                  :expected-output "3"
+                  :input-context {}
+                  :output-context {}}
+                 {:agent/tool-registry
+                  (merge registry (proto/-registry store))})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "3" (:actual parsed)))
+    (is (= "record-runtime-tool-test" (get-in parsed [:transition :op])))))
 
 (deftest promote-tool-preflights-unknown-and-untested-tools
   (let [store (session/factory-session {})
