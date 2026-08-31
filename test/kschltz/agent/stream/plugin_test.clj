@@ -10,6 +10,7 @@
             [kschltz.agent.secrets :as secrets]
             [kschltz.agent.stream.bus :as bus]
             [kschltz.agent.stream.plugin :as stream.plugin]
+            [kschltz.agent.stream.protocol :as stream.proto]
             [kschltz.agent.tool :as tool]))
 
 (deftype AuditTool []
@@ -37,6 +38,45 @@
            :model "fake/v0"}
           {:choices [{:message {:role "assistant" :content "done"}}]
            :model "fake/v0"})))))
+
+(defn- tool-then-error-client
+  [value]
+  (let [calls (atom 0)]
+    (reify LlmClient
+      (-call [_ _request]
+        (if (= 1 (swap! calls inc))
+          {:choices [{:message
+                      {:role "assistant"
+                       :content ""
+                       :tool_calls
+                       [{:id "audit-error-1"
+                         :type "function"
+                         :function {:name "audit_echo"
+                                    :arguments (str "{\"value\":\"" value "\"}")}}]}}]
+           :model "fake/v0"}
+          (throw (ex-info "simulated terminal provider failure"
+                          {:phase :http-error})))))))
+
+(defrecord RecordingBus [delegate operations]
+  stream.proto/StreamBus
+  (-open-turn! [_ meta]
+    (stream.proto/-open-turn! delegate meta))
+  (-emit! [_ turn-id event]
+    (swap! operations conj {:op :emit
+                            :type (:type event)
+                            :tool-result (:tool-result event)})
+    (stream.proto/-emit! delegate turn-id event))
+  (-close-turn! [_ turn-id status extra]
+    (swap! operations conj {:op :close :status status})
+    (stream.proto/-close-turn! delegate turn-id status extra))
+  (-snapshot [_ turn-id]
+    (stream.proto/-snapshot delegate turn-id))
+  (-current-id [_]
+    (stream.proto/-current-id delegate))
+  (-events-since [_ turn-id seq-n]
+    (stream.proto/-events-since delegate turn-id seq-n))
+  (-latest-id [_]
+    (stream.proto/-latest-id delegate)))
 
 (deftest plugin-records-stub-exchange
   (let [b     (bus/create-bus)
@@ -95,6 +135,39 @@
     (is (= 1 (count events)))
     (is (= "audit_echo" (:tool-name (first events))))
     (is (= "guarded-result" (:tool-result (first events))))))
+
+(deftest assembled-chain-emits-tool-result-on-terminal-error-before-close
+  (let [operations (atom [])
+        b (->RecordingBus (bus/create-bus) operations)
+        chain (plugin/assemble-chain
+               [(plugins.base/base-plugin)
+                (plugins.tools/tools-plugin {"audit_echo" (->AuditTool)})
+                (stream.plugin/stream-plugin b)])
+        rt (runtime/start {:exchange-chain chain
+                           :agent/llm-client
+                           (tool-then-error-client "guarded-error-result")
+                           :initial-state {:agent/system-message "sys"
+                                           :model "fake/v0"}}
+                          "stream-tool-error-test")
+        result (runtime/send-message rt "call the audit tool")
+        turn-id (:stream/turn-id result)
+        events (->> (:events (bus/snapshot b turn-id))
+                    (filter #(= "tool-result" (:type %)))
+                    vec)
+        lifecycle (->> @operations
+                       (filter #(or (= :tool-result (:type %))
+                                    (= :close (:op %))))
+                       vec)]
+    (is (= "error" (:status (bus/snapshot b turn-id))))
+    (is (= 1 (count events))
+        "the accumulated guarded result is emitted exactly once")
+    (is (= "guarded-error-result" (:tool-result (first events))))
+    (is (= [{:op :emit
+             :type :tool-result
+             :tool-result "guarded-error-result"}
+            {:op :close :status :error}]
+           lifecycle)
+        "the result event is emitted before the terminal error closes the turn")))
 
 (deftest assembled-chain-emits-only-redacted-tool-result-content
   (let [path (str (System/getProperty "java.io.tmpdir")
