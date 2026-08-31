@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.secrets :as secrets]
             [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.factory.session :as session])
   (:import [java.nio.file Files]
@@ -89,6 +90,22 @@
     (let [ixs (proto/-interceptors store :observe)]
       (is (= 1 (count ixs)))
       (is (= {:flag true} ((:enter (first ixs)) {}))))))
+
+(deftest secret-store-rejects-disabled-sandbox
+  (let [store (reify secrets/SecretStore
+                (-secret-labels [_] [])
+                (-get-secret [_ _] nil)
+                (-secret-exists? [_ _] false)
+                (-put-secret! [_ _ _] nil)
+                (-delete-secret! [_ _] nil))
+        e (try
+            (session/factory-session {:secret-store store
+                                      :sandbox {:enabled? false}})
+            nil
+            (catch clojure.lang.ExceptionInfo ex ex))]
+    (is (some? e))
+    (is (= :unsafe-secret-factory-config (:kind (ex-data e))))
+    (is (str/includes? (ex-message e) "must enable the sandbox"))))
 
 (deftest rehydrate-surfaces-compile-errors
   ;; previously errors were swallowed, so tool_define looked like a fake
