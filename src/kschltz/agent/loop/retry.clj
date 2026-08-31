@@ -3,8 +3,8 @@
 
    Dispatch runs before transition apply, so a parallel `weather_now`
    call looks unregistered. After apply refreshes the registry, retry
-   those unavailable results. If a tool was defined but never invoked,
-   nudge the follow-up turn to test it."
+   those unavailable results. If a tool was defined but has no passing
+   tool_test evidence, nudge the follow-up turn to test it."
   (:require [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.transitions :as tr]
@@ -40,12 +40,14 @@
                     name))))
         (or results [])))
 
-(defn invoked-ok?
+(defn tested-ok?
   [results name]
   (boolean
    (some (fn [entry]
-           (and (= name (get-in entry [:call :function :name]))
-                (not (unavailable-result? entry))))
+           (let [parsed (tr/parse-tool-result (:result entry))]
+             (and (= "tool_test" (get-in entry [:call :function :name]))
+                  (= name (:tool-name parsed))
+                  (true? (:ok parsed)))))
          (or results []))))
 
 (defn retry-now-available
@@ -69,10 +71,10 @@
                     replace-turn-results (count results) retried))))))
 
 (defn nudge-untested-runtime-tools
-  "Ask the next LLM turn to invoke tools defined this turn but not run."
+  "Ask the next LLM turn to tool_test definitions without passing evidence."
   [ctx]
   (let [untested (into []
-                       (remove #(invoked-ok? (:tool/results ctx) %))
+                       (remove #(tested-ok? (:tool/results ctx) %))
                        (defined-tool-names (:tool/results ctx)))]
     (if (empty? untested)
       ctx
@@ -83,8 +85,9 @@
                       :content
                       (str "Runtime tool(s) now registered: "
                            (str/join ", " untested)
-                           ". Call each now with a real test input. "
-                           "Do not describe the call — invoke the tool.")})))))
+                           ". Call tool_test for each now with real arguments "
+                           "and exact expected-output. Do not claim success or "
+                           "call tool_promote until tool_test returns ok=true.")})))))
 
 (defn retry-now-available-interceptor
   "`:tools` interceptor — after apply, before compose."

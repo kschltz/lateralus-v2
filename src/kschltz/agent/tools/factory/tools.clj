@@ -25,10 +25,56 @@
   [k]
   (keyword (str/replace (name k) #"_" "-")))
 
+(declare json-schema->malli)
+
+(defn- object-schema->malli
+  [schema]
+  (let [required (set (map #(keyword (name %)) (:required schema)))
+        properties (sort-by (comp name key) (:properties schema))]
+    (into
+     [:map]
+     (map (fn [[raw-key property-schema]]
+            (let [k (keyword (name raw-key))
+                  value-schema (json-schema->malli property-schema)]
+              (if (contains? required k)
+                [k value-schema]
+                [k {:optional true} value-schema]))))
+     properties)))
+
+(defn- json-schema->malli
+  [schema]
+  (let [schema (if (map? schema) schema {})
+        schema-type (some-> (:type schema) name keyword)]
+    (case schema-type
+      :map (object-schema->malli schema)
+      :object (object-schema->malli schema)
+      :string :string
+      :int :int
+      :integer :int
+      :double :double
+      :float :double
+      :number :double
+      :bool :boolean
+      :boolean :boolean
+      :array [:vector (json-schema->malli (:items schema))]
+      :vector [:vector (json-schema->malli (:items schema))]
+      :any)))
+
 (defn normalize-tool-spec
   "Accept the shapes models actually emit; persist a closed ToolSpec."
   [spec]
-  (let [spec (into {} (map (fn [[k v]] [(kebab-key k) v]) (or spec {})))]
+  (let [model-spec (into {}
+                         (map (fn [[k v]] [(kebab-key k) v]))
+                         (or spec {}))
+        aliased (cond-> model-spec
+                  (and (nil? (:input-schema model-spec))
+                       (contains? model-spec :schema))
+                  (assoc :input-schema
+                         (let [schema (:schema model-spec)]
+                           (if (map? schema)
+                             (json-schema->malli schema)
+                             schema))))
+        spec (dissoc aliased :schema)]
     (cond-> spec
       (and (some? (:input-schema spec)) (not (string? (:input-schema spec))))
       (update :input-schema pr-str)
@@ -67,7 +113,7 @@
   tool/Tool
   (-name [_] "tool_define")
   (-description [_]
-    "Create a callable session tool now: name, description, input-schema (EDN Malli string), invoke (Clojure string of (fn [args ctx] result)). Do not use clojure_eval. You may call the new name in this same turn (parallel with tool_define) or on the next LLM call this exchange. For live HTTP prefer java.net.URL + slurp (set User-Agent) or an existing web_* tool — do not add clj-http. Optional libs/require/alias and interceptor-slot plus interceptor-enter/leave/error. Emits a transition; compile + registry refresh happen before compose.")
+    "Create a callable session tool now: name, description, input-schema (EDN Malli string or schema object), invoke (Clojure string of (fn [args ctx] result); one-argument (fn [args] result) is also accepted). Do not use clojure_eval. Network I/O must use existing protocol-backed web_* or MCP tools, never direct sockets/URL/slurp. Call tool_test after define; only a passing exact-output test permits tool_promote. Optional libs/require/alias and interceptor-slot plus interceptor-enter/leave/error. Emits a transition; compile + registry refresh happen before compose.")
   (-input-schema [_] DefineInput)
   (-output-schema [_] :string)
   (-invoke [_ spec _ctx]
@@ -204,15 +250,46 @@
         (tr/encode-result {:ok false :tool "tool_promote"
                            :error "Dynamic tool factory is disabled"
                            :phase "disabled"})
-        (tr/encode-result
-         {:ok true
-          :tool "tool_promote"
-          :pending "same-exchange"
-          :tool-name name
-          :before (proto/-status session)
-          :transition (cond-> {:op :promote-runtime-tool :tool-name name}
-                        (some? as-plugin) (assoc :as-plugin (boolean as-plugin))
-                        target (assoc :target (coerce-target target)))})))))
+        (let [status (proto/-status session)
+              ephemeral (set (:ephemeral status))
+              tested (set (:tested status))
+              promoted (set (:promoted status))]
+          (cond
+            (contains? promoted name)
+            (tr/encode-result {:ok true
+                               :tool "tool_promote"
+                               :tool-name name
+                               :phase "already-promoted"
+                               :status status})
+
+            (not (contains? ephemeral name))
+            (tr/encode-result {:ok false
+                               :tool "tool_promote"
+                               :tool-name name
+                               :phase "unknown"
+                               :error (str "Unknown ephemeral runtime tool: " name
+                                           ". Call tool_define first.")
+                               :status status})
+
+            (not (contains? tested name))
+            (tr/encode-result {:ok false
+                               :tool "tool_promote"
+                               :tool-name name
+                               :phase "needs-test"
+                               :error (str "Runtime tool must pass tool_test before promotion: "
+                                           name)
+                               :status status})
+
+            :else
+            (tr/encode-result
+             {:ok true
+              :tool "tool_promote"
+              :pending "same-exchange"
+              :tool-name name
+              :before status
+              :transition (cond-> {:op :promote-runtime-tool :tool-name name}
+                            (some? as-plugin) (assoc :as-plugin (boolean as-plugin))
+                            target (assoc :target (coerce-target target)))})))))))
 
 (defn factory-tools-registry
   "Control tools bound to `session`. Empty when session is missing."

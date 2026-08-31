@@ -92,7 +92,14 @@
   (-input-schema [_] schema)
   (-output-schema [_] :string)
   (-invoke [_ args ctx]
-    (stringify (invoke-fn args ctx))))
+    (stringify
+     (try
+       (invoke-fn args ctx)
+       (catch clojure.lang.ArityException two-arity-error
+         (try
+           (invoke-fn args)
+           (catch clojure.lang.ArityException _
+             (throw two-arity-error))))))))
 
 (defn- compile-interceptor
   [spec]
