@@ -55,7 +55,7 @@
     (is (str/includes? (:content last-msg) "add_two"))
     (is (str/includes? (:content last-msg) "tool_test"))))
 
-(deftest no-nudge-when-define-and-tool-test-both-ok
+(deftest passing-tool-test-advances-to-promotion-nudge
   (let [envelope (tr/encode-result
                   {:ok true
                    :tool "tool_define"
@@ -72,7 +72,9 @@
                                        :actual "3"})}]}
         out (retry/nudge-untested-runtime-tools ctx)]
     (is (nil? (:agent/runtime-tool-test-nudge out)))
-    (is (empty? (get-in out [:llm/request :messages])))))
+    (is (= ["add_two"] (:agent/runtime-tool-promote-nudge out)))
+    (is (str/includes? (get-in out [:llm/request :messages 0 :content])
+                       "tool_promote"))))
 
 (deftest direct-call-does-not-satisfy-promotion-test-nudge
   (let [define-result
