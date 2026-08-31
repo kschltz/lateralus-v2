@@ -60,11 +60,13 @@
 
 (defn- same-factory-op?
   [a b]
-  (and (map? a) (map? b)
-       (= (:op a) (:op b))
-       (or (and (= :register-runtime-tool (:op a))
-                (= (get-in a [:spec :name]) (get-in b [:spec :name])))
-           (= (str (:tool-name a)) (str (:tool-name b))))))
+  (let [a-op (some-> (:op a) name keyword)
+        b-op (some-> (:op b) name keyword)]
+    (and (map? a) (map? b)
+         (= a-op b-op)
+         (if (= :register-runtime-tool a-op)
+           (= (get-in a [:spec :name]) (get-in b [:spec :name]))
+           (= (str (:tool-name a)) (str (:tool-name b)))))))
 
 (defn- tool-name-for-op
   [op]
@@ -78,7 +80,8 @@
 (defn rewrite-entry
   [entry op outcome]
   (let [parsed (tr/parse-tool-result (:result entry))
-        status (:status outcome)]
+        status (:status outcome)
+        catalog-entry (:entry status)]
     (if (:ok outcome)
       (assoc entry
              :result
@@ -93,6 +96,10 @@
                                                :ns (:ns status)
                                                :catalog (:catalog status)
                                                :target (:target status))
+                (some? (:sandboxed catalog-entry))
+                (assoc :sandboxed (:sandboxed catalog-entry))
+                (some? (:spec-path catalog-entry))
+                (assoc :spec-path (:spec-path catalog-entry))
                 (some? (:removed status)) (assoc :removed (:removed status)))))
       (assoc entry
              :result
