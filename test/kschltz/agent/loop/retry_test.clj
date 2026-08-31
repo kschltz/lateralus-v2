@@ -168,7 +168,7 @@
     (is (>= (count @reqs) 2))
     (is (some #(and (= "system" (:role %))
                     (str/includes? (str (:content %)) "add_two")
-                    (str/includes? (str (:content %)) "invoke the tool"))
+                    (str/includes? (str (:content %)) "tool_test"))
               (:messages (second @reqs))))
     (is (some #(= "add_two" (get-in % [:function :name]))
               (:tools (second @reqs))))))
