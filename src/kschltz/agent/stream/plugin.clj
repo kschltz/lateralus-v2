@@ -43,13 +43,18 @@
                            :stream/turn-id turn-id)
                     (wrap-llm stream-bus turn-id)))))})
 
-(defn- tools-interceptor
+(defn- tool-results-interceptor
+  "Emit every guarded result after the ReAct loop settles. Follow-up dispatch
+   replaces the current `:tool/results` vector (including with `[]` on the
+   final text response), while `:agent/all-tool-results` retains those exact
+   guarded entries. This interceptor follows the turn closer in the assembled
+   `:observe` slot so reverse leave order emits results before closing the bus."
   [stream-bus]
   {:name ::stream-tools
-   :slot :tools
+   :slot :observe
    :leave (fn [ctx]
             (let [turn-id (:stream/turn-id ctx)
-                  results (or (:tool/results ctx) [])]
+                  results (or (:agent/all-tool-results ctx) [])]
               (when (and (proto/stream-bus? stream-bus) turn-id (seq results))
                 (doseq [{:keys [call result]} results]
                   (bus/emit! stream-bus turn-id
@@ -97,8 +102,8 @@
   (with-meta
     (if (proto/stream-bus? stream-bus)
       [(seed-interceptor stream-bus)
-       (tools-interceptor stream-bus)
-       (observe-interceptor stream-bus)]
+       (observe-interceptor stream-bus)
+       (tool-results-interceptor stream-bus)]
       [])
     {:plugin/name :stream
      :plugin/rebuild (fn [] (stream-plugin stream-bus))}))
