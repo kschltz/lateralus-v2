@@ -6,7 +6,7 @@
    appear in any response body, even for the label that was just put."
   (:require [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [kschltz.agent.secrets :as secrets]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.http :as http]
@@ -18,6 +18,18 @@
                "/lat-wb-secrets-" (System/currentTimeMillis) ".sealed")
     :passphrase "ui-test-passphrase"
     :kdf-iterations 1000}))
+
+(defn- reset-store!
+  [test-fn]
+  (doseq [label (secrets/-secret-labels store)]
+    (secrets/-delete-secret! store label))
+  (try
+    (test-fn)
+    (finally
+      (doseq [label (secrets/-secret-labels store)]
+        (secrets/-delete-secret! store label)))))
+
+(use-fixtures :each reset-store!)
 
 (defn- handler-with-secrets []
   (http/make-handler (hub/create-hub {:session-id "secrets-test"})
