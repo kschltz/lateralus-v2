@@ -44,3 +44,19 @@
 
 (deftest empty-plugin-when-bus-nil
   (is (= [] (stream.plugin/stream-plugin nil))))
+
+(deftest tool-result-events-retain-redacted-result-content
+  (let [b (bus/create-bus)
+        turn-id (bus/open-turn! b {:session-id "audit"})
+        interceptor (#'stream.plugin/tools-interceptor b)
+        result "{\"ok\":true,\"passed\":true,\"actual\":\"{\\\"available\\\":true}\"}"
+        ctx {:stream/turn-id turn-id
+             :tool/results
+             [{:call {:function {:name "tool_test"}}
+               :result result}]}]
+    ((:leave interceptor) ctx)
+    (let [event (->> (:events (bus/snapshot b turn-id))
+                     (filter #(= "tool-result" (:type %)))
+                     first)]
+      (is (= "tool_test" (:tool-name event)))
+      (is (= result (:tool-result event))))))
