@@ -71,14 +71,22 @@
   [schema]
   (cond
     (map? schema)
-    (json-schema->malli schema)
+    (json-schema->malli
+     (if (contains? schema :type)
+       schema
+       {:type :map
+        :keys (into {}
+                    (map (fn [[k v]]
+                           [k (assoc (if (map? v) v {:type v})
+                                     :required true)]))
+                    schema)}))
 
     (string? schema)
     (let [parsed (try
                    (edn/read-string schema)
                    (catch Throwable _ ::invalid))]
-      (if (and (map? parsed) (contains? parsed :type))
-        (json-schema->malli parsed)
+      (if (map? parsed)
+        (normalize-input-schema parsed)
         schema))
 
     :else schema))
@@ -89,11 +97,15 @@
   (let [model-spec (into {}
                          (map (fn [[k v]] [(kebab-key k) v]))
                          (or spec {}))
+        schema-alias (cond
+                       (contains? model-spec :schema) (:schema model-spec)
+                       (contains? model-spec :malli) (:malli model-spec)
+                       :else nil)
         aliased (cond-> model-spec
                   (and (nil? (:input-schema model-spec))
-                       (contains? model-spec :schema))
-                  (assoc :input-schema (:schema model-spec)))
-        spec (cond-> (dissoc aliased :schema)
+                       (some? schema-alias))
+                  (assoc :input-schema schema-alias))
+        spec (cond-> (dissoc aliased :schema :malli)
                (some? (:input-schema aliased))
                (update :input-schema normalize-input-schema))]
     (cond-> spec
@@ -128,10 +140,16 @@
   [:map {:closed true}])
 
 (def PromoteInput
-  [:map {:closed true}
-   [:name proto/portable-tool-name]
-   [:as-plugin {:optional true} :boolean]
-   [:target {:optional true} [:enum "workspace" "project" :workspace :project]]])
+  [:and
+   [:map {:closed true}
+    [:name {:optional true} proto/portable-tool-name]
+    [:tool {:optional true} proto/portable-tool-name]
+    [:as-plugin {:optional true} :boolean]
+    [:target {:optional true} [:enum "workspace" "project" :workspace :project]]]
+   [:fn {:error/message "tool_promote requires name or tool"}
+    (fn [input]
+      (or (string? (:name input))
+          (string? (:tool input))))]])
 
 (defn- coerce-target
   [target]
@@ -272,53 +290,54 @@
     "Promote a tool_define spec to reusable on-disk source. target=workspace (default) writes .lateralus/promoted/<name>/ and load-files it — works in Docker/uberjar when the workspace is writable. target=project writes src/kschltz/agent/tools/promoted/ plus a test ns (host source tree). as-plugin true also writes a real interceptor plugin. Explicit only — defining a tool does not write files.")
   (-input-schema [_] PromoteInput)
   (-output-schema [_] :string)
-  (-invoke [_ {:keys [name as-plugin target]} _ctx]
-    (if-not (proto/runtime-tool-store? session)
-      (tr/encode-result {:ok false :tool "tool_promote" :error "No factory session on context"})
-      (if-not (proto/-dynamic-enabled? session)
-        (tr/encode-result {:ok false :tool "tool_promote"
-                           :error "Dynamic tool factory is disabled"
-                           :phase "disabled"})
-        (let [status (proto/-status session)
+  (-invoke [_ {:keys [name tool as-plugin target]} _ctx]
+    (let [name (or name tool)]
+      (if-not (proto/runtime-tool-store? session)
+        (tr/encode-result {:ok false :tool "tool_promote" :error "No factory session on context"})
+        (if-not (proto/-dynamic-enabled? session)
+          (tr/encode-result {:ok false :tool "tool_promote"
+                             :error "Dynamic tool factory is disabled"
+                             :phase "disabled"})
+          (let [status (proto/-status session)
               ephemeral (set (:ephemeral status))
               tested (set (:tested status))
               promoted (set (:promoted status))]
-          (cond
-            (contains? promoted name)
-            (tr/encode-result {:ok true
-                               :tool "tool_promote"
-                               :tool-name name
-                               :phase "already-promoted"
-                               :status status})
+            (cond
+              (contains? promoted name)
+              (tr/encode-result {:ok true
+                                 :tool "tool_promote"
+                                 :tool-name name
+                                 :phase "already-promoted"
+                                 :status status})
 
-            (not (contains? ephemeral name))
-            (tr/encode-result {:ok false
-                               :tool "tool_promote"
-                               :tool-name name
-                               :phase "unknown"
-                               :error (str "Unknown ephemeral runtime tool: " name
-                                           ". Call tool_define first.")
-                               :status status})
+              (not (contains? ephemeral name))
+              (tr/encode-result {:ok false
+                                 :tool "tool_promote"
+                                 :tool-name name
+                                 :phase "unknown"
+                                 :error (str "Unknown ephemeral runtime tool: " name
+                                             ". Call tool_define first.")
+                                 :status status})
 
-            (not (contains? tested name))
-            (tr/encode-result {:ok false
-                               :tool "tool_promote"
-                               :tool-name name
-                               :phase "needs-test"
-                               :error (str "Runtime tool must pass tool_test before promotion: "
-                                           name)
-                               :status status})
+              (not (contains? tested name))
+              (tr/encode-result {:ok false
+                                 :tool "tool_promote"
+                                 :tool-name name
+                                 :phase "needs-test"
+                                 :error (str "Runtime tool must pass tool_test before promotion: "
+                                             name)
+                                 :status status})
 
-            :else
-            (tr/encode-result
-             {:ok true
-              :tool "tool_promote"
-              :pending "same-exchange"
-              :tool-name name
-              :before status
-              :transition (cond-> {:op :promote-runtime-tool :tool-name name}
-                            (some? as-plugin) (assoc :as-plugin (boolean as-plugin))
-                            target (assoc :target (coerce-target target)))})))))))
+              :else
+              (tr/encode-result
+               {:ok true
+                :tool "tool_promote"
+                :pending "same-exchange"
+                :tool-name name
+                :before status
+                :transition (cond-> {:op :promote-runtime-tool :tool-name name}
+                              (some? as-plugin) (assoc :as-plugin (boolean as-plugin))
+                              target (assoc :target (coerce-target target)))}))))))))
 
 (defn factory-tools-registry
   "Control tools bound to `session`. Empty when session is missing."
