@@ -80,6 +80,9 @@
       .map((e) => {
         const type = e.type || "";
         const extra =
+          (e["tool-result"] != null
+            ? (e["tool-name"] || "tool") + " → " + e["tool-result"]
+            : null) ||
           e.text ||
           e.thinking ||
           e["tool-name"] ||

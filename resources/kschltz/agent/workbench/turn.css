@@ -141,6 +141,11 @@ section { margin: 0.75rem 0 0; flex: 0 0 auto; }
   font: 12px/1.4 "IBM Plex Mono", ui-monospace, monospace;
   color: var(--muted);
 }
+#events li > span:last-child {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
 #events .type { color: var(--accent); }
 
 @media (max-width: 720px) {

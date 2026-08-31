@@ -51,11 +51,20 @@
             (let [turn-id (:stream/turn-id ctx)
                   results (or (:tool/results ctx) [])]
               (when (and (proto/stream-bus? stream-bus) turn-id (seq results))
-                (doseq [{:keys [call]} results]
+                (doseq [{:keys [call result]} results]
                   (bus/emit! stream-bus turn-id
                              (llm.stream/event
                               :tool-result
-                              {:tool-name (get-in call [:function :name])}))))
+                              {:tool-name (get-in call [:function :name])
+                               ;; `plugins.secrets` has already scrubbed the
+                               ;; tools-stage ctx. Preserve the exact guarded
+                               ;; result for Workbench lifecycle auditability.
+                               :tool-result (let [s (str result)
+                                                  cap 20000]
+                                              (if (> (count s) cap)
+                                                (str (subs s 0 cap)
+                                                     "\n... [audit result truncated]")
+                                                s))}))))
             ctx))})
 
 (defn- observe-interceptor
