@@ -71,7 +71,9 @@
   [x]
   (cond
     (keyword? x) x
-    (string? x) (keyword (name x))
+    (string? x) (keyword (cond-> (name x)
+                           (str/starts-with? (name x) ":")
+                           (subs 1)))
     (sequential? x) (mapv schema-token x)
     :else x))
 

@@ -95,6 +95,16 @@
     (is (= "[:map [:handle :string] [:token :string]]" (:input-schema normalized)))
     (is (proto/valid-tool-spec? normalized))))
 
+(deftest define-accepts-colon-prefixed-json-schema-tokens
+  (let [normalized
+        (tools/normalize-tool-spec
+         {:name "credential_status"
+          :description "Classify credential presence"
+          :input-schema [":map" [":handle" ":string"]]
+          :invoke "(fn [args] (if (:handle args) \"available\" \"missing\"))"})]
+    (is (= "[:map [:handle :string]]" (:input-schema normalized)))
+    (is (proto/valid-tool-spec? normalized))))
+
 (deftest list-runtime-is-read-only
   (let [store (session/factory-session {})
         t (get (tools/factory-tools-registry store) "tool_list_runtime")
