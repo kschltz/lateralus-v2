@@ -30,7 +30,7 @@ The factory is the missing bridge:
 |------|------|
 | `tool_define` | Propose `:register-runtime-tool`. Compile + overlay happen in apply. |
 | `tool_test` | Invoke with real arguments; record exact-output evidence for the current spec. |
-| `tool_list_runtime` | Read-only inventory of ephemeral + promoted overlay names. |
+| `tool_list_runtime` | Read-only inventory of ephemeral + promoted overlay names. Extra keys (`name`, `all`, `page`) are ignored so small models do not burn a turn on a closed empty map. |
 | `tool_forget` | Drop a runtime tool from the session overlay. |
 | `tool_promote` | Write a workspace spec + catalog in sandbox mode; non-sandboxed operator profiles may also generate project source. |
 

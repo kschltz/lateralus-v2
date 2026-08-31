@@ -111,6 +111,28 @@
     (catch Throwable _
       [:truncated (count (str arguments))])))
 
+(defn- disallowed-keys
+  "Collect closed-map extra keys from a humanized Malli error tree."
+  [human]
+  (cond
+    (map? human)
+    (into []
+          (mapcat
+           (fn [[k v]]
+             (let [msgs (if (sequential? v) v [v])
+                   extra? (some (fn [msg]
+                                  (let [s (str msg)]
+                                    (or (str/includes? s "disallowed key")
+                                        (str/includes? s "disallowed-key"))))
+                                msgs)]
+               (if extra?
+                 [(name k)]
+                 (disallowed-keys v)))))
+          human)
+    (sequential? human)
+    (mapcat disallowed-keys human)
+    :else []))
+
 (defn- validation-error
   "Build a model-visible error string from a Malli explanation.
 
@@ -121,10 +143,17 @@
    the old message omitted the tool name and the failing key path, so
    an `AddLibInput` mistake gave the model nothing concrete to fix)."
   [tool phase _schema _value explain]
-  (format "Tool '%s' %s validation failed: %s"
-          (-name tool)
-          phase
-          (pr-str (me/humanize explain))))
+  (let [human (me/humanize explain)
+        extras (disallowed-keys human)
+        hint (when (seq extras)
+               (str " Extra keys are not accepted: "
+                    (str/join ", " extras)
+                    ". Retry with only the documented fields."))]
+    (format "Tool '%s' %s validation failed: %s%s"
+            (-name tool)
+            phase
+            (pr-str human)
+            (or hint ""))))
 
 (defn invoke-tool
   "Call `tool` with parsed `args` and interceptor `ctx`. Validates

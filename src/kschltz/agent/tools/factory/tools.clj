@@ -160,7 +160,7 @@
       (update :interceptor-slot keyword))))
 
 (def ToolNameInput
-  [:map {:closed true}
+  [:map
    [:name proto/portable-tool-name]])
 
 (def TestInput
@@ -178,11 +178,12 @@
           (map? (:args input))))]])
 
 (def ListInput
-  [:map {:closed true}])
+  "Read-only inventory. Extra keys (name/all/page) from small models are ignored."
+  [:map])
 
 (def PromoteInput
   [:and
-   [:map {:closed true}
+   [:map
     [:name {:optional true} proto/portable-tool-name]
     [:tool {:optional true} proto/portable-tool-name]
     [:as-plugin {:optional true} :boolean]
@@ -311,7 +312,7 @@
   tool/Tool
   (-name [_] "tool_list_runtime")
   (-description [_]
-    "List tools created with tool_define in this session, plus promoted overlay names. Read-only.")
+    "List tools created with tool_define in this session, plus promoted overlay names. Read-only; extra keys such as name, all, or page are ignored.")
   (-input-schema [_] ListInput)
   (-output-schema [_] :string)
   (-invoke [_ _args ctx]

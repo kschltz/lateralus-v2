@@ -129,7 +129,8 @@
             :content
             (str "tool_test passed for: " (str/join ", " tested)
                  ". Call tool_promote for each now, then call "
-                 "tool_list_runtime and verify each name appears in promoted. "
+                 "tool_list_runtime with no arguments and verify each name "
+                 "appears in promoted. Extra keys are ignored. "
                  "Do not claim completion before both calls succeed.")}))
 
       (seq promoted)

@@ -112,6 +112,38 @@
     (is (true? (:ok parsed)))
     (is (nil? (:transition parsed)))))
 
+(deftest list-runtime-ignores-small-model-extra-keys
+  (let [store (session/factory-session {})
+        t (get (tools/factory-tools-registry store) "tool_list_runtime")
+        parsed (json/parse-string
+                (tool/invoke-tool t {:name "shout_prefix" :all true :page 1} {})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (nil? (:transition parsed)))))
+
+(deftest forget-ignores-small-model-extra-keys
+  (let [store (session/factory-session {})
+        t (get (tools/factory-tools-registry store) "tool_forget")
+        parsed (json/parse-string
+                (tool/invoke-tool t {:name "add_two" :force true :all true} {})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "add_two" (:tool-name parsed)))
+    (is (= "forget-runtime-tool" (get-in parsed [:transition :op])))))
+
+(deftest promote-ignores-small-model-extra-keys
+  (let [store (session/factory-session {})
+        t (get (tools/factory-tools-registry store) "tool_promote")
+        parsed (json/parse-string
+                (tool/invoke-tool t {:name "missing_tool"
+                                     :reason "verify"
+                                     :target "workspace"}
+                                  {})
+                true)]
+    (is (false? (:ok parsed)))
+    (is (= "unknown" (:phase parsed)))
+    (is (= "missing_tool" (:tool-name parsed)))))
+
 (deftest test-tool-records-only-an-exact-passing-result
   (let [store (session/factory-session {})
         _ (proto/-define! store spec {})
