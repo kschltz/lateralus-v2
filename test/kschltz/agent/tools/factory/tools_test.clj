@@ -42,6 +42,18 @@
     (is (= "[:map [:a :int] [:b :int]]"
            (get-in parsed [:transition :spec :input-schema])))))
 
+(deftest define-accepts-openai-style-schema-alias
+  (let [normalized
+        (tools/normalize-tool-spec
+         {:name "credential_status"
+          :description "Classify credential presence"
+          :schema {:type :map
+                   :properties {:credential {:type :string}}
+                   :required [:credential]}
+          :invoke "(fn [args] (if (:credential args) \"available\" \"missing\"))"})]
+    (is (= "[:map [:credential :string]]" (:input-schema normalized)))
+    (is (proto/valid-tool-spec? normalized))))
+
 (deftest list-runtime-is-read-only
   (let [store (session/factory-session {})
         t (get (tools/factory-tools-registry store) "tool_list_runtime")
@@ -76,3 +88,26 @@
     (is (false? (:ok failing)))
     (is (= "3" (:actual failing)))
     (is (nil? (:transition failing)))))
+
+(deftest promote-tool-preflights-unknown-and-untested-tools
+  (let [store (session/factory-session {})
+        promote (get (tools/factory-tools-registry store) "tool_promote")
+        invoke-promote #(json/parse-string
+                         (tool/invoke-tool promote
+                                           {:name "add_two"
+                                            :target "workspace"}
+                                           {})
+                         true)
+        unknown (invoke-promote)
+        _ (proto/-define! store spec {})
+        untested (invoke-promote)
+        _ (proto/-record-test! store "add_two" (proto/spec-id spec))
+        ready (invoke-promote)]
+    (is (false? (:ok unknown)))
+    (is (= "unknown" (:phase unknown)))
+    (is (nil? (:transition unknown)))
+    (is (false? (:ok untested)))
+    (is (= "needs-test" (:phase untested)))
+    (is (nil? (:transition untested)))
+    (is (true? (:ok ready)))
+    (is (= "promote-runtime-tool" (get-in ready [:transition :op])))))
