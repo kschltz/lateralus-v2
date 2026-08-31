@@ -120,6 +120,39 @@
     (is (false? (::loop/needs-repair? event)))
     (is (re-find (re-pattern id) (:text event)))))
 
+(deftest portal-repair-preserves-original-turn-details-link
+  (let [h (hub/create-hub {:session-id "repair-link"})
+        wb (->SessionWorkbench h (atom false))
+        calls (atom 0)
+        original-id "11111111-1111-1111-1111-111111111111"
+        repair-id "22222222-2222-2222-2222-222222222222"
+        portal-id "33333333-3333-3333-3333-333333333333"
+        agent-runtime
+        (reify runtime/AgentRuntime
+          (session-id [_] "repair-link")
+          (send-message [_ _]
+            (if (= 1 (swap! calls inc))
+              {:exchange/response "Done: @portal/prompt"
+               :agent/all-tool-results
+               [{:call {:function {:name "tool_promote"}}
+                 :result "{\"ok\":true}"}]
+               :stream/turn-id original-id}
+              {:exchange/response (str "Done: @portal/" portal-id)
+               :agent/all-tool-results
+               [{:call {:function {:name "portal_submit"}}
+                 :result (str "{\"ok\":true,\"cite\":\"@portal/" portal-id
+                              "\",\"ref\":{\"id\":\"" portal-id "\"}}")}]
+               :stream/turn-id repair-id}))
+          (stop [_] {}))
+        repaired (#'loop/run-exchange! agent-runtime wb "promote it")
+        guard-turn (->> (:turns (hub/snapshot h))
+                        (filter #(= :system (:role %)))
+                        last)]
+    (is (= repair-id (:turn-id repaired)))
+    (is (= original-id (:turn-id guard-turn))
+        "the guard notice links to the lifecycle turn that triggered repair")
+    (is (str/includes? (:text guard-turn) "Portal guard"))))
+
 (deftest guard-surfaces-raised-http-errors
   (let [wb (reify proto/Workbench
              (-url [_] "")

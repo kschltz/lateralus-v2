@@ -48,14 +48,16 @@
 
 (deftest await-human-opens-live-turn
   (let [b (stream.bus/create-bus)
-        h (hub/create-hub {:stream-bus b})]
+        h (hub/create-hub {:session-id "stream-session" :stream-bus b})]
     (hub/enqueue-human! h {:text "go" :refs []})
     (let [msg (hub/await-human! h {:timeout-ms 500})
-          snap (hub/snapshot h)]
+          snap (hub/snapshot h)
+          streamed (stream.bus/snapshot b (:current-turn-id snap))]
       (is (= "go" (:text msg)))
       (is (= :running (:status snap)))
       (is (string? (:current-turn-id snap)))
-      (is (true? (:live? (stream.bus/snapshot b (:current-turn-id snap))))))))
+      (is (true? (:live? streamed)))
+      (is (= "stream-session" (:session-id streamed))))))
 
 (deftest load-workspace-replaces-turns
   (let [h (hub/create-hub {:session-id "old" :session-title "Old"})]
