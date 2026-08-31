@@ -915,7 +915,7 @@
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ label, value }),
+        body: JSON.stringify({ label, value, "session-id": lastSessionId }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) throw new Error(body.error || "save failed");
@@ -933,7 +933,11 @@
     const label = btn.dataset.label;
     btn.disabled = true;
     try {
-      const res = await fetch("/api/secrets?label=" + encodeURIComponent(label), { method: "DELETE" });
+      const query = new URLSearchParams({
+        label,
+        "session-id": lastSessionId || "",
+      });
+      const res = await fetch("/api/secrets?" + query.toString(), { method: "DELETE" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) throw new Error(body.error || "delete failed");
       setSettingsStatus(`secret '${label}' deleted ✓`, "ok");

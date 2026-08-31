@@ -309,6 +309,40 @@
        v))
    args))
 
+(defn- handle-labels
+  [args]
+  (let [labels (volatile! #{})]
+    (walk/postwalk
+     (fn [v]
+       (when (string? v)
+         (doseq [[_ label] (re-seq handle-regex v)]
+           (vswap! labels conj label)))
+       v)
+     args)
+    @labels))
+
+(defn authorized-substitute-handles
+  "Resolve handles only when `capability` authorizes every referenced label.
+   A capability is `{:labels :all}` or `{:labels #{\"label\" ...}}`.
+   Missing/unauthorized capabilities fail closed before delegate invocation."
+  [store capability args]
+  (let [referenced (handle-labels args)
+        allowed (:labels capability)
+        unauthorized
+        (when (seq referenced)
+          (if (= :all allowed)
+            #{}
+            (set (remove (set (or allowed #{})) referenced))))]
+    (when (seq unauthorized)
+      (throw (ex-info
+              (str "Secret handle use is not authorized for labels: "
+                   (str/join ", " (sort unauthorized)))
+              {:kind :secret-capability-denied
+               :labels (vec (sort unauthorized))})))
+    (if (seq referenced)
+      (substitute-handles store args)
+      args)))
+
 
 
 ;; ---- Model-visible handle inventory ----
@@ -319,6 +353,7 @@
 ;; unreadable — there is no LLM-callable path that returns plaintext.
 
 (def handles-tool-name "secret_list_handles")
+(def presence-tool-name "secret_check")
 
 (defn handles-tool
   "A Tool that lists the secret HANDLE labels (never values). Registers
@@ -333,6 +368,22 @@
     (-output-schema [_] :string)
     (-invoke [_ _args _ctx]
       (json/generate-string {:handles (-secret-labels store)}))))
+
+(defn presence-tool
+  "Trusted capability endpoint used by sandboxed runtime tools to verify that
+   an operator-authorized handle resolved. It never returns the value."
+  []
+  (reify tool/Tool
+    (-name [_] presence-tool-name)
+    (-description [_]
+      "Check whether an operator-authorized secret handle resolves. Input is a {{secret:label}} handle. Returns only available true/false, never the secret value.")
+    (-input-schema [_] [:map [:handle :string]])
+    (-output-schema [_] :string)
+    (-invoke [_ {:keys [handle]} _ctx]
+      (json/generate-string
+       {:available (and (string? handle)
+                        (not (str/includes? handle handle-prefix-tok))
+                        (not (str/blank? handle)))}))))
 
 ;; ---- Tool wrapping ----
 
@@ -350,18 +401,26 @@
    input will echo handles spiked with nothing — the input carries only
    handles, and the output redact sweep covers a tool that expands
    them."
-  [store delegate]
-  (let [pairs (volatile! nil)]
-    (reify tool/Tool
-      (-name [this] (tool/-name delegate))
-      (-description [this] (tool/-description delegate))
-      (-input-schema [this] (tool/-input-schema delegate))
-      (-output-schema [this] (tool/-output-schema delegate))
-      (-invoke [_ args ctx]
-        (let [resolved (substitute-handles store args)]
-          (when-not @pairs
-            (vreset! pairs (collect-redaction-pairs store)))
-          (redact-string @pairs
-                         (tool/invoke-tool delegate resolved ctx)))))))
-;; The needle set is computed lazily (first invoke) and reused; a store
-;; mutation invalidates it only via plugin rebuild (runtime reload).
+  ([store delegate]
+   (wrap-tool store delegate nil))
+  ([store delegate capability]
+   (reify
+     tool/Tool
+     (-name [_] (tool/-name delegate))
+     (-description [_] (tool/-description delegate))
+     (-input-schema [_] (tool/-input-schema delegate))
+     (-output-schema [_] (tool/-output-schema delegate))
+     (-invoke [_ args ctx]
+       (let [untrusted? (tool/untrusted-runtime-tool? delegate)
+             resolved (if untrusted?
+                        args
+                        (authorized-substitute-handles
+                         store capability args))
+             result (tool/invoke-tool delegate resolved ctx)
+             ;; Store mutations take effect immediately; literal redaction is
+             ;; a backup layer, never the capability boundary.
+             pairs (collect-redaction-pairs store)]
+         (redact-string pairs result)))
+
+     tool/ToolTrust
+     (-trust-tier [_] (tool/trust-tier delegate)))))

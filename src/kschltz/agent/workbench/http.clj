@@ -24,16 +24,14 @@
   ([body] (json-response 200 body))
   ([status body]
    {:status  status
-    :headers {"Content-Type"                "application/json; charset=utf-8"
-              "Access-Control-Allow-Origin" "*"}
+    :headers {"Content-Type" "application/json; charset=utf-8"}
     :body    (json/generate-string body)}))
 
 (defn- text-response
   [status content-type body]
   {:status  status
-   :headers {"Content-Type"                 content-type
-             "Access-Control-Allow-Origin"  "*"
-             "Cache-Control"                "no-store, max-age=0"}
+   :headers {"Content-Type"  content-type
+             "Cache-Control" "no-store, max-age=0"}
    :body    body})
 
 (defn- read-json-body
@@ -203,6 +201,27 @@
                         :expected-session-id expected
                         :actual-session-id actual})))
 
+(defn- required-session-conflict-response
+  [expected actual]
+  (if (str/blank? (str expected))
+    (json-response 409 {:ok false
+                        :error "session-id is required — refresh and retry"
+                        :actual-session-id actual})
+    (session-conflict-response expected actual)))
+
+(defn- same-origin-request?
+  [req]
+  (let [origin (or (get-in req [:headers "origin"])
+                   (get-in req [:headers "Origin"]))]
+    (and (not (str/blank? (str origin)))
+         (= (str origin) (request-origin req)))))
+
+(defn- origin-forbidden-response
+  [req]
+  (when-not (same-origin-request? req)
+    (json-response 403 {:ok false
+                        :error "secret mutations require a same-origin request"})))
+
 (defn- sse-loop!
   [hub channel send! run? since req]
   (try
@@ -239,10 +258,9 @@
       (http-kit/on-close channel (fn [_] (reset! run? false)))
       (http-kit/send! channel
                       {:status  200
-                       :headers {"Content-Type"                "text/event-stream; charset=utf-8"
-                                 "Cache-Control"               "no-cache"
-                                 "Connection"                  "keep-alive"
-                                 "Access-Control-Allow-Origin" "*"}}
+                       :headers {"Content-Type"  "text/event-stream; charset=utf-8"
+                                 "Cache-Control" "no-cache"
+                                 "Connection"    "keep-alive"}}
                       false)
       (future (sse-loop! hub channel http-kit/send! run? since req)))))
 
@@ -284,10 +302,9 @@
         (http-kit/on-close channel (fn [_] (reset! run? false)))
         (http-kit/send! channel
                         {:status  200
-                         :headers {"Content-Type"                "text/event-stream; charset=utf-8"
-                                   "Cache-Control"               "no-cache"
-                                   "Connection"                  "keep-alive"
-                                   "Access-Control-Allow-Origin" "*"}}
+                         :headers {"Content-Type"  "text/event-stream; charset=utf-8"
+                                   "Cache-Control" "no-cache"
+                                   "Connection"    "keep-alive"}}
                         false)
         (future (turn-sse-loop! bus turn-id channel http-kit/send! run? since))))))
 
@@ -371,9 +388,7 @@
 
           (= method :options)
           {:status 204
-           :headers {"Access-Control-Allow-Origin"  "*"
-                     "Access-Control-Allow-Methods" "GET,POST,PATCH,DELETE,OPTIONS"
-                     "Access-Control-Allow-Headers" "Content-Type"}
+           :headers {}
            :body ""}
 
           :else
@@ -414,18 +429,32 @@
                  (json-response ((:view-fn secret-ops)))
 
                  (and (#{:put :post} method) (= path "/api/secrets"))
-                 (let [op     (read-json-body req)
-                       result ((:put-fn secret-ops) op)]
-                   (if (:ok result)
-                     (json-response result)
-                     (json-response 400 result)))
+                 (or
+                  (origin-forbidden-response req)
+                  (let [op (read-json-body req)]
+                    (locking hub
+                      (let [expected (:session-id op)
+                            actual (:session-id (hub/snapshot hub))]
+                        (or
+                         (required-session-conflict-response expected actual)
+                         (let [result ((:put-fn secret-ops) op)]
+                           (if (:ok result)
+                             (json-response result)
+                             (json-response 400 result))))))))
 
                  (and (= method :delete) (= path "/api/secrets"))
-                 (let [q      (parse-query uri)
-                       result ((:delete-fn secret-ops) (:label q))]
-                   (if (:ok result)
-                     (json-response result)
-                     (json-response 400 result)))
+                 (or
+                  (origin-forbidden-response req)
+                  (let [q (parse-query uri)]
+                    (locking hub
+                      (let [expected (:session-id q)
+                            actual (:session-id (hub/snapshot hub))]
+                        (or
+                         (required-session-conflict-response expected actual)
+                         (let [result ((:delete-fn secret-ops) (:label q))]
+                           (if (:ok result)
+                             (json-response result)
+                             (json-response 400 result))))))))
 
                  :else
                  (json-response 404 {:error "not found"}))))

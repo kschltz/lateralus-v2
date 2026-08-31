@@ -27,6 +27,26 @@
   (-invoke [this args ctx] "Execute the tool with validated `args` and the
    current interceptor `ctx`. Returns a string-serializable result."))
 
+(defprotocol ToolTrust
+  "Optional trust marker for tool implementations.
+
+   Host-defined tools default to `:trusted-static`. Runtime-authored tools
+   MUST implement this protocol and return `:untrusted-runtime`, which keeps
+   secret plaintext and host context outside model-authored code."
+  (-trust-tier [this]))
+
+(defn trust-tier
+  "Return the explicit tool trust tier, defaulting host-defined tools to
+   `:trusted-static`."
+  [tool]
+  (if (satisfies? ToolTrust tool)
+    (-trust-tier tool)
+    :trusted-static))
+
+(defn untrusted-runtime-tool?
+  [tool]
+  (= :untrusted-runtime (trust-tier tool)))
+
 (defn tool?
   "Return true if `x` satisfies the `Tool` protocol."
   [x]

@@ -22,15 +22,18 @@
       (when (map? reg) reg))))
 
 (defn- seed-promoted
-  [compiler workspace-root]
+  [compiler workspace-root sandboxed?]
   (reduce
    (fn [acc entry]
      (let [name (:name entry)
            ns-sym (some-> entry :ns symbol)
-           path (:path entry)]
-       (when (and path (.isFile (java.io.File. (str path))))
+           path (:path entry)
+           spec-only? (or sandboxed? (:sandboxed entry))]
+       (when (and (not spec-only?)
+                  path
+                  (.isFile (java.io.File. (str path))))
          (try (load-file (str path)) (catch Throwable _)))
-       (let [from-ns (when ns-sym
+       (let [from-ns (when (and (not spec-only?) ns-sym)
                        (try (get (resolve-registry ns-sym) name)
                             (catch Throwable _ nil)))
              compiled (when (and (not (tool/tool? from-ns))
@@ -145,7 +148,8 @@
                                          (:workspace-root config)
                                          ".")
                      :target (or (:target opts) :workspace)
-                     :as-plugin (boolean (:as-plugin opts))})
+                     :as-plugin (boolean (:as-plugin opts))
+                     :sandboxed? (proto/-sandboxed? _)})
             compiled (proto/-compile-spec compiler spec)
             live (cond-> {:spec spec
                           :tool (or (:tool compiled) (:tool entry))
@@ -231,7 +235,23 @@
       (assoc results :ok (empty? errors))))
 
   (-dynamic-enabled? [_]
-    (dynamic-enabled? config)))
+    (dynamic-enabled? config))
+
+  (-sandboxed? [_]
+    (true? (get-in config [:sandbox :enabled?]))))
+
+(defn- normalize-config
+  [config]
+  (let [config (or config {})
+        secret-store? (some? (:secret-store config))
+        explicit (get-in config [:sandbox :enabled?] ::unset)]
+    (when (and secret-store? (false? explicit))
+      (throw (ex-info
+              "A factory session with a secret store must enable the sandbox"
+              {:phase :sandbox :kind :unsafe-secret-factory-config})))
+    (cond-> config
+      (and secret-store? (= ::unset explicit))
+      (assoc-in [:sandbox :enabled?] true))))
 
 (defn factory-session
   "Build a `RuntimeToolStore`.
@@ -240,14 +260,17 @@
    optional `:compiler` / `:runtime` test seams."
   ([] (factory-session {}))
   ([config]
-   (let [config (or config {})
+   (let [config (normalize-config config)
          compiler (cond
                     (proto/tool-compiler? (:compiler config))
                     (:compiler config)
                     :else
-                    (compile/jvm-compiler (:runtime config)))
+                    (compile/jvm-compiler
+                     (:runtime config)
+                     {:sandbox (:sandbox config)}))
          workspace (or (:workspace-root config) ".")
-         promoted (try (seed-promoted compiler workspace)
+         sandboxed? (true? (get-in config [:sandbox :enabled?]))
+         promoted (try (seed-promoted compiler workspace sandboxed?)
                        (catch Throwable _ {}))]
      (->FactorySession config compiler
                        (atom {:ephemeral {}

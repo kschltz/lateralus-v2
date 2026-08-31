@@ -50,6 +50,7 @@
             [kschltz.agent.tools.mcp.tools :as tools.mcp]
             [kschltz.agent.tools.mcp.schemas :as mcp.schemas]
             [kschltz.agent.tools.mcp.session-tools :as mcp.session-tools]
+            [kschltz.agent.tools.factory.protocol :as factory.proto]
             [kschltz.agent.tools.factory.wiring]
             [kschltz.agent.tools.workflow.wiring]
             [kschltz.agent.stream.wiring]
@@ -272,7 +273,12 @@
 (def ^:private SecretPluginConfig
   "Malli schema for :lateralus/secret-plugin."
   [:map
-   [:store some?]])
+   [:store some?]
+   [:factory-session [:fn factory.proto/runtime-tool-store?]]
+   [:runtime-tools :map]
+   [:capabilities {:optional true}
+    [:map-of :string
+     [:map [:labels [:or [:= :all] [:set :string]]]]]]])
 
 ;; ---- Component definitions ----
 
@@ -429,8 +435,19 @@
 (defmethod ig/init-key :lateralus/secret-store [_ opts]
   (secrets/sealed-file-store opts))
 
-(defmethod ig/init-key :lateralus/secret-plugin [_ {:keys [store]}]
-  (plugins.secrets/secrets-plugin {:store store}))
+(defmethod ig/init-key :lateralus/secret-plugin
+  [_ {:keys [store factory-session runtime-tools capabilities]}]
+  (when-not (factory.proto/-sandboxed? factory-session)
+    (throw (ex-info
+            "Secret plugin requires a sandboxed runtime tool factory"
+            {:kind :unsafe-secret-factory-config})))
+  (when-not (false? (:runtime/enabled? (meta runtime-tools)))
+    (throw (ex-info
+            "Secret plugin requires :lateralus/runtime-tools :enabled? false"
+            {:kind :unsafe-secret-runtime-config})))
+  (plugins.secrets/secrets-plugin
+   {:store store
+    :capabilities capabilities}))
 
 (defmethod ig/init-key :lateralus/plugins [_ plugins]
   ;; The base plugin is prepended automatically so user plugins are
@@ -468,7 +485,8 @@
 
 (defn- rebuildable-registry
   [registry rebuild]
-  (with-meta registry {:registry/rebuild rebuild}))
+  (with-meta registry
+    (assoc (meta registry) :registry/rebuild rebuild)))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
@@ -519,9 +537,10 @@
    dependencies at runtime; gate them with `:enabled?` / `:network?`.
    JVM-only — not wired into the native-image config (GraalVM cannot
    compile arbitrary forms at runtime)."
-  (rebuildable-registry
-   (tools.runtime/runtime-registry opts)
-   #(tools.runtime/runtime-registry opts)))
+  (let [build #(with-meta
+                 (tools.runtime/runtime-registry opts)
+                 {:runtime/enabled? (get opts :enabled? true)})]
+    (rebuildable-registry (build) build)))
 
 (defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session factory-session]}]
   (plugins.tools/tools-plugin registry {:mcp-session mcp-session

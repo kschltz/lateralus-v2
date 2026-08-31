@@ -83,7 +83,10 @@
     "Synchronize ephemeral tools to `specs`: remove absent/stale entries,
      then compile missing/changed specs. Errors are reported, not raised.")
   (-dynamic-enabled? [store]
-    "True when agent-driven define/forget/promote is allowed."))
+    "True when agent-driven define/forget/promote is allowed.")
+  (-sandboxed? [store]
+    "True when runtime-authored code is restricted to the SCI capability
+     sandbox and cannot receive host context."))
 
 (defn tool-compiler?
   [x]

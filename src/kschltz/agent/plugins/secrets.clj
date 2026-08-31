@@ -37,7 +37,10 @@
   (str "A secret store is available. Tools that need credentials accept a "
        "{{secret:label}} handle in their arguments: call the \""
        secrets/handles-tool-name "\" tool to list the handles, then pass "
-       "the handle (e.g. {{secret:label}}) where a credential is required. "
+       "the handle (e.g. {{secret:label}}) only to a tool granted that "
+       "secret capability by the operator. Runtime-authored tools receive "
+       "opaque handles, never values; they must delegate credential use via "
+       "lateralus.runtime/call-tool to an allowlisted host tool. "
        "Secret VALUES can never be read or displayed; never ask the user "
        "to paste a secret into the chat."))
 
@@ -45,10 +48,15 @@
   "Wrap every tool in `registry` (map name -> Tool) for `store`.
    Value-cached in `cache` so an unchanged registry reuses wrappers
    across exchanges and live-registry refreshes."
-  [store cache registry]
+  [store capabilities cache registry]
   (if-let [wrapped (get @cache registry)]
     wrapped
-    (let [wrapped (into {} (map (fn [[k t]] [k (secrets/wrap-tool store t)])) registry)]
+    (let [wrapped
+          (into {}
+                (map (fn [[k t]]
+                       [k (secrets/wrap-tool
+                           store t (get capabilities (str k)))]))
+                registry)]
       (vswap! cache assoc registry wrapped)
       wrapped)))
 
@@ -76,12 +84,6 @@
         advertise-handle-tool?
         (update :agent/system-append append-system-guidance)))))
 
-(defn- redact-needle-pairs
-  [store cache]
-  (when-not @cache
-    (vreset! cache (secrets/collect-redaction-pairs store)))
-  @cache)
-
 (defn- scrub-messages
   "Redact each message's :content using `pairs`."
   [pairs req]
@@ -93,9 +95,9 @@
     req))
 
 (defn- redact-enter
-  [store needle-cache]
+  [store]
   (fn [ctx]
-    (let [pairs (redact-needle-pairs store needle-cache)]
+    (let [pairs (secrets/collect-redaction-pairs store)]
       (if (seq pairs)
         (let [red (partial secrets/redact-string pairs)
               scrub-messages #(scrub-messages pairs %)]
@@ -123,27 +125,37 @@
 (defn secrets-plugin
   "Construct the secrets plugin. `opts` keys:
      :store — required `SecretStore` instance."
-  [{:keys [store advertise-handle-tool?]
+  [{:keys [store advertise-handle-tool? capabilities]
     :or   {advertise-handle-tool? true}
     :as _opts}]
   {:pre [(satisfies? secrets/SecretStore store)]}
   (let [wrap-cache (volatile! {})
-        needle-cache (volatile! nil)
+        capabilities (assoc (or capabilities {})
+                            secrets/presence-tool-name
+                            {:labels :all})
         handle-tool (when advertise-handle-tool?
                       (secrets/wrap-tool store (secrets/handles-tool store)))
+        presence-tool (when advertise-handle-tool?
+                        (secrets/wrap-tool
+                         store (secrets/presence-tool)
+                         {:labels :all}))
         transform-registry
         (fn [registry]
-          (cond-> (wrap-registry store wrap-cache (or registry {}))
+          (cond-> (wrap-registry
+                   store capabilities wrap-cache (or registry {}))
             handle-tool
-            (assoc secrets/handles-tool-name handle-tool)))]
+            (assoc secrets/handles-tool-name handle-tool)
+            presence-tool
+            (assoc secrets/presence-tool-name presence-tool)))]
     (with-meta
       [{:name  ::wrap-registry
         :slot  :guard
         :enter (wrap-enter transform-registry advertise-handle-tool?)}
        {:name  ::redact
         :slot  :tools
-        :enter (redact-enter store needle-cache)}]
+        :enter (redact-enter store)}]
       {:plugin/name :secrets
        :plugin/rebuild
        (fn [] (secrets-plugin {:store store
-                               :advertise-handle-tool? advertise-handle-tool?}))})))
+                               :advertise-handle-tool? advertise-handle-tool?
+                               :capabilities capabilities}))})))

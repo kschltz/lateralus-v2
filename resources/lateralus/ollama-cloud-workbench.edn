@@ -28,7 +28,7 @@
  :lateralus/cli-ui               {:enabled? :auto :theme :default}
  :lateralus/thinking             {:mode :preview}
  :lateralus/web-tools            {:provider :none}
- :lateralus/runtime-tools        {:enabled? true :network? false}
+ :lateralus/runtime-tools        {:enabled? false :network? false}
  :lateralus/loop-opts            {:max-loop-depth 10
                                   :max-tool-calls-per-turn 100
                                   :max-tool-calls-per-exchange 30
@@ -37,7 +37,10 @@
 
  :lateralus/secret-store  {:path ".lateralus/secrets.sealed"
                            :passphrase-env "LATERALUS_SECRETS_PASSPHRASE"}
- :lateralus/secret-plugin {:store #ig/ref :lateralus/secret-store}
+ :lateralus/secret-plugin {:store #ig/ref :lateralus/secret-store
+                            :factory-session #ig/ref :lateralus/factory-session
+                            :runtime-tools #ig/ref :lateralus/runtime-tools
+                            :capabilities {"secret_check" {:labels :all}}}
 
  :lateralus/workbench {:enabled? true
                        :stream-bus #ig/ref :lateralus/stream-bus
@@ -55,7 +58,10 @@
                                :dynamic {:enabled? false}}
  :lateralus/mcp-session-tools {:session #ig/ref :lateralus/mcp-tools}
  :lateralus/factory-session   {:workspace-root "."
-                               :dynamic {:enabled? true}}
+                               :dynamic {:enabled? true}
+                               :secret-store #ig/ref :lateralus/secret-store
+                               :sandbox {:enabled? true
+                                         :call-tools #{"secret_check"}}}
  :lateralus/factory-tools     {:session #ig/ref :lateralus/factory-session}
  :lateralus/factory-plugin    {:session #ig/ref :lateralus/factory-session}
  :lateralus/workflow-tools    {}
