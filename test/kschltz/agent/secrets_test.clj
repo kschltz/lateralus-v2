@@ -80,7 +80,28 @@
           _ (secrets/-put-secret! store1 "k" "v-12345678")
           store2 (secrets/sealed-file-store {:path path :passphrase "bad"})]
       (try
-        (is (thrown? Exception (secrets/-get-secret store2 "k")))
+        (let [e (try (secrets/-get-secret store2 "k") nil (catch Exception ex ex))]
+          (is (some? e))
+          (is (str/includes? (ex-message e) "cannot decrypt"))
+          (is (= :secret-decrypt-failed (:kind (ex-data e))))
+          (is (not (str/includes? (ex-message e) "Tag mismatch"))))
+        (finally
+          (cleanup! path))))))
+
+(deftest redaction-survives-undecryptable-envelopes
+  (testing "wrong-passphrase labels are skipped so list/redact tools stay up"
+    (let [path (temp-path :redact-bad)
+          store1 (secrets/sealed-file-store {:path path :passphrase "good"})
+          _ (secrets/-put-secret! store1 "k" "v-12345678")
+          store2 (secrets/sealed-file-store {:path path :passphrase "bad"})]
+      (try
+        (is (= ["k"] (secrets/-secret-labels store2)))
+        (is (= {} (secrets/all-secret-values store2)))
+        (is (= [] (secrets/collect-redaction-pairs store2)))
+        (let [t (secrets/wrap-tool store2 (secrets/handles-tool store2))
+              out (tool/invoke-tool t {} {})]
+          (is (str/includes? out "k"))
+          (is (not (str/includes? out "Tag mismatch"))))
         (finally
           (cleanup! path))))))
 

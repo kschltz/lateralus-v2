@@ -25,7 +25,7 @@
            [java.nio.file Files Paths StandardOpenOption]
            [java.security SecureRandom]
            [java.util Base64]
-           [javax.crypto Cipher SecretKeyFactory]
+           [javax.crypto AEADBadTagException Cipher SecretKeyFactory]
            [javax.crypto.spec GCMParameterSpec PBEKeySpec SecretKeySpec]))
 
 ;; ---- Protocol ----
@@ -204,7 +204,15 @@
               (throw (ex-info "Sealed-store salt changed on disk; reload the store"
                               {:path (str (:path store))})))
             (when-let [sealed (get envelopes label)]
-              (let [plaintext (open-bytes (:key store) sealed)]
+              (let [plaintext (try
+                                (open-bytes (:key store) sealed)
+                                (catch AEADBadTagException _
+                                  (throw (ex-info
+                                          (str "Secret store cannot decrypt label "
+                                               label
+                                               " — the passphrase does not match this sealed file. Re-save the secret from Workbench settings.")
+                                          {:kind :secret-decrypt-failed
+                                           :label label}))))]
                 ;; negative cache for missing labels requires distinct
                 ;; representation; only cache FOUND values
                 (vswap! (:plaintext-cache store) assoc label plaintext)
@@ -229,11 +237,17 @@
 (defn all-secret-values
   "Map of label -> plaintext for every secret in `store`. Used ONLY for
    redaction (this side of the trust boundary); never exposed to the
-   model."
+   model. Labels that cannot be decrypted (wrong passphrase / torn
+   envelope) are omitted so a single bad envelope cannot crash a turn."
   [store]
   (into {}
         (keep (fn [label]
-                (when-let [v (-get-secret store label)] [label v])))
+                (try
+                  (when-let [v (-get-secret store label)] [label v])
+                  (catch clojure.lang.ExceptionInfo e
+                    (if (= :secret-decrypt-failed (:kind (ex-data e)))
+                      nil
+                      (throw e))))))
         (-secret-labels store)))
 
 ;; ---- Redaction ----
