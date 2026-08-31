@@ -5,7 +5,8 @@
    call looks unregistered. After apply refreshes the registry, retry
    those unavailable results. If a tool was defined but has no passing
    tool_test evidence, nudge the follow-up turn to test it."
-  (:require [clojure.string :as str]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.transitions :as tr]
             [malli.core :as m]
@@ -107,6 +108,22 @@
                        (remove #(inventory-confirms? results %))
                        (successful-control-tool-names
                         results "tool_promote"))]
+    ;; #region agent log
+    (spit "/opt/cursor/logs/debug.log"
+          (str (json/generate-string
+                {:hypothesisId "B,C"
+                 :location "loop/retry.clj:nudge-untested-runtime-tools"
+                 :message "evaluated lifecycle continuation nudge"
+                 :data {:depth (:agent/tool-loop-depth ctx)
+                        :resultTools (mapv #(get-in % [:call :function :name])
+                                           results)
+                        :untested untested
+                        :tested tested
+                        :promoted promoted}
+                 :timestamp (System/currentTimeMillis)})
+               "\n")
+          :append true)
+    ;; #endregion
     (cond
       (seq untested)
       (-> ctx

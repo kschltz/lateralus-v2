@@ -29,7 +29,8 @@
      store-exchange   — leave stage; records the final exchange
      deliver-responses — leave stage; hands responses to listeners
      notify           — leave stage; fires on-thought / on-response"
-    (:require [clojure.string :as str]
+   (:require [cheshire.core :as json]
+             [clojure.string :as str]
               [kschltz.agent.chain :as chain]
               [kschltz.agent.interceptors.schema :as schema]
               [kschltz.agent.llm.client :as llm-client]
@@ -54,7 +55,56 @@
   [ctx]
   (let [client (or (:llm/client ctx) (default-llm-client))
         req    (:llm/request ctx)]
-    (assoc ctx :llm/response (llm-client/-call client req))))
+    ;; #region agent log
+    (spit "/opt/cursor/logs/debug.log"
+          (str (json/generate-string
+                {:hypothesisId "A,B"
+                 :location "interceptors.clj:call-llm:before"
+                 :message "calling LlmClient protocol"
+                 :data {:model (:model req)
+                        :messageCount (count (:messages req))
+                        :toolCount (count (:tools req))
+                        :lastRole (:role (peek (:messages req)))
+                        :lastToolNames (mapv #(get-in % [:function :name])
+                                             (:tool_calls (peek (:messages req))))}
+                 :timestamp (System/currentTimeMillis)})
+               "\n")
+          :append true)
+    ;; #endregion
+    (try
+      (let [response (llm-client/-call client req)]
+        ;; #region agent log
+        (spit "/opt/cursor/logs/debug.log"
+              (str (json/generate-string
+                    {:hypothesisId "A"
+                     :location "interceptors.clj:call-llm:after"
+                     :message "LlmClient protocol returned"
+                     :data {:responseKeys (mapv str (keys response))
+                            :finishReason (get-in response [:choices 0 :finish_reason])
+                            :toolNames (mapv #(get-in % [:function :name])
+                                             (get-in response
+                                                     [:choices 0 :message :tool_calls]))}
+                     :timestamp (System/currentTimeMillis)})
+                   "\n")
+              :append true)
+        ;; #endregion
+        (assoc ctx :llm/response response))
+      (catch Throwable t
+        ;; #region agent log
+        (spit "/opt/cursor/logs/debug.log"
+              (str (json/generate-string
+                    {:hypothesisId "A"
+                     :location "interceptors.clj:call-llm:error"
+                     :message "LlmClient protocol threw"
+                     :data {:exceptionClass (.getName (class t))
+                            :hasMessage (boolean (some-> t ex-message seq))
+                            :safeErrorData (select-keys (ex-data t)
+                                                       [:kind :status :phase])}
+                     :timestamp (System/currentTimeMillis)})
+                   "\n")
+              :append true)
+        ;; #endregion
+        (throw t)))))
 
 ;; ---- Stage definitions ----
 
