@@ -29,7 +29,8 @@
  :lateralus/thinking             {:mode :preview}
  :lateralus/web-tools            {:provider :none}
  :lateralus/runtime-tools        {:enabled? true :network? false}
- :lateralus/loop-opts            {:max-tool-calls-per-turn 100
+ :lateralus/loop-opts            {:max-loop-depth 10
+                                  :max-tool-calls-per-turn 100
                                   :max-tool-calls-per-exchange 30
                                   :tool-schema-mode :compact
                                   :tool-content-caps {"clojure_eval" 12000}}
