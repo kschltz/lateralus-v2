@@ -2,7 +2,8 @@
   "Outer UI-session loop for the workbench plugin: park on web chat,
    run one agent exchange, publish artifacts back into the chat pane.
    The exchange chain itself is never parked."
-  (:require [clojure.java.io :as io]
+  (:require [cheshire.core :as json]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [kschltz.agent.runtime :as runtime]
             [kschltz.agent.session.manager :as sessions]
@@ -232,6 +233,19 @@
          (let [msg     (wb/await-human!* workbench {})
                prompt  (hub/format-prompt msg)
                trimmed (str/trim (str (:text msg)))]
+           ;; #region agent log
+           (spit "/opt/cursor/logs/debug.log"
+                 (str (json/generate-string
+                       {:hypothesisId "F,H,I"
+                        :location "workbench/loop.clj:run-session:dequeued"
+                        :message "dequeued Workbench message"
+                        :data {:sessionId (:session-id (hub/snapshot (:hub workbench)))
+                               :runtimeSessionId (runtime/session-id runtime)
+                               :textChars (count trimmed)}
+                        :timestamp (System/currentTimeMillis)})
+                      "\n")
+                 :append true)
+           ;; #endregion
            (cond
              (#{"/quit" "/exit"} trimmed)
              (do (wb/publish! workbench {:role :system :text "Goodbye."})
@@ -247,15 +261,44 @@
                (hub/set-status! h :running "model working…")
                (try
                  (let [event (run-exchange! runtime workbench prompt)]
+                   ;; #region agent log
+                   (spit "/opt/cursor/logs/debug.log"
+                         (str (json/generate-string
+                               {:hypothesisId "H,I"
+                                :location "workbench/loop.clj:run-session:exchange-returned"
+                                :message "Workbench exchange returned"
+                                :data {:sessionId (:session-id (hub/snapshot h))
+                                       :role (some-> event :role name)
+                                       :hasTurnId (boolean (:turn-id event))
+                                       :textChars (count (str (:text event)))}
+                                :timestamp (System/currentTimeMillis)})
+                              "\n")
+                         :append true)
+                   ;; #endregion
                    (wb/publish! workbench event)
                    (when-let [store (:session-store workbench)]
                      (sessions/persist-current! store h runtime))
                    (hub/set-status! h :waiting "ready for your next message"))
                  (catch Throwable t
-                 (let [msg (friendly-exchange-error t nil)]
-                   (wb/publish! workbench
-                                {:role :error :text msg})
-                   (hub/set-status! h :error msg))))
+                   ;; #region agent log
+                   (spit "/opt/cursor/logs/debug.log"
+                         (str (json/generate-string
+                               {:hypothesisId "G,H,I"
+                                :location "workbench/loop.clj:run-session:error"
+                                :message "Workbench exchange threw"
+                                :data {:sessionId (:session-id (hub/snapshot h))
+                                       :exceptionClass (.getName (class t))
+                                       :hasMessage (boolean (some-> t ex-message seq))
+                                       :safeErrorData (select-keys (ex-data t)
+                                                                  [:kind :status :phase])}
+                                :timestamp (System/currentTimeMillis)})
+                              "\n")
+                         :append true)
+                   ;; #endregion
+                   (let [msg (friendly-exchange-error t nil)]
+                     (wb/publish! workbench
+                                  {:role :error :text msg})
+                     (hub/set-status! h :error msg))))
                (recur))
 
              :else

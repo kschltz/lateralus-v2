@@ -470,8 +470,36 @@
                    msg  (schemas/decode-message
                          {:text (str (:text body))
                           :refs (vec (or (:refs body) []))})]
+               ;; #region agent log
+               (spit "/opt/cursor/logs/debug.log"
+                     (str (json/generate-string
+                           {:hypothesisId "F,G,J"
+                            :location "workbench/http.clj:api-message:before"
+                            :message "received Workbench message request"
+                            :data {:pid (.pid (ProcessHandle/current))
+                                   :sessionId (:session-id (hub/snapshot hub))
+                                   :status (some-> (hub/snapshot hub) :status name)
+                                   :textChars (count (:text msg))
+                                   :refCount (count (:refs msg))}
+                            :timestamp (System/currentTimeMillis)})
+                          "\n")
+                     :append true)
+               ;; #endregion
                (hub/enqueue-human! hub msg)
                (when on-message (on-message msg))
+               ;; #region agent log
+               (spit "/opt/cursor/logs/debug.log"
+                     (str (json/generate-string
+                           {:hypothesisId "F,G,J"
+                            :location "workbench/http.clj:api-message:after"
+                            :message "enqueued Workbench message request"
+                            :data {:sessionId (:session-id (hub/snapshot hub))
+                                   :status (some-> (hub/snapshot hub) :status name)
+                                   :turnCount (count (:turns (hub/snapshot hub)))}
+                            :timestamp (System/currentTimeMillis)})
+                          "\n")
+                     :append true)
+               ;; #endregion
                (json-response {:ok true}))
 
              (and (= method :post) (= path "/api/portal-event"))
