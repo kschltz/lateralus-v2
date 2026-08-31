@@ -67,6 +67,41 @@
       :vector [:vector (json-schema->malli (:items schema))]
       :any)))
 
+(defn- schema-token
+  [x]
+  (cond
+    (keyword? x) x
+    (string? x) (keyword (name x))
+    (sequential? x) (mapv schema-token x)
+    :else x))
+
+(defn- sequential-schema->malli
+  "Accept the JSON-array Malli dialects small models emit:
+   [\"map\" \"handle\" \"string\"] and [\"map\" [\"handle\" \"string\"]]."
+  [schema]
+  (let [xs (vec schema)
+        head (schema-token (first xs))
+        tail (vec (rest xs))]
+    (cond
+      (not= :map head)
+      schema
+
+      (every? (fn [x] (and (sequential? x) (>= (count x) 2))) tail)
+      (into [:map]
+            (map (fn [pair]
+                   [(schema-token (first pair))
+                    (schema-token (second pair))]))
+            tail)
+
+      (and (even? (count tail))
+           (seq tail)
+           (every? (fn [x] (or (string? x) (keyword? x))) tail))
+      (into [:map]
+            (map (fn [[k t]] [(schema-token k) (schema-token t)]))
+            (partition 2 tail))
+
+      :else schema)))
+
 (defn- normalize-input-schema
   [schema]
   (cond
@@ -85,9 +120,13 @@
     (let [parsed (try
                    (edn/read-string schema)
                    (catch Throwable _ ::invalid))]
-      (if (map? parsed)
-        (normalize-input-schema parsed)
-        schema))
+      (cond
+        (map? parsed) (normalize-input-schema parsed)
+        (sequential? parsed) (normalize-input-schema parsed)
+        :else schema))
+
+    (sequential? schema)
+    (sequential-schema->malli schema)
 
     :else schema))
 
