@@ -176,6 +176,21 @@
       (is (str/includes? err "input validation failed") "phase is input")
       (is (str/includes? err ":lib") "humanized key path is present"))))
 
+(deftest invoke-tool-validation-error-humanizes-disallowed-keys
+  (testing "closed input maps tell the model which extra keys to drop"
+    (let [t (reify tool/Tool
+              (-name [_] "status")
+              (-description [_] "status")
+              (-input-schema [_] [:map {:closed true}])
+              (-output-schema [_] :string)
+              (-invoke [_ _ _] "ok"))
+          err (tool/invoke-tool t {:name "x" :page 1} {})]
+      (is (str/includes? err "status"))
+      (is (str/includes? err "input validation failed"))
+      (is (str/includes? err "name"))
+      (is (str/includes? err "page"))
+      (is (str/includes? err "Retry with only the documented fields")))))
+
 (deftest invoke-tool-execution-error-is-structured-json
   (testing "audit 2026-07 rec #7: an execution throw returns a JSON envelope
             with :tool :phase :class :message, and keeps the back-compat

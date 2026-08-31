@@ -47,9 +47,14 @@
             (factory.proto/-rehydrate! factory
                                        (get-in ctx [:agent/state
                                                     :agent/runtime-tools])))
-        static (or (:agent/static-tool-registry ctx) {})
-        reg (-> (live-registry static session factory)
-                (apply-tool-overlay (:agent/state ctx)))
+        static (or (:agent/raw-static-tool-registry ctx)
+                   (:agent/static-tool-registry ctx)
+                   {})
+        raw-reg (live-registry static session factory)
+        transformed-reg (if-let [transform (:agent/tool-registry-transform ctx)]
+                          (transform raw-reg)
+                          raw-reg)
+        reg (apply-tool-overlay transformed-reg (:agent/state ctx))
         req (:llm/request ctx)]
     (cond-> (assoc ctx :agent/tool-registry reg)
       req (assoc :llm/request

@@ -256,3 +256,91 @@
     (let [data (init-throws? {key config})]
       (is (= key (:key data)) (str "error names " key))
       (is (seq (:problems data)) (str key " carries Malli problems")))))
+
+(defn- temp-secret-path
+  []
+  (str (System/getProperty "java.io.tmpdir")
+       "/latsec-ig-" (System/currentTimeMillis) "-"
+       (str (random-uuid)) "/secrets.sealed"))
+
+(defn- thrown-kind
+  [^Throwable t]
+  (loop [e t]
+    (when e
+      (or (:kind (ex-data e))
+          (when (instance? Throwable e)
+            (recur (.getCause ^Throwable e)))))))
+
+(defn- init-kind
+  "Init `config`. Returns `{:ok true}` or `{:ok false :kind …}`."
+  [config]
+  (try
+    (let [s (ig/init config)]
+      (try (ig/halt! s) (catch Throwable _))
+      {:ok true})
+    (catch Throwable t
+      {:ok false :kind (thrown-kind t) :message (ex-message t)})))
+
+(deftest secret-plugin-rejects-unsandboxed-factory
+  (testing "Integrant refuses a secret plugin when the factory is not sandboxed"
+    (let [path (temp-secret-path)
+          result (init-kind
+                  {:lateralus/secret-store {:path path :passphrase "ig-test-pass"}
+                   :lateralus/factory-session {:workspace-root "."
+                                               :dynamic {:enabled? true}}
+                   :lateralus/runtime-tools {:enabled? false :network? false}
+                   :lateralus/secret-plugin
+                   {:store (ig/ref :lateralus/secret-store)
+                    :factory-session (ig/ref :lateralus/factory-session)
+                    :runtime-tools (ig/ref :lateralus/runtime-tools)}})]
+      (is (false? (:ok result)))
+      (is (= :unsafe-secret-factory-config (:kind result))))))
+
+(deftest secret-plugin-rejects-enabled-runtime-eval
+  (testing "Integrant refuses a secret plugin when clojure_eval is enabled"
+    (let [path (temp-secret-path)
+          result (init-kind
+                  {:lateralus/secret-store {:path path :passphrase "ig-test-pass"}
+                   :lateralus/factory-session
+                   {:workspace-root "."
+                    :dynamic {:enabled? true}
+                    :secret-store (ig/ref :lateralus/secret-store)
+                    :sandbox {:enabled? true :call-tools #{"secret_check"}}}
+                   :lateralus/runtime-tools {:enabled? true :network? false}
+                   :lateralus/secret-plugin
+                   {:store (ig/ref :lateralus/secret-store)
+                    :factory-session (ig/ref :lateralus/factory-session)
+                    :runtime-tools (ig/ref :lateralus/runtime-tools)}})]
+      (is (false? (:ok result)))
+      (is (= :unsafe-secret-runtime-config (:kind result))))))
+
+(deftest factory-session-rejects-secret-store-without-sandbox
+  (testing "Integrant refuses a factory that has a secret store and disables SCI"
+    (let [path (temp-secret-path)
+          result (init-kind
+                  {:lateralus/secret-store {:path path :passphrase "ig-test-pass"}
+                   :lateralus/factory-session
+                   {:workspace-root "."
+                    :dynamic {:enabled? true}
+                    :secret-store (ig/ref :lateralus/secret-store)
+                    :sandbox {:enabled? false}}})]
+      (is (false? (:ok result)))
+      (is (= :unsafe-secret-factory-config (:kind result))))))
+
+(deftest secret-plugin-inits-when-sandboxed-and-runtime-disabled
+  (testing "the safe combination used by the Ollama Cloud Workbench profile inits"
+    (let [path (temp-secret-path)
+          result (init-kind
+                  {:lateralus/secret-store {:path path :passphrase "ig-test-pass"}
+                   :lateralus/factory-session
+                   {:workspace-root "."
+                    :dynamic {:enabled? true}
+                    :secret-store (ig/ref :lateralus/secret-store)
+                    :sandbox {:enabled? true :call-tools #{"secret_check"}}}
+                   :lateralus/runtime-tools {:enabled? false :network? false}
+                   :lateralus/secret-plugin
+                   {:store (ig/ref :lateralus/secret-store)
+                    :factory-session (ig/ref :lateralus/factory-session)
+                    :runtime-tools (ig/ref :lateralus/runtime-tools)
+                    :capabilities {"secret_check" {:labels :all}}}})]
+      (is (true? (:ok result)) (pr-str result)))))

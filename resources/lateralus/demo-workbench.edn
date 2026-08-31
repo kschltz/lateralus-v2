@@ -33,7 +33,13 @@
  ;; via Settings → Secrets, or a REPL via kschltz.agent.secrets).
  ;; :lateralus/secret-store  {:path ".lateralus/secrets.sealed"
  ;;                           :passphrase-env "LATERALUS_SECRETS_PASSPHRASE"}
- ;; :lateralus/secret-plugin {:store #ig/ref :lateralus/secret-store}
+ ;; :lateralus/secret-plugin
+ ;; {:store #ig/ref :lateralus/secret-store
+ ;;  :factory-session #ig/ref :lateralus/factory-session
+ ;;  :runtime-tools #ig/ref :lateralus/runtime-tools
+ ;;  :capabilities {"secret_check" {:labels :all}}}
+ ;; Also set :lateralus/runtime-tools :enabled? false and wire
+ ;; :secret-store plus :sandbox {:enabled? true ...} into factory-session.
  ;; …then add :secret-store #ig/ref :lateralus/secret-store to
  ;; :lateralus/workbench below (and add the tool redaction sweep by
  ;; listing :lateralus/secret-plugin AFTER :lateralus/tools-plugin in

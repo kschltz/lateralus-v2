@@ -2,7 +2,8 @@
 
 Workbench can **define a real `Tool` mid-session**, call it on the next
 model turn, and later **explicitly promote** that spec into reusable
-source (a Tool namespace plus an optional interceptor plugin).
+storage. With secrets active, promoted tools remain untrusted SCI specs;
+without secrets, trusted operator profiles may opt into generated source.
 
 This is not `clojure_eval` pretending to be a tool. `tool_define` compiles
 a protocol `Tool`, merges it into `:agent/tool-registry`, and patches
@@ -17,19 +18,21 @@ an uberjar workbench cannot persist eval'd vars into `src/`.
 The factory is the missing bridge:
 
 1. **Define** — compile a persistable spec into a `Tool`.
-2. **Use** — the new name is callable this exchange. A parallel call in the
-   same batch is retried after apply; if the model only defined the tool,
-   the follow-up turn is nudged to test it.
-3. **Promote** — write on-disk Tool + plugin source. Explicit only.
+2. **Test** — `tool_test` invokes the tool through the current guarded
+   registry with real arguments and requires an exact expected string.
+3. **Promote** — write an on-disk spec/catalog entry (or generated source in
+   a non-sandboxed profile). Promotion is explicit and requires a passing
+   test of the current spec fingerprint.
 
 ## Tools
 
 | Tool | Role |
 |------|------|
 | `tool_define` | Propose `:register-runtime-tool`. Compile + overlay happen in apply. |
-| `tool_list_runtime` | Read-only inventory of ephemeral + promoted overlay names. |
+| `tool_test` | Invoke with real arguments; record exact-output evidence for the current spec. |
+| `tool_list_runtime` | Read-only inventory of ephemeral + promoted overlay names. Extra keys (`name`, `all`, `page`) are ignored so small models do not burn a turn on a closed empty map. |
 | `tool_forget` | Drop a runtime tool from the session overlay. |
-| `tool_promote` | Write files + catalog. `target=workspace` (default) or `project`. |
+| `tool_promote` | Write a workspace spec + catalog in sandbox mode; non-sandboxed operator profiles may also generate project source. |
 
 `tool_define` input:
 
@@ -47,19 +50,23 @@ The factory is the missing bridge:
 ```
 
 `:libs` is EDN for `clojure.repl.deps/add-libs` (same network boundary as
-`clojure_add_lib`, behind `ClojureRuntime`). Reader-eval is off.
+`clojure_add_lib`, behind `ClojureRuntime`). Reader-eval is off. A
+secret-enabled factory rejects `:libs`, `:require`, aliases, and runtime
+interceptors; the SCI sandbox has no JVM interop, filesystem, environment,
+or raw network access.
 
 ## Promotion targets
 
 | `target` | Where | Survives |
 |----------|--------|----------|
-| `workspace` (default) | `.lateralus/promoted/<name>/` + `catalog.edn` | Writable workspace (host or mounted Docker volume). `load-file`s immediately. |
-| `project` | `src/kschltz/agent/tools/promoted/` + matching test | Source tree + `reload_runtime` / restart. |
+| `workspace` (default) | `.lateralus/promoted/<name>/` + `catalog.edn` | In sandbox mode, persists `spec.edn` and recompiles it through SCI without `load-file`. |
+| `project` | `src/kschltz/agent/tools/promoted/` + matching test | Non-sandboxed profiles only. |
 
-`:as-plugin true` also writes an interceptor plugin that seeds the Tool
-and, when present, the custom enter/leave/error fns.
+`:as-plugin true` is available only outside the sandbox. Sandboxed runtime
+interceptors are forbidden because they would receive the host context.
 
-Defining a tool never writes files. Promotion is always explicit.
+Defining a tool never writes files. Redefinition invalidates prior test
+evidence. Promotion is always explicit and refuses an untested current spec.
 
 ## Integrant
 
@@ -74,6 +81,21 @@ Wire `factory-tools` into `:lateralus/tool-registry`, pass
 `:lateralus/factory-plugin` in `:lateralus/plugins`.
 
 Lock with `:dynamic {:enabled? false}`.
+
+When secrets are enabled, wire the same store into the factory and use an
+explicit host-tool allowlist:
+
+```clojure
+:lateralus/factory-session
+{:workspace-root "."
+ :secret-store #ig/ref :lateralus/secret-store
+ :sandbox {:enabled? true
+           :call-tools #{"secret_check" "approved_mcp_tool"}}}
+```
+
+Model-authored code receives `nil` for its `ctx` argument. Its only host
+bridge is `(lateralus.runtime/call-tool "approved_mcp_tool" args)`. The
+host tool must also have a secret capability in `:lateralus/secret-plugin`.
 
 ## Workflow tools
 
@@ -97,10 +119,26 @@ or `{:op :literal :values {…}}`. No network I/O except through a
 
 ## Protocols
 
-- `ToolCompiler` — compile spec → Tool (+ optional interceptor). JVM impl
-  uses in-process eval and `ClojureRuntime` for add-libs.
+- `ToolCompiler` — compile spec → Tool (+ optional interceptor). Secret-safe
+  mode uses SCI with no host classes. Non-sandboxed mode uses in-process eval
+  and `ClojureRuntime` for add-libs.
 - `RuntimeToolStore` — define / forget / promote / rehydrate. Tools only
   emit transitions; apply reconciles the store (same pattern as MCP).
 
 Specs persist on `:agent/runtime-tools` in `:agent/state-delta` so the
-next exchange can rehydrate without files.
+next exchange can rehydrate without files. The outer runtime replaces this
+map wholesale when touched, so forget/promote removals cannot be resurrected
+by deep merge. Rehydrate synchronizes the process-global factory overlay to
+the active Workbench session: absent and changed ephemeral entries are
+removed before missing/current specs are compiled.
+
+Promoted catalog entries retain the validated ToolSpec. A sandboxed session
+always recompiles catalog specs through SCI and never loads generated Clojure
+source.
+
+When the secrets plugin is active, it transforms the complete effective
+registry and publishes that transform for same-exchange live-tool refreshes.
+Runtime-created/promoted tools are marked `:untrusted-runtime`: they receive
+opaque `{{secret:label}}` handles, never plaintext. Only operator-allowlisted
+host tools resolve allowlisted labels at their protocol boundary. Result
+redaction remains a backup layer and is refreshed after every store mutation.

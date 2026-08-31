@@ -3,24 +3,19 @@
 
    Two interceptors:
 
-     :guard — AFTER `plugins.tools` seeded the registry on ctx (plugin
-              declaration order, same slot), wrap every static Tool in
-              the registry with `secrets/wrap-tool`: model-supplied
-              `{{secret:label}}` handles resolve to plaintext only
-              inside `-invoke`, and tool result strings are redacted
-              before they can enter `:tool/results` / messages.
+     :guard — AFTER `plugins.tools` seeded the registry on ctx, wrap every
+              effective Tool. Operator-granted trusted host tools resolve
+              selected labels; untrusted runtime tools retain opaque
+              handles. Every result is redacted before it can enter
+              `:tool/results` / messages.
 
      :tools — belt-and-braces sweep `:enter` that redacts stored values
               out of `:tool/results`, `:agent/all-tool-results`,
               `:agent/tool-transcript`, `:llm/request :messages`,
-              `:exchange/response`, and `:agent/state-delta`. Catches
-              live (MCP/factory) tools that the :guard wrapper cannot
-              reach and anything a tool echoed into the follow-up
-              request.
+              `:exchange/response`, and `:agent/state-delta`.
 
-   The needle set is computed lazily per exchange and cached; set the
-   plugin rebuild hook to pick up store mutations mid-session (runtime
-   reload does this for other plugins too).
+   Needle sets are recomputed so operator store mutations are reflected
+   immediately.
 
    One model-visible tool IS contributed (operator-turn-offable via
    `:advertise-handle-tool?`): `secret_list_handles`, which returns the
@@ -29,8 +24,7 @@
    secret labels stay invisible until the tool is called. Values remain
    unobtainable: there is no LLM-callable path that returns plaintext."
 
-  (:require [kschltz.agent.loop.act :as act]
-            [kschltz.agent.secrets :as secrets]))
+  (:require [kschltz.agent.secrets :as secrets]))
 
 (def system-guidance
   "Model-facing hint that a secret store exists. Tells the model HOW to
@@ -38,49 +32,52 @@
   (str "A secret store is available. Tools that need credentials accept a "
        "{{secret:label}} handle in their arguments: call the \""
        secrets/handles-tool-name "\" tool to list the handles, then pass "
-       "the handle (e.g. {{secret:label}}) where a credential is required. "
+       "the handle (e.g. {{secret:label}}) only to a tool granted that "
+       "secret capability by the operator. Runtime-authored tools receive "
+       "opaque handles, never values; they must delegate credential use via "
+       "lateralus.runtime/call-tool to an allowlisted host tool. "
        "Secret VALUES can never be read or displayed; never ask the user "
        "to paste a secret into the chat."))
 
 (defn- wrap-registry
   "Wrap every tool in `registry` (map name -> Tool) for `store`.
-   Identity-cached in `cache` so a stable static registry is wrapped
-   once (per plugin instance), keeping the wrapped -invoke needle set
-   consistent across exchanges."
-  [store cache registry]
+   Value-cached in `cache` so an unchanged registry reuses wrappers
+   across exchanges and live-registry refreshes."
+  [store capabilities cache registry]
   (if-let [wrapped (get @cache registry)]
     wrapped
-    (let [wrapped (into {} (map (fn [[k t]] [k (secrets/wrap-tool store t)])) registry)]
+    (let [wrapped
+          (into {}
+                (map (fn [[k t]]
+                       [k (secrets/wrap-tool
+                           store t (get capabilities (str k)))]))
+                registry)]
       (vswap! cache assoc registry wrapped)
       wrapped)))
 
-(defn- wrap-enter
-  [store cache advertise-handle-tool?]
-  (fn [ctx]
-    (let [static (:agent/static-tool-registry ctx)]
-      (if (seq static)
-        (let [wrapped (wrap-registry store cache static)
-              wrapped (cond-> wrapped
-                        advertise-handle-tool?
-                        (assoc secrets/handles-tool-name
-                               (secrets/wrap-tool store (secrets/handles-tool store))))
-              effective (or (:agent/tool-registry ctx) {})]
-          (-> ctx
-              (assoc
-               :agent/static-tool-registry wrapped
-               ;; effective = wrapped static underneath, live tools on
-               ;; top (precedence identical to tools-plugin's merge)
-               :agent/tool-registry (merge wrapped effective))
-              (cond->
-               advertise-handle-tool?
-                (update :agent/system-append act/merge-system-guidance))))
-        ctx))))
+(defn- append-system-guidance
+  [prior]
+  (cond
+    (string? prior) (str prior "\n\n" system-guidance)
+    (sequential? prior) (conj (vec prior) system-guidance)
+    :else system-guidance))
 
-(defn- redact-needle-pairs
-  [store cache]
-  (when-not @cache
-    (vreset! cache (secrets/collect-redaction-pairs store)))
-  @cache)
+(defn- wrap-enter
+  [transform-registry advertise-handle-tool?]
+  (fn [ctx]
+    (let [static (or (:agent/static-tool-registry ctx) {})
+          effective (or (:agent/tool-registry ctx) {})]
+      (cond-> (assoc ctx
+                     ;; Preserve raw static tools so same-exchange refreshes
+                     ;; do not wrap an already wrapped registry repeatedly.
+                     :agent/raw-static-tool-registry static
+                     :agent/static-tool-registry (transform-registry static)
+                     :agent/tool-registry (transform-registry effective)
+                     ;; Live MCP/factory overlays can change after :guard.
+                     ;; The tools plugin reapplies this transform on refresh.
+                     :agent/tool-registry-transform transform-registry)
+        advertise-handle-tool?
+        (update :agent/system-append append-system-guidance)))))
 
 (defn- scrub-messages
   "Redact each message's :content using `pairs`."
@@ -93,9 +90,9 @@
     req))
 
 (defn- redact-enter
-  [store needle-cache]
+  [store]
   (fn [ctx]
-    (let [pairs (redact-needle-pairs store needle-cache)]
+    (let [pairs (secrets/collect-redaction-pairs store)]
       (if (seq pairs)
         (let [red (partial secrets/redact-string pairs)
               scrub-messages #(scrub-messages pairs %)]
@@ -110,33 +107,50 @@
             (update :agent/tool-transcript (fn [ms] (mapv #(update % :content red) ms)))
 
             (seq (get-in ctx [:llm/request :messages] []))
-            (update ctx :llm/request scrub-messages)
+            (update :llm/request scrub-messages)
 
             (string? (:exchange/response ctx))
             (update :exchange/response red)
 
-            :else
-            (update ctx :agent/state-delta
-                    (fn [sd] (when sd (secrets/redact-data pairs sd))))))
+            (some? (:agent/state-delta ctx))
+            (update :agent/state-delta
+                    (fn [sd] (secrets/redact-data pairs sd)))))
         ctx))))
 
 (defn secrets-plugin
   "Construct the secrets plugin. `opts` keys:
      :store — required `SecretStore` instance."
-  [{:keys [store advertise-handle-tool?]
+  [{:keys [store advertise-handle-tool? capabilities]
     :or   {advertise-handle-tool? true}
     :as _opts}]
   {:pre [(satisfies? secrets/SecretStore store)]}
   (let [wrap-cache (volatile! {})
-        needle-cache (volatile! nil)]
+        capabilities (assoc (or capabilities {})
+                            secrets/presence-tool-name
+                            {:labels :all})
+        handle-tool (when advertise-handle-tool?
+                      (secrets/wrap-tool store (secrets/handles-tool store)))
+        presence-tool (when advertise-handle-tool?
+                        (secrets/wrap-tool
+                         store (secrets/presence-tool)
+                         {:labels :all}))
+        transform-registry
+        (fn [registry]
+          (cond-> (wrap-registry
+                   store capabilities wrap-cache (or registry {}))
+            handle-tool
+            (assoc secrets/handles-tool-name handle-tool)
+            presence-tool
+            (assoc secrets/presence-tool-name presence-tool)))]
     (with-meta
       [{:name  ::wrap-registry
         :slot  :guard
-        :enter (wrap-enter store wrap-cache advertise-handle-tool?)}
+        :enter (wrap-enter transform-registry advertise-handle-tool?)}
        {:name  ::redact
         :slot  :tools
-        :enter (redact-enter store needle-cache)}]
+        :enter (redact-enter store)}]
       {:plugin/name :secrets
        :plugin/rebuild
        (fn [] (secrets-plugin {:store store
-                               :advertise-handle-tool? advertise-handle-tool?}))})))
+                               :advertise-handle-tool? advertise-handle-tool?
+                               :capabilities capabilities}))})))

@@ -53,9 +53,9 @@
     (is (= ["add_two"] (:agent/runtime-tool-test-nudge out)))
     (is (= "system" (:role last-msg)))
     (is (str/includes? (:content last-msg) "add_two"))
-    (is (str/includes? (:content last-msg) "invoke the tool"))))
+    (is (str/includes? (:content last-msg) "tool_test"))))
 
-(deftest no-nudge-when-define-and-invoke-both-ok
+(deftest passing-tool-test-advances-to-promotion-nudge
   (let [envelope (tr/encode-result
                   {:ok true
                    :tool "tool_define"
@@ -64,11 +64,68 @@
         ctx {:llm/request {:messages []}
              :tool/results [{:call {:function {:name "tool_define"}}
                              :result envelope}
-                            {:call {:function {:name "add_two"}}
-                             :result "3"}]}
+                            {:call {:function {:name "tool_test"}}
+                             :result (tr/encode-result
+                                      {:ok true
+                                       :tool "tool_test"
+                                       :tool-name "add_two"
+                                       :actual "3"})}]}
         out (retry/nudge-untested-runtime-tools ctx)]
     (is (nil? (:agent/runtime-tool-test-nudge out)))
-    (is (empty? (get-in out [:llm/request :messages])))))
+    (is (= ["add_two"] (:agent/runtime-tool-promote-nudge out)))
+    (is (str/includes? (get-in out [:llm/request :messages 0 :content])
+                       "tool_promote"))))
+
+(deftest direct-call-does-not-satisfy-promotion-test-nudge
+  (let [define-result
+        (tr/encode-result
+         {:ok true
+          :tool "tool_define"
+          :tool-name "add_two"
+          :transition {:op :register-runtime-tool :spec spec}})
+        out (retry/nudge-untested-runtime-tools
+             {:llm/request {:messages []}
+              :tool/results
+              [{:call {:function {:name "tool_define"}}
+                :result define-result}
+               {:call {:function {:name "add_two"}}
+                :result "3"}]})]
+    (is (= ["add_two"] (:agent/runtime-tool-test-nudge out)))
+    (is (str/includes? (get-in out [:llm/request :messages 0 :content])
+                       "tool_test"))))
+
+(deftest passing-tool-test-nudges-promotion-and-inventory
+  (let [test-result
+        (tr/encode-result {:ok true
+                           :tool "tool_test"
+                           :tool-name "add_two"
+                           :actual "3"})
+        out (retry/nudge-untested-runtime-tools
+             {:llm/request {:messages []}
+              :tool/results
+              [{:call {:function {:name "tool_test"}}
+                :result test-result}]})
+        content (get-in out [:llm/request :messages 0 :content])]
+    (is (= ["add_two"] (:agent/runtime-tool-promote-nudge out)))
+    (is (str/includes? content "tool_promote"))
+    (is (str/includes? content "tool_list_runtime"))
+    (is (str/includes? content "Do not claim"))))
+
+(deftest successful-promotion-nudges-inventory-verification
+  (let [promote-result
+        (tr/encode-result {:ok true
+                           :tool "tool_promote"
+                           :tool-name "add_two"
+                           :paths {:tool "x"}})
+        out (retry/nudge-untested-runtime-tools
+             {:llm/request {:messages []}
+              :tool/results
+              [{:call {:function {:name "tool_promote"}}
+                :result promote-result}]})
+        content (get-in out [:llm/request :messages 0 :content])]
+    (is (= ["add_two"] (:agent/runtime-tool-list-nudge out)))
+    (is (str/includes? content "tool_list_runtime"))
+    (is (str/includes? content "Do not claim"))))
 
 (deftest same-turn-define-and-call-runs-new-tool
   (let [store (session/factory-session {})
@@ -146,7 +203,7 @@
     (is (>= (count @reqs) 2))
     (is (some #(and (= "system" (:role %))
                     (str/includes? (str (:content %)) "add_two")
-                    (str/includes? (str (:content %)) "invoke the tool"))
+                    (str/includes? (str (:content %)) "tool_test"))
               (:messages (second @reqs))))
     (is (some #(= "add_two" (get-in % [:function :name]))
               (:tools (second @reqs))))))

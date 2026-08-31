@@ -150,19 +150,55 @@
     (do (load-file path)
         {:loaded ns-sym :path path :via :load-file})))
 
+(defn- promote-sandboxed-spec
+  [spec {:keys [workspace-root target as-plugin]
+         :or {workspace-root "." target :workspace}}]
+  (let [target (keyword (or target :workspace))]
+    (when (or (not= :workspace target) as-plugin)
+      (raise :sandbox
+             "sandboxed tools may only promote as workspace spec artifacts"
+             {:target target :as-plugin (boolean as-plugin)}))
+    (let [root (str workspace-root)
+          name (:name spec)
+          spec-path (.getPath
+                     (io/file root ".lateralus" "promoted" name "spec.edn"))
+          _ (write-file! spec-path (pr-str spec))
+          entry {:name name
+                 :target :workspace
+                 :sandboxed true
+                 :spec-path spec-path
+                 :spec spec}
+          catalog (write-catalog!
+                   root
+                   (upsert-catalog (read-catalog root) entry))]
+      {:ok true
+       :tool-name name
+       :target :workspace
+       :paths [spec-path]
+       :catalog catalog
+       :loaded nil
+       :plugin-loaded nil
+       :entry entry})))
+
 (defn promote-spec
   "Write tool (and optional plugin + test) files for `spec`.
 
    `:target` is `:workspace` (default, under `.lateralus/promoted/`)
    or `:project` (`src/kschltz/agent/...` + matching test).
    Returns a status map with paths and catalog entry."
-  [spec {:keys [workspace-root target as-plugin]
+  [spec {:keys [workspace-root target as-plugin sandboxed?]
          :or {workspace-root "."
               target :workspace
               as-plugin false}}]
   (when-not (proto/valid-tool-spec? spec)
     (raise :promote "invalid tool spec" {:spec spec}))
-  (let [root (str workspace-root)
+  (if sandboxed?
+    (promote-sandboxed-spec
+     spec
+     {:workspace-root workspace-root
+      :target target
+      :as-plugin as-plugin})
+    (let [root (str workspace-root)
         target (keyword (or target :workspace))
         name (:name spec)
         as-plugin? (boolean as-plugin)
@@ -198,7 +234,10 @@
         entry (cond-> {:name name
                        :ns (str tool-ns)
                        :path tool-path
-                       :target (keyword target)}
+                       :target (keyword target)
+                       ;; The source artifact is primary; the validated spec
+                       ;; is a recovery recipe when paths move or disappear.
+                       :spec spec}
                 plugin-ns (assoc :plugin-ns (str plugin-ns)
                                  :plugin-path plugin-path))
         catalog (write-catalog! root (upsert-catalog (read-catalog root) entry))]
@@ -208,9 +247,9 @@
      :ns (str tool-ns)
      :paths written
      :catalog catalog
-     :loaded loaded
-     :plugin-loaded plugin-loaded
-     :entry entry}))
+       :loaded loaded
+       :plugin-loaded plugin-loaded
+       :entry entry})))
 
 (m/=> kebab-name [:=> [:cat :string] :string])
 (m/=> record-name [:=> [:cat :string] :string])

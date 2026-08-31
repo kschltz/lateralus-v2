@@ -130,17 +130,21 @@
 (defn- run-exchange!
   [runtime workbench prompt]
   (let [result (runtime/send-message runtime prompt)
-        event  (guard-assistant-event result workbench)]
+        event  (guard-assistant-event result workbench)
+        original (with-turn-id (public-event event) result)
+        original-turn-id (:turn-id original)]
     (if-not (::needs-repair? event)
-      (with-turn-id (public-event event) result)
+      original
       (do
         (wb/publish! workbench
-                     {:role :system
-                     :text (str "Portal guard: claimed a viz without a successful "
-                                "portal_submit (or used a fake @portal id). Retrying once…")})
+                     (cond-> {:role :system
+                              :text (str "Portal guard: claimed a viz without a successful "
+                                         "portal_submit (or used a fake @portal id). Retrying once…")}
+                       original-turn-id (assoc :turn-id original-turn-id)))
         (let [repair (runtime/send-message runtime cite/repair-prompt)
-              fixed  (guard-assistant-event repair workbench)]
-          (with-turn-id (public-event fixed) repair))))))
+              fixed  (guard-assistant-event repair workbench)
+              repaired (with-turn-id (public-event fixed) repair)]
+          repaired)))))
 
 (defn- session-command?
   [text]
@@ -252,10 +256,10 @@
                      (sessions/persist-current! store h runtime))
                    (hub/set-status! h :waiting "ready for your next message"))
                  (catch Throwable t
-                 (let [msg (friendly-exchange-error t nil)]
-                   (wb/publish! workbench
-                                {:role :error :text msg})
-                   (hub/set-status! h :error msg))))
+                   (let [msg (friendly-exchange-error t nil)]
+                     (wb/publish! workbench
+                                  {:role :error :text msg})
+                     (hub/set-status! h :error msg))))
                (recur))
 
              :else

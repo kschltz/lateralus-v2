@@ -4,7 +4,8 @@
             [kschltz.agent.transitions :as tr]))
 
 (def factory-ops
-  #{:register-runtime-tool :forget-runtime-tool :promote-runtime-tool})
+  #{:register-runtime-tool :forget-runtime-tool
+    :record-runtime-tool-test :promote-runtime-tool})
 
 (defn factory-op?
   [op]
@@ -29,6 +30,7 @@
   (try
     (when (and (contains? #{:register-runtime-tool
                             :forget-runtime-tool
+                            :record-runtime-tool-test
                             :promote-runtime-tool}
                           (:op op))
                (not (proto/-dynamic-enabled? store)))
@@ -41,6 +43,8 @@
             (proto/-define! store (:spec op) {:reserved-names (reserved-names ctx store)})
             :forget-runtime-tool
             (proto/-forget! store (:tool-name op))
+            :record-runtime-tool-test
+            (proto/-record-test! store (:tool-name op) (:spec-id op))
             :promote-runtime-tool
             (proto/-promote! store (:tool-name op)
                              {:as-plugin (:as-plugin op)
@@ -56,24 +60,28 @@
 
 (defn- same-factory-op?
   [a b]
-  (and (map? a) (map? b)
-       (= (:op a) (:op b))
-       (or (and (= :register-runtime-tool (:op a))
-                (= (get-in a [:spec :name]) (get-in b [:spec :name])))
-           (= (str (:tool-name a)) (str (:tool-name b))))))
+  (let [a-op (some-> (:op a) name keyword)
+        b-op (some-> (:op b) name keyword)]
+    (and (map? a) (map? b)
+         (= a-op b-op)
+         (if (= :register-runtime-tool a-op)
+           (= (get-in a [:spec :name]) (get-in b [:spec :name]))
+           (= (str (:tool-name a)) (str (:tool-name b)))))))
 
 (defn- tool-name-for-op
   [op]
   (case (:op op)
     :register-runtime-tool "tool_define"
     :forget-runtime-tool "tool_forget"
+    :record-runtime-tool-test "tool_test"
     :promote-runtime-tool "tool_promote"
     "tool_define"))
 
 (defn rewrite-entry
   [entry op outcome]
   (let [parsed (tr/parse-tool-result (:result entry))
-        status (:status outcome)]
+        status (:status outcome)
+        catalog-entry (:entry status)]
     (if (:ok outcome)
       (assoc entry
              :result
@@ -88,6 +96,10 @@
                                                :ns (:ns status)
                                                :catalog (:catalog status)
                                                :target (:target status))
+                (some? (:sandboxed catalog-entry))
+                (assoc :sandboxed (:sandboxed catalog-entry))
+                (some? (:spec-path catalog-entry))
+                (assoc :spec-path (:spec-path catalog-entry))
                 (some? (:removed status)) (assoc :removed (:removed status)))))
       (assoc entry
              :result

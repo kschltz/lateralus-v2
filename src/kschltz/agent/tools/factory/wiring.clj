@@ -10,6 +10,11 @@
   [:map
    [:workspace-root {:optional true} :string]
    [:dynamic {:optional true} [:map [:enabled? {:optional true} :boolean]]]
+   [:secret-store {:optional true} :any]
+   [:sandbox {:optional true}
+    [:map
+     [:enabled? {:optional true} :boolean]
+     [:call-tools {:optional true} [:set :string]]]]
    [:compiler {:optional true} :any]
    [:runtime {:optional true} :any]])
 

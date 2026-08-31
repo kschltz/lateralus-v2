@@ -29,7 +29,7 @@
      store-exchange   — leave stage; records the final exchange
      deliver-responses — leave stage; hands responses to listeners
      notify           — leave stage; fires on-thought / on-response"
-    (:require [clojure.string :as str]
+   (:require [clojure.string :as str]
               [kschltz.agent.chain :as chain]
               [kschltz.agent.interceptors.schema :as schema]
               [kschltz.agent.llm.client :as llm-client]
@@ -54,7 +54,11 @@
   [ctx]
   (let [client (or (:llm/client ctx) (default-llm-client))
         req    (:llm/request ctx)]
-    (assoc ctx :llm/response (llm-client/-call client req))))
+    (try
+      (let [response (llm-client/-call client req)]
+        (assoc ctx :llm/response response))
+      (catch Throwable t
+        (throw t)))))
 
 ;; ---- Stage definitions ----
 

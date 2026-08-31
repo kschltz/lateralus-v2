@@ -63,6 +63,36 @@
     }
   }
 
+  function prettyJson(raw) {
+    if (raw == null) return "";
+    const s = String(raw);
+    try {
+      return JSON.stringify(JSON.parse(s), null, 2);
+    } catch (_) {
+      return s;
+    }
+  }
+
+  function renderToolResults(events) {
+    const el = $("tool-results");
+    if (!el) return;
+    const hits = (events || []).filter(
+      (e) => e.type === "tool-result" || e["tool-result"] != null
+    );
+    if (!hits.length) {
+      el.innerHTML = '<p class="empty">—</p>';
+      return;
+    }
+    el.innerHTML = hits
+      .map((e) => {
+        const name = e["tool-name"] || "tool";
+        return `<article class="tool-result" data-tool="${esc(name)}"><h3>${esc(
+          name
+        )}</h3><pre>${esc(prettyJson(e["tool-result"]))}</pre></article>`;
+      })
+      .join("");
+  }
+
   function render(snap, first) {
     if (!snap) return;
     $("title").textContent = snap.id || turnId || "response";
@@ -76,10 +106,14 @@
     $("timing").textContent = timingLine(snap);
     setBadge(snap);
     const events = snap.events || [];
+    renderToolResults(events);
     $("events").innerHTML = events
       .map((e) => {
         const type = e.type || "";
         const extra =
+          (e["tool-result"] != null
+            ? (e["tool-name"] || "tool") + " → " + prettyJson(e["tool-result"])
+            : null) ||
           e.text ||
           e.thinking ||
           e["tool-name"] ||

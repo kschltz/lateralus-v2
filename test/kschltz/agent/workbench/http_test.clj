@@ -87,6 +87,52 @@
     (is (= 200 (:status attach)))
     (is (string? (:id @attached)))))
 
+(deftest settings-and-messages-keep-session-affinity
+  (let [h       (hub/create-hub {:session-id "active-session"})
+        applied (atom [])
+        handler (http/make-handler
+                 h
+                 {:settings-ops
+                  {:apply-fn (fn [op]
+                               (swap! applied conj op)
+                               {:ok true})}})
+        stale-settings
+        (handler {:request-method :post
+                  :uri "/api/settings"
+                  :body (json/generate-string
+                         {:session-id "stale-session"
+                          :op {:op "set-llm" :model "gpt-oss:120b"}})})
+        matching-settings
+        (handler {:request-method :post
+                  :uri "/api/settings"
+                  :body (json/generate-string
+                         {:session-id "active-session"
+                          :op {:op "set-llm" :model "gpt-oss:120b"}})})
+        stale-message
+        (handler {:request-method :post
+                  :uri "/api/message"
+                  :body (json/generate-string
+                         {:session-id "stale-session"
+                          :text "must not run"
+                          :refs []})})
+        matching-message
+        (handler {:request-method :post
+                  :uri "/api/message"
+                  :body (json/generate-string
+                         {:session-id "active-session"
+                          :text "run here"
+                          :refs []})})]
+    (is (= 409 (:status stale-settings)))
+    (is (= "active-session"
+           (:actual-session-id (json/parse-string (:body stale-settings) true))))
+    (is (= 200 (:status matching-settings)))
+    (is (= [{:op :set-llm :model "gpt-oss:120b"}] @applied)
+        "a stale settings form cannot mutate the newly active runtime")
+    (is (= 409 (:status stale-message)))
+    (is (= 200 (:status matching-message)))
+    (is (= ["run here"] (mapv :text (:turns (hub/snapshot h))))
+        "a stale composer cannot enqueue into a different active session")))
+
 (deftest api-state-rewrites-portal-url-to-chat-origin
   (let [sid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         h (hub/create-hub {:session-id "tailscale-test"})
@@ -128,7 +174,13 @@
             (is (re-find #"focusComposer" js)
                 "JS restores chat caret after send / turn complete")
             (is (re-find #"inputEl\.readOnly" js)
-                "composer uses readOnly while busy so focus can stick"))
+                "composer uses readOnly while busy so focus can stick")
+            (is (re-find #"\"session-id\": sessionId" js)
+                "message requests are bound to the displayed session")
+            (is (re-find #"\"session-id\": settingsSessionId \|\| lastSessionId" js)
+                "settings requests are bound to the session whose form was loaded")
+            (is (re-find #"const meta = infoLink\(t\[\"turn-id\"\] \|\| t\.turnId, false\)" js)
+                "every transcript role can expose preserved turn details"))
           (finally
             (http/stop-server! server)))))))
 
@@ -192,6 +244,7 @@
     (is (= 200 (:status page)))
     (is (re-find #"response details" (String. ^bytes (:body page) "UTF-8")))
     (is (re-find #"events-wrap" (String. ^bytes (:body page) "UTF-8")))
+    (is (re-find #"id=\"tool-results\"" (String. ^bytes (:body page) "UTF-8")))
     (is (= 200 (:status api)))
     (is (= "pad" (:text body)))
     (is (= "draw" (:user-text body)))

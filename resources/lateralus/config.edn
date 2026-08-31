@@ -86,18 +86,21 @@
  ;; Secrets plugin (use-without-seeing) — opt-in. Requires the
  ;; passphrase env var to be set (default LATERALUS_SECRETS_PASSPHRASE),
  ;; so the default config leaves it commented. Tools reference secrets
- ;; with {{secret:label}} handles in their arguments; the values are
- ;; resolved inside the tool invocation only and the sealed store is
- ;; blocked from file tools. Manage secrets from a REPL via
+ ;; with {{secret:label}} handles in their arguments. Resolution is
+ ;; deny-by-default and requires per-tool/label capabilities; runtime
+ ;; authored tools stay opaque inside SCI. The sealed store is blocked
+ ;; from file tools. Also disable :lateralus/runtime-tools and wire the
+ ;; store into a sandboxed :lateralus/factory-session. Manage secrets via
  ;; kschltz.agent.secrets (put!/get/delete!). If enabled, place
  ;; :lateralus/secret-plugin AFTER :lateralus/tools-plugin so the
  ;; wrapping :guard interceptor sees the seeded registry.
  ;; :lateralus/secret-store  {:path ".lateralus/secrets.sealed"
  ;;                           :passphrase-env "LATERALUS_SECRETS_PASSPHRASE"}
- ;; :lateralus/secret-plugin {:store #ig/ref :lateralus/secret-store
- ;;                           ; :advertise-handle-tool? false → no
- ;;                           ; secret_list_handles tool, no guidance hint
- ;;                           }
+ ;; :lateralus/secret-plugin
+ ;; {:store #ig/ref :lateralus/secret-store
+ ;;  :factory-session #ig/ref :lateralus/factory-session
+ ;;  :runtime-tools #ig/ref :lateralus/runtime-tools
+ ;;  :capabilities {"secret_check" {:labels :all}}}
 
  ;; Skill packs (progressive disclosure) — opt-in. One pure-data .edn
  ;; skill per file in :path (Malli-validated SkillSchema), so one bad

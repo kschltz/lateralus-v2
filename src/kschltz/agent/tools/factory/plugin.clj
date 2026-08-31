@@ -4,7 +4,7 @@
             [kschltz.agent.tools.factory.protocol :as proto]))
 
 (def system-guidance
-  "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then invoke the new name this exchange (same turn is ok). Do not clojure_eval a substitute. After define, call the new tool with a real test input before telling the human it works.")
+  "TOOL AUTHORING: tool_define is registered. Call it to add a callable tool, then use tool_test with real arguments and the exact expected output (expected_output is accepted). If this session has exactly one ephemeral tool, name may be omitted. Omitting expected-output probes and returns actual without marking the tool tested. A passing test is required before tool_promote and is invalidated by redefinition. tool_promote may omit name when exactly one tested tool exists. Do not clojure_eval a substitute. In a secret-enabled sandbox, runtime code receives opaque {{secret:label}} handles and nil ctx; use lateralus.runtime/call-tool for an operator-allowlisted protocol tool such as secret_check or file_read. Java, raw I/O, libs, require, and runtime interceptors are unavailable.")
 
 (def ^:private dispatch-slots
   "Slots that can host a runtime-defined interceptor without a rebuild."

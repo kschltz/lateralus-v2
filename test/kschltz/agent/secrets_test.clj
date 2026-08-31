@@ -4,7 +4,9 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.secrets :as secrets]
-            [kschltz.agent.tool :as tool]))
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.factory.compile :as factory.compile]
+            [kschltz.agent.tools.factory.protocol :as factory.proto]))
 
 (defn- temp-path
   "A fresh unique file path under java.io.tmpdir."
@@ -33,6 +35,18 @@
   (-input-schema [_] [:map])
   (-output-schema [_] :string)
   (-invoke [_ args _ctx] (pr-str args)))
+
+(defrecord CredentialProbeTool [seen]
+  tool/Tool
+  (-name [_] "credential_probe")
+  (-description [_] "Trusted protocol-bound credential consumer")
+  (-input-schema [_] [:map [:token :string]])
+  (-output-schema [_] :string)
+  (-invoke [_ args _ctx]
+    (reset! seen args)
+    (if (= "sk-protocol-value-789" (:token args))
+      "available"
+      "missing")))
 
 (deftest sealed-store-roundtrip
   (testing "put/get/exists/delete cycle"
@@ -66,7 +80,28 @@
           _ (secrets/-put-secret! store1 "k" "v-12345678")
           store2 (secrets/sealed-file-store {:path path :passphrase "bad"})]
       (try
-        (is (thrown? Exception (secrets/-get-secret store2 "k")))
+        (let [e (try (secrets/-get-secret store2 "k") nil (catch Exception ex ex))]
+          (is (some? e))
+          (is (str/includes? (ex-message e) "cannot decrypt"))
+          (is (= :secret-decrypt-failed (:kind (ex-data e))))
+          (is (not (str/includes? (ex-message e) "Tag mismatch"))))
+        (finally
+          (cleanup! path))))))
+
+(deftest redaction-survives-undecryptable-envelopes
+  (testing "wrong-passphrase labels are skipped so list/redact tools stay up"
+    (let [path (temp-path :redact-bad)
+          store1 (secrets/sealed-file-store {:path path :passphrase "good"})
+          _ (secrets/-put-secret! store1 "k" "v-12345678")
+          store2 (secrets/sealed-file-store {:path path :passphrase "bad"})]
+      (try
+        (is (= ["k"] (secrets/-secret-labels store2)))
+        (is (= {} (secrets/all-secret-values store2)))
+        (is (= [] (secrets/collect-redaction-pairs store2)))
+        (let [t (secrets/wrap-tool store2 (secrets/handles-tool store2))
+              out (tool/invoke-tool t {} {})]
+          (is (str/includes? out "k"))
+          (is (not (str/includes? out "Tag mismatch"))))
         (finally
           (cleanup! path))))))
 
@@ -126,7 +161,8 @@
       (secrets/-put-secret! store "tok" "sk-leaky-value-42")
       ;; the delegate echoes args AND the model managed to smuggle a
       ;; raw value into a second arg — both must come back safe
-      (let [wrapped (secrets/wrap-tool store (->EchoTool))
+      (let [wrapped (secrets/wrap-tool
+                     store (->EchoTool) {:labels #{"tok"}})
             out (tool/invoke-tool wrapped {"tok" "{{secret:tok}}"
                                            "echo-back" "sk-leaky-value-42"} {})]
         (is (str/includes? out "[REDACTED:tok]"))
@@ -135,8 +171,74 @@
         (is (= 2 (count (re-seq #"\[REDACTED:tok\]" out))))
         (is (= "echo" (tool/-name wrapped))))))))
 
+(deftest wrap-tool-keeps-secret-handles-opaque-without-a-capability
+  (with-store :deny-capability
+    (fn [store]
+      (secrets/-put-secret! store "tok" "sk-denied-value-42")
+      (let [out (tool/invoke-tool
+                 (secrets/wrap-tool store (->EchoTool))
+                 {:token "{{secret:tok}}"}
+                 {})]
+        (is (str/includes? out "{{secret:tok}}"))
+        (is (not (str/includes? out "sk-denied-value-42"))))
+      (let [out (tool/invoke-tool
+                 (secrets/wrap-tool
+                  store (->EchoTool) {:labels #{"different-label"}})
+                 {:token "{{secret:tok}}"}
+                 {})]
+        (is (str/includes? out "not authorized"))
+        (is (not (str/includes? out "sk-denied-value-42")))))))
+
+(deftest wrap-tool-refreshes-redaction-after-store-mutation
+  (with-store :fresh-needles
+    (fn [store]
+      (let [wrapped (secrets/wrap-tool
+                     store (->EchoTool) {:labels #{"first" "second"}})]
+        (secrets/-put-secret! store "first" "sk-first-value-123")
+        (is (str/includes?
+             (tool/invoke-tool wrapped {:token "{{secret:first}}"} {})
+             "[REDACTED:first]"))
+        (secrets/-put-secret! store "second" "sk-second-value-456")
+        (let [out (tool/invoke-tool wrapped
+                                    {:token "{{secret:second}}"}
+                                    {})]
+          (is (str/includes? out "[REDACTED:second]"))
+          (is (not (str/includes? out "sk-second-value-456"))))))))
+
 (deftest wrap-tool-preserves-programmatic-calls
   (testing "args without handles pass through untouched to the delegate"
     (with-store :passthrough (fn [store] 
       (let [wrapped (secrets/wrap-tool store (->EchoTool))]
         (is (= "{:a 1}" (tool/invoke-tool wrapped {:a 1} {}))))))))
+
+(deftest sandboxed-runtime-tool-can-compose-an-allowlisted-host-tool
+  (with-store :sandbox-compose
+    (fn [store]
+      (secrets/-put-secret! store "protocol-token" "sk-protocol-value-789")
+      (let [seen (atom nil)
+            host-tool (secrets/wrap-tool
+                       store
+                       (->CredentialProbeTool seen)
+                       {:labels #{"protocol-token"}})
+            compiler (factory.compile/jvm-compiler
+                      nil
+                      {:sandbox? true
+                       :call-tools #{"credential_probe"}})
+            compiled (factory.proto/-compile-spec
+                      compiler
+                      {:name "safe_composer"
+                       :description "Delegate credential use to a host tool"
+                       :input-schema "[:map [:token :string]]"
+                       :invoke "(fn [args _ctx] (lateralus.runtime/call-tool \"credential_probe\" {:token (:token args)}))"})
+            runtime-tool (secrets/wrap-tool store (:tool compiled))
+            ctx {:agent/tool-registry {"credential_probe" host-tool}}]
+        (is (true? (:ok compiled)) (pr-str compiled))
+        (is (= "available"
+               (tool/invoke-tool runtime-tool
+                                 {:token "{{secret:protocol-token}}"}
+                                 ctx)))
+        (is (= "sk-protocol-value-789" (:token @seen)))
+        (is (not= "sk-protocol-value-789"
+                  (tool/invoke-tool runtime-tool
+                                    {:token "{{secret:protocol-token}}"}
+                                    ctx)))))))

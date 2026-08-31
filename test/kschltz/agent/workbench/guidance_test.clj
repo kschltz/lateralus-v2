@@ -18,8 +18,12 @@
   (is (re-find #"clojure_add_lib" guidance/self-update-system-guidance))
   (is (re-find #"Do not announce a plan" guidance/self-update-system-guidance))
   (is (re-find #"tool_define" guidance/self-update-system-guidance))
+  (is (re-find #"tool_test" guidance/self-update-system-guidance))
   (is (re-find #"tool_promote" guidance/self-update-system-guidance))
   (is (re-find #"not clojure_eval" guidance/self-update-system-guidance))
+  (is (re-find #"protocol-backed" guidance/self-update-system-guidance))
+  (is (not (re-find #"live HTTP use java\.net\.URL"
+                    guidance/self-update-system-guidance)))
   (is (re-find #"workflow_run" guidance/self-update-system-guidance))
   (is (re-find #"workflow_register_action" guidance/self-update-system-guidance)))
 

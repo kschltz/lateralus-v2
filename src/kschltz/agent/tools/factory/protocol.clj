@@ -1,13 +1,16 @@
 (ns kschltz.agent.tools.factory.protocol
   "Runtime tool factory protocols.
 
-   Workbench can define a Tool in-session (Clojure 1.12 eval / add-libs)
-   and later promote the spec to an on-disk plugin. Compile and I/O sit
-   behind these protocols so tests can stub them and implementations
-   stay Malli-instrumented."
+   Workbench can define a Tool in-session (SCI when secrets are active;
+   trusted Clojure eval/add-libs otherwise) and later promote the spec.
+   Compile and I/O sit behind these protocols so tests can stub them and
+   implementations stay Malli-instrumented."
   (:require [kschltz.agent.plugin :as plugin]
             [kschltz.agent.tool :as tool]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [malli.instrument :as mi])
+  (:import [java.nio.charset StandardCharsets]
+           [java.security MessageDigest]))
 
 (def portable-tool-name
   "Same conservative function-name subset as `tool/portable-tool-name?`."
@@ -61,6 +64,9 @@
      Returns a status map. Raises `ex-info` with `:phase` on failure.")
   (-forget! [store tool-name]
     "Drop a runtime tool. Idempotent when unknown. Returns status.")
+  (-record-test! [store tool-name spec-id]
+    "Record a passing `tool_test` for the current spec fingerprint.
+     Rejects unknown tools and stale fingerprints.")
   (-promote! [store tool-name opts]
     "Write the registered spec to disk as a reusable Tool / plugin.
      `opts` may include `:as-plugin`, `:target` (`:workspace`|`:project`),
@@ -74,10 +80,13 @@
   (-status [store]
     "Serializable inventory. MUST NOT raise.")
   (-rehydrate! [store specs]
-    "Compile any specs not already live. Returns status. Missing/invalid
-     specs are reported, not raised.")
+    "Synchronize ephemeral tools to `specs`: remove absent/stale entries,
+     then compile missing/changed specs. Errors are reported, not raised.")
   (-dynamic-enabled? [store]
-    "True when agent-driven define/forget/promote is allowed."))
+    "True when agent-driven define/forget/promote is allowed.")
+  (-sandboxed? [store]
+    "True when runtime-authored code is restricted to the SCI capability
+     sandbox and cannot receive host context."))
 
 (defn tool-compiler?
   [x]
@@ -90,3 +99,17 @@
 (defn valid-tool-spec?
   [spec]
   (m/validate ToolSpec spec))
+
+(defn spec-id
+  "Stable SHA-256 fingerprint for promotion-test evidence."
+  [spec]
+  (let [canonical (pr-str (into (sorted-map) spec))
+        digest (.digest (MessageDigest/getInstance "SHA-256")
+                        (.getBytes canonical StandardCharsets/UTF_8))]
+    (str "sha256:"
+         (apply str (map #(format "%02x" (bit-and 0xff %)) digest)))))
+
+(m/=> spec-id [:=> [:cat ToolSpec] [:string {:min 71 :max 71}]])
+
+(mi/instrument!
+ {:filters [(mi/-filter-ns 'kschltz.agent.tools.factory.protocol)]})

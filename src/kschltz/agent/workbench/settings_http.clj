@@ -84,8 +84,9 @@
     {:ok false :error (pr-str (tr/explain-transition op))}
 
     :else
-    (do (swap! (:state runtime) tr/apply-transition op)
-        {:ok true :op (:op op)})))
+    (do
+      (swap! (:state runtime) tr/apply-transition op)
+      {:ok true :op (:op op)})))
 
 (defn list-models
   "Model ids for `base-url` (falls back to the session's base-url).

@@ -147,10 +147,16 @@
               :input-schema "[:map [:a :int] [:b :int]]"
               :invoke "(fn [args _ctx] (str (+ (:a args) (:b args))))"}
         register {:op :register-runtime-tool :spec spec}
+        record-test {:op :record-runtime-tool-test
+                     :tool-name "add_two"
+                     :spec-id (str "sha256:" (apply str (repeat 64 "0")))}
         promote {:op :promote-runtime-tool :tool-name "add_two" :target :workspace}
-        {:keys [state applied]} (tr/apply-transitions {} [register promote])
+        {:keys [state applied]} (tr/apply-transitions
+                                 {}
+                                 [register record-test promote])
         delta (tr/durable-delta {} state applied)]
     (is (tr/valid-transition? register))
+    (is (tr/valid-transition? record-test))
     (is (tr/valid-transition? promote))
     (is (not (contains? (:agent/runtime-tools state) "add_two")))
     (is (= ["add_two"] (:agent/promoted-tools state)))

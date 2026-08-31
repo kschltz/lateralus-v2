@@ -18,6 +18,7 @@
         store (session/factory-session {:workspace-root root})]
     (try
       (proto/-define! store spec {})
+      (proto/-record-test! store "add_two" (proto/spec-id spec))
       (let [status (proto/-promote! store "add_two"
                                     {:as-plugin true
                                      :target :workspace
@@ -37,7 +38,14 @@
         (is (empty? (:ephemeral (proto/-status store))))
         (let [reg-fn (ns-resolve (the-ns 'lateralus.promoted.add-two) 'registry)
               loaded (reg-fn)]
-          (is (= "3" (tool/invoke-tool (get loaded "add_two") {:a 1 :b 2} {})))))
+          (is (= "3" (tool/invoke-tool (get loaded "add_two") {:a 1 :b 2} {}))))
+        (remove-ns 'lateralus.promoted.add-two)
+        (.delete tool-clj)
+        (let [fresh (session/factory-session {:workspace-root root})
+              restored (get (proto/-registry fresh) "add_two")]
+          (is (tool/tool? restored)
+              "catalog embeds the spec so a missing generated source can be recovered")
+          (is (= "3" (tool/invoke-tool restored {:a 1 :b 2} {})))))
       (finally
         (doseq [f (reverse (file-seq (io/file root)))]
           (.delete f))))))
@@ -47,3 +55,35 @@
   (is (= "AddTwoTool" (promote/record-name "add_two")))
   (is (= 'kschltz.agent.tools.promoted.add-two
          (promote/project-ns "add_two"))))
+
+(deftest sandboxed-promotion-persists-spec-without-loading-host-source
+  (let [root (.getPath (io/file (System/getProperty "java.io.tmpdir")
+                                (str "lateralus-safe-promote-" (random-uuid))))
+        config {:workspace-root root
+                :sandbox {:enabled? true :call-tools #{}}}
+        store (session/factory-session config)]
+    (try
+      (proto/-define! store spec {})
+      (proto/-record-test! store "add_two" (proto/spec-id spec))
+      (let [status (proto/-promote! store "add_two"
+                                    {:target :workspace
+                                     :workspace-root root})
+            tool-clj (io/file root ".lateralus/promoted/add_two/tool.clj")
+            spec-edn (io/file root ".lateralus/promoted/add_two/spec.edn")
+            fresh (session/factory-session config)
+            restored (get (proto/-registry fresh) "add_two")]
+        (is (true? (:ok status)))
+        (is (true? (get-in status [:entry :sandboxed])))
+        (is (not (.exists tool-clj))
+            "sandboxed promotion must not emit host-loadable source")
+        (is (.isFile spec-edn))
+        (is (tool/tool? restored))
+        (is (= :untrusted-runtime (tool/trust-tier restored)))
+        (is (= "3" (tool/invoke-tool restored {:a 1 :b 2} {})))
+        (is (thrown-with-msg?
+             Exception #"sandbox"
+             (proto/-promote! store "add_two"
+                              {:target :project :workspace-root root}))))
+      (finally
+        (doseq [f (reverse (file-seq (io/file root)))]
+          (.delete f))))))

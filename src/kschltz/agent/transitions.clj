@@ -147,6 +147,12 @@
    [:op [:= :forget-runtime-tool]]
    [:tool-name [:string {:min 1}]]])
 
+(def RecordRuntimeToolTestOp
+  [:map {:closed true}
+   [:op [:= :record-runtime-tool-test]]
+   [:tool-name [:string {:min 1}]]
+   [:spec-id [:re #"^sha256:[0-9a-f]{64}$"]]])
+
 (def PromoteRuntimeToolOp
   [:map {:closed true}
    [:op [:= :promote-runtime-tool]]
@@ -169,6 +175,7 @@
    [:reload-runtime ReloadRuntimeOp]
    [:register-runtime-tool RegisterRuntimeToolOp]
    [:forget-runtime-tool ForgetRuntimeToolOp]
+   [:record-runtime-tool-test RecordRuntimeToolTestOp]
    [:promote-runtime-tool PromoteRuntimeToolOp]])
 
 (def Transitions
@@ -258,6 +265,8 @@
         (update :agent/promoted-tools
                 (fn [names]
                   (vec (remove #{(:tool-name op)} (or names []))))))
+    :record-runtime-tool-test
+    (or state {})
     :promote-runtime-tool
     (-> (or state {})
         (update :agent/runtime-tools

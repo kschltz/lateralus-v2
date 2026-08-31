@@ -19,6 +19,7 @@
    [:usage {:optional true} :map]
    [:tool-name {:optional true} :string]
    [:tool-arguments {:optional true} :string]
+   [:tool-result {:optional true} :string]
    [:elapsed-ms {:optional true} :int]
    [:wave {:optional true} :int]
    [:error {:optional true} :string]])

@@ -3,8 +3,8 @@
 
    Dispatch runs before transition apply, so a parallel `weather_now`
    call looks unregistered. After apply refreshes the registry, retry
-   those unavailable results. If a tool was defined but never invoked,
-   nudge the follow-up turn to test it."
+   those unavailable results. If a tool was defined but has no passing
+   tool_test evidence, nudge the follow-up turn to test it."
   (:require [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.transitions :as tr]
@@ -40,13 +40,40 @@
                     name))))
         (or results [])))
 
-(defn invoked-ok?
+(defn tested-ok?
   [results name]
   (boolean
    (some (fn [entry]
-           (and (= name (get-in entry [:call :function :name]))
-                (not (unavailable-result? entry))))
+           (let [parsed (tr/parse-tool-result (:result entry))]
+             (and (= "tool_test" (get-in entry [:call :function :name]))
+                  (= name (:tool-name parsed))
+                  (true? (:ok parsed)))))
          (or results []))))
+
+(defn- successful-control-tool-names
+  [results control-tool]
+  (into []
+        (keep (fn [entry]
+                (let [parsed (tr/parse-tool-result (:result entry))
+                      name (:tool-name parsed)]
+                  (when (and (= control-tool
+                                (get-in entry [:call :function :name]))
+                             (true? (:ok parsed))
+                             (string? name)
+                             (seq name))
+                    name))))
+        (or results [])))
+
+(defn- inventory-confirms?
+  [results name]
+  (boolean
+   (some
+    (fn [entry]
+      (let [parsed (tr/parse-tool-result (:result entry))]
+        (and (= "tool_list_runtime" (get-in entry [:call :function :name]))
+             (true? (:ok parsed))
+             (some #{name} (get-in parsed [:status :promoted])))))
+    (or results []))))
 
 (defn retry-now-available
   "Re-run this turn's unavailable calls whose names are now registered."
@@ -69,13 +96,19 @@
                     replace-turn-results (count results) retried))))))
 
 (defn nudge-untested-runtime-tools
-  "Ask the next LLM turn to invoke tools defined this turn but not run."
+  "Drive define → tool_test → promote → inventory verification."
   [ctx]
-  (let [untested (into []
-                       (remove #(invoked-ok? (:tool/results ctx) %))
-                       (defined-tool-names (:tool/results ctx)))]
-    (if (empty? untested)
-      ctx
+  (let [results (:tool/results ctx)
+        untested (into []
+                       (remove #(tested-ok? (:tool/results ctx) %))
+                       (defined-tool-names results))
+        tested (successful-control-tool-names results "tool_test")
+        promoted (into []
+                       (remove #(inventory-confirms? results %))
+                       (successful-control-tool-names
+                        results "tool_promote"))]
+    (cond
+      (seq untested)
       (-> ctx
           (assoc :agent/runtime-tool-test-nudge untested)
           (update-in [:llm/request :messages] (fnil conj [])
@@ -83,8 +116,35 @@
                       :content
                       (str "Runtime tool(s) now registered: "
                            (str/join ", " untested)
-                           ". Call each now with a real test input. "
-                           "Do not describe the call — invoke the tool.")})))))
+                           ". Call tool_test for each now with real arguments "
+                           "and exact expected-output. Do not claim success or "
+                           "call tool_promote until tool_test returns ok=true.")}))
+
+      (seq tested)
+      (-> ctx
+          (assoc :agent/runtime-tool-promote-nudge tested)
+          (update-in
+           [:llm/request :messages] (fnil conj [])
+           {:role "system"
+            :content
+            (str "tool_test passed for: " (str/join ", " tested)
+                 ". Call tool_promote for each now, then call "
+                 "tool_list_runtime with no arguments and verify each name "
+                 "appears in promoted. Extra keys are ignored. "
+                 "Do not claim completion before both calls succeed.")}))
+
+      (seq promoted)
+      (-> ctx
+          (assoc :agent/runtime-tool-list-nudge promoted)
+          (update-in
+           [:llm/request :messages] (fnil conj [])
+           {:role "system"
+            :content
+            (str "Promotion succeeded for: " (str/join ", " promoted)
+                 ". Call tool_list_runtime now and verify each appears in "
+                 "promoted. Do not claim completion before inventory confirms.")}))
+
+      :else ctx)))
 
 (defn retry-now-available-interceptor
   "`:tools` interceptor — after apply, before compose."

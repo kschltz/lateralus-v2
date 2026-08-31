@@ -8,7 +8,9 @@
             [kschltz.agent.plugins.secrets :as plugins.secrets]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.secrets :as secrets]
-            [kschltz.agent.tool :as tool]))
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.factory.protocol :as factory.proto]
+            [kschltz.agent.tools.factory.session :as factory.session]))
 
 (defrecord EchoTool []
   tool/Tool
@@ -18,12 +20,33 @@
   (-output-schema [_] :string)
   (-invoke [_ args _ctx] (pr-str args)))
 
+(defrecord UntrustedEchoTool []
+  tool/Tool
+  (-name [_] "runtime_echo")
+  (-description [_] "echoes opaque runtime args")
+  (-input-schema [_] [:map])
+  (-output-schema [_] :string)
+  (-invoke [_ args _ctx] (pr-str args))
+  tool/ToolTrust
+  (-trust-tier [_] :untrusted-runtime))
+
+(def runtime-echo-spec
+  {:name "runtime_echo"
+   :description "Echo runtime tool arguments"
+   :input-schema "[:map]"
+   :invoke "(fn [args _ctx] (pr-str args))"})
+
 (def store-path
   (str (System/getProperty "java.io.tmpdir") "/latsec-plugin/secrets.sealed"))
 
-(defn- cleanup! [_]
+(defn- cleanup!
+  [test-fn]
   (let [f (java.io.File. store-path)]
-    (when (.exists f) (.delete f))))
+    (when (.exists f) (.delete f))
+    (try
+      (test-fn)
+      (finally
+        (when (.exists f) (.delete f))))))
 
 (use-fixtures :each cleanup!)
 
@@ -36,7 +59,9 @@
   (let [chain (plugin/assemble-chain
                [(plugins.base/base-plugin)
                 (plugins.tools/tools-plugin {"echo" (->EchoTool)})
-                (plugins.secrets/secrets-plugin {:store @store})])]
+                (plugins.secrets/secrets-plugin
+                 {:store @store
+                  :capabilities {"echo" {:labels #{"tok"}}}})])]
     {:seed   (some #(when (= :kschltz.agent.plugins.tools/seed-registry (:name %)) %) chain)
      :wrap   (some #(when (= :kschltz.agent.plugins.secrets/wrap-registry (:name %)) %) chain)
      :redact (some #(when (= :kschltz.agent.plugins.secrets/redact (:name %)) %) chain)}))
@@ -48,9 +73,19 @@
       ((:enter seed) c)
       ((:enter wrap) c))))
 
+(defn- factory-chain-ixs
+  [factory]
+  (let [chain (plugin/assemble-chain
+               [(plugins.base/base-plugin)
+                (plugins.tools/tools-plugin {} {:factory-session factory})
+                (plugins.secrets/secrets-plugin {:store @store})])]
+    {:seed (some #(when (= :kschltz.agent.plugins.tools/seed-registry (:name %)) %) chain)
+     :wrap (some #(when (= :kschltz.agent.plugins.secrets/wrap-registry (:name %)) %) chain)}))
+
 (deftest wraps-static-registry-tools-on-guard
   (testing "after seeding, the registry tools are wrapped (slots + behavior)"
-    (let [ctx (seed-and-wrap-ctx)
+    (let [_ (secrets/-put-secret! @store "tok" "sk-wrap-value-77")
+          ctx (seed-and-wrap-ctx)
           {:keys [wrap redact]} (assembled-chain-ixs)]
       (is (= :guard (:plugin/slot wrap)))
       (is (= :tools (:plugin/slot redact)))
@@ -67,6 +102,58 @@
           (is (not (str/includes? out "sk-wrap-value-77"))))))
     ;; the store must contain the secret for this test to be meaningful
     (is (secrets/-secret-exists? @store "tok"))))
+
+(deftest wraps-live-factory-tools-on-guard
+  (let [factory (factory.session/factory-session {})
+        _ (factory.proto/-define! factory runtime-echo-spec {})
+        _ (secrets/-put-secret! @store "factory-token" "sk-factory-value-123")
+        {:keys [seed wrap]} (factory-chain-ixs factory)
+        ctx (as-> {:agent/state
+                   {:agent/runtime-tools {"runtime_echo" runtime-echo-spec}}
+                   :llm/request {:messages []}} c
+              ((:enter seed) c)
+              ((:enter wrap) c))
+        out (tool/invoke-tool
+             (get-in ctx [:agent/tool-registry "runtime_echo"])
+             {:token "{{secret:factory-token}}"}
+             ctx)]
+    (is (str/includes? out "{{secret:factory-token}}"))
+    (is (not (str/includes? out "sk-factory-value-123")))))
+
+(deftest same-exchange-factory-refresh-keeps-secret-wrapping
+  (let [factory (factory.session/factory-session {})
+        _ (secrets/-put-secret! @store "refresh-token" "sk-refresh-value-456")
+        {:keys [seed wrap]} (factory-chain-ixs factory)
+        wrapped-ctx (as-> {:llm/request {:messages [] :tools []}} c
+                      ((:enter seed) c)
+                      ((:enter wrap) c))
+        _ (factory.proto/-define! factory runtime-echo-spec {})
+        refreshed (plugins.tools/refresh-live-tools
+                   (assoc-in wrapped-ctx
+                             [:agent/state :agent/runtime-tools "runtime_echo"]
+                             runtime-echo-spec))
+        out (tool/invoke-tool
+             (get-in refreshed [:agent/tool-registry "runtime_echo"])
+             {:token "{{secret:refresh-token}}"}
+             refreshed)]
+    (is (str/includes? out "{{secret:refresh-token}}"))
+    (is (not (str/includes? out "sk-refresh-value-456")))))
+
+(deftest untrusted-runtime-tools-never-receive-plaintext
+  (let [store @store
+        _ (secrets/-put-secret! store "runtime-token" "sk-runtime-plain-999")
+        plugin (plugins.secrets/secrets-plugin {:store store})
+        wrap (-> plugin first :enter)
+        ctx (wrap {:agent/static-tool-registry
+                   {"runtime_echo" (->UntrustedEchoTool)}
+                   :agent/tool-registry
+                   {"runtime_echo" (->UntrustedEchoTool)}})
+        out (tool/invoke-tool
+             (get-in ctx [:agent/tool-registry "runtime_echo"])
+             {:token "{{secret:runtime-token}}"}
+             ctx)]
+    (is (str/includes? out "{{secret:runtime-token}}"))
+    (is (not (str/includes? out "sk-runtime-plain-999")))))
 
 (deftest redact-sweep-scrubs-context
   (testing ":tools-slot enter scrubbs tool results, transcript, and messages"
@@ -89,8 +176,12 @@
 
 (deftest wrap-cache-identity-stable
   (testing "same static registry identity → same wrapped tool instances"
-    (let [ctx1 (seed-and-wrap-ctx)
-          ctx2 (seed-and-wrap-ctx)]
+    (let [{:keys [seed wrap]} (assembled-chain-ixs)
+          build-ctx #(as-> {:llm/request {:messages []}} c
+                       ((:enter seed) c)
+                       ((:enter wrap) c))
+          ctx1 (build-ctx)
+          ctx2 (build-ctx)]
       (is (identical? (get (:agent/tool-registry ctx1) "echo")
                       (get (:agent/tool-registry ctx2) "echo"))))))
 (deftest handles-tool-is-advertised

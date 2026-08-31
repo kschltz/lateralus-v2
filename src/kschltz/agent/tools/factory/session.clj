@@ -22,15 +22,18 @@
       (when (map? reg) reg))))
 
 (defn- seed-promoted
-  [compiler workspace-root]
+  [compiler workspace-root sandboxed?]
   (reduce
    (fn [acc entry]
      (let [name (:name entry)
            ns-sym (some-> entry :ns symbol)
-           path (:path entry)]
-       (when (and path (.isFile (java.io.File. (str path))))
+           path (:path entry)
+           spec-only? (or sandboxed? (:sandboxed entry))]
+       (when (and (not spec-only?)
+                  path
+                  (.isFile (java.io.File. (str path))))
          (try (load-file (str path)) (catch Throwable _)))
-       (let [from-ns (when ns-sym
+       (let [from-ns (when (and (not spec-only?) ns-sym)
                        (try (get (resolve-registry ns-sym) name)
                             (catch Throwable _ nil)))
              compiled (when (and (not (tool/tool? from-ns))
@@ -104,6 +107,24 @@
        :tool-name tool-name
        :removed (boolean had?)}))
 
+  (-record-test! [_ tool-name tested-spec-id]
+    (when-not (dynamic-enabled? config)
+      (raise :disabled
+             "Dynamic tool factory is disabled; set :dynamic {:enabled? true} on :lateralus/factory-session"
+             {}))
+    (let [entry (get-in @state [:ephemeral tool-name])
+          current-spec-id (some-> entry :spec proto/spec-id)]
+      (when-not entry
+        (raise :unknown (str "unknown ephemeral runtime tool: " tool-name)
+               {:tool-name tool-name}))
+      (when-not (= current-spec-id tested-spec-id)
+        (raise :stale-test
+               (str "tool_test result is stale for current spec: " tool-name)
+               {:tool-name tool-name}))
+      (swap! state assoc-in [:ephemeral tool-name :tested-spec-id]
+             tested-spec-id)
+      {:ok true :tool-name tool-name :tested true}))
+
   (-promote! [_ tool-name opts]
     (when-not (dynamic-enabled? config)
       (raise :disabled
@@ -115,13 +136,20 @@
       (when-not spec
         (raise :unknown (str "unknown runtime tool: " tool-name)
                {:tool-name tool-name}))
+      (when (and (get-in @state [:ephemeral tool-name])
+                 (not= (proto/spec-id spec) (:tested-spec-id entry)))
+        (raise :untested
+               (str "runtime tool must pass tool_test before promotion: "
+                    tool-name)
+               {:tool-name tool-name}))
       (let [status (promote/promote-spec
                     spec
                     {:workspace-root (or (:workspace-root opts)
                                          (:workspace-root config)
                                          ".")
                      :target (or (:target opts) :workspace)
-                     :as-plugin (boolean (:as-plugin opts))})
+                     :as-plugin (boolean (:as-plugin opts))
+                     :sandboxed? (proto/-sandboxed? _)})
             compiled (proto/-compile-spec compiler spec)
             live (cond-> {:spec spec
                           :tool (or (:tool compiled) (:tool entry))
@@ -157,11 +185,28 @@
     (let [st @state]
       {:dynamic-enabled? (dynamic-enabled? config)
        :ephemeral (vec (sort (keys (:ephemeral st))))
+       :tested (->> (:ephemeral st)
+                    (keep (fn [[name {:keys [spec tested-spec-id]}]]
+                            (when (= tested-spec-id (proto/spec-id spec))
+                              name)))
+                    sort
+                    vec)
        :promoted (vec (sort (keys (:promoted st))))
        :tool-count (+ (count (:ephemeral st)) (count (:promoted st)))}))
 
   (-rehydrate! [_ specs]
     (let [specs (or specs {})
+          current (:ephemeral @state)
+          removed (->> current
+                       (keep (fn [[name {:keys [spec]}]]
+                               (when (or (not (contains? specs name))
+                                         (not= spec (get specs name)))
+                                 name)))
+                       sort
+                       vec)
+          _ (when (seq removed)
+              (swap! state update :ephemeral
+                     #(apply dissoc (or % {}) removed)))
           existing (set (concat (keys (:ephemeral @state))
                                 (keys (:promoted @state))))
           results (reduce
@@ -180,8 +225,8 @@
                            (update acc :errors conj
                                    {:name name
                                     :error (:error compiled)})))))
-                   {:rehydrated [] :errors []}
-                   specs)
+                   {:rehydrated [] :removed removed :errors []}
+                   (sort-by key specs))
           ;; Remember the failures so the UI/model can be told — these
           ;; used to be swallowed, which made tool_define look like a
           ;; fake success (define ok, tool silently missing forever).
@@ -190,7 +235,29 @@
       (assoc results :ok (empty? errors))))
 
   (-dynamic-enabled? [_]
-    (dynamic-enabled? config)))
+    (dynamic-enabled? config))
+
+  (-sandboxed? [_]
+    (true? (get-in config [:sandbox :enabled?]))))
+
+(defn- normalize-config
+  [config]
+  (let [config (or config {})
+        secret-store? (some? (:secret-store config))
+        explicit (get-in config [:sandbox :enabled?] ::unset)]
+    (when (and secret-store? (false? explicit))
+      (throw (ex-info
+              "A factory session with a secret store must enable the sandbox"
+              {:phase :sandbox :kind :unsafe-secret-factory-config})))
+    (let [config (cond-> config
+                   (and secret-store? (= ::unset explicit))
+                   (assoc-in [:sandbox :enabled?] true))]
+      (when (and (true? (get-in config [:sandbox :enabled?]))
+                 (proto/tool-compiler? (:compiler config)))
+        (throw (ex-info
+                "Sandboxed factory sessions cannot inject a custom compiler"
+                {:phase :sandbox :kind :unsafe-custom-compiler})))
+      config)))
 
 (defn factory-session
   "Build a `RuntimeToolStore`.
@@ -199,14 +266,17 @@
    optional `:compiler` / `:runtime` test seams."
   ([] (factory-session {}))
   ([config]
-   (let [config (or config {})
+   (let [config (normalize-config config)
          compiler (cond
                     (proto/tool-compiler? (:compiler config))
                     (:compiler config)
                     :else
-                    (compile/jvm-compiler (:runtime config)))
+                    (compile/jvm-compiler
+                     (:runtime config)
+                     {:sandbox (:sandbox config)}))
          workspace (or (:workspace-root config) ".")
-         promoted (try (seed-promoted compiler workspace)
+         sandboxed? (true? (get-in config [:sandbox :enabled?]))
+         promoted (try (seed-promoted compiler workspace sandboxed?)
                        (catch Throwable _ {}))]
      (->FactorySession config compiler
                        (atom {:ephemeral {}

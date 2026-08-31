@@ -156,7 +156,8 @@
        (throw (ex-info "Workbench await-human timed out"
                        {:timeout-ms timeout-ms})))
      (set-status! hub :running "model working…")
-     (begin-turn! hub {:user-text (:text msg)})
+     (begin-turn! hub {:session-id (:session-id @(:state hub))
+                       :user-text (:text msg)})
      msg)))
 
 (defn set-session-title!
