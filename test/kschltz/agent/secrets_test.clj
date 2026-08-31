@@ -150,12 +150,19 @@
         (is (= 2 (count (re-seq #"\[REDACTED:tok\]" out))))
         (is (= "echo" (tool/-name wrapped))))))))
 
-(deftest wrap-tool-denies-secret-handles-without-a-capability
+(deftest wrap-tool-keeps-secret-handles-opaque-without-a-capability
   (with-store :deny-capability
     (fn [store]
       (secrets/-put-secret! store "tok" "sk-denied-value-42")
       (let [out (tool/invoke-tool
                  (secrets/wrap-tool store (->EchoTool))
+                 {:token "{{secret:tok}}"}
+                 {})]
+        (is (str/includes? out "{{secret:tok}}"))
+        (is (not (str/includes? out "sk-denied-value-42"))))
+      (let [out (tool/invoke-tool
+                 (secrets/wrap-tool
+                  store (->EchoTool) {:labels #{"different-label"}})
                  {:token "{{secret:tok}}"}
                  {})]
         (is (str/includes? out "not authorized"))

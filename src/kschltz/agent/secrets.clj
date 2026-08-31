@@ -322,12 +322,14 @@
 (defn authorized-substitute-handles
   "Resolve handles only when `capability` authorizes every referenced label.
    A capability is `{:labels :all}` or `{:labels #{\"label\" ...}}`.
-   Missing/unauthorized capabilities fail closed before delegate invocation."
+   A missing capability leaves handles opaque so transport/control tools can
+   safely forward them. An explicit capability with an unauthorized label
+   fails closed before delegate invocation."
   [store capability args]
   (let [referenced (handle-labels args)
         allowed (:labels capability)
         unauthorized
-        (when (seq referenced)
+        (when (and capability (seq referenced))
           (if (= :all allowed)
             #{}
             (set (remove (set (or allowed #{})) referenced))))]
@@ -337,7 +339,7 @@
                    (str/join ", " (sort unauthorized)))
               {:kind :secret-capability-denied
                :labels (vec (sort unauthorized))})))
-    (if (seq referenced)
+    (if (and capability (seq referenced))
       (substitute-handles store args)
       args)))
 
