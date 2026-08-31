@@ -244,6 +244,7 @@
     (is (= 200 (:status page)))
     (is (re-find #"response details" (String. ^bytes (:body page) "UTF-8")))
     (is (re-find #"events-wrap" (String. ^bytes (:body page) "UTF-8")))
+    (is (re-find #"id=\"tool-results\"" (String. ^bytes (:body page) "UTF-8")))
     (is (= 200 (:status api)))
     (is (= "pad" (:text body)))
     (is (= "draw" (:user-text body)))
