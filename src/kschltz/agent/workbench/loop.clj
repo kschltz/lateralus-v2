@@ -131,17 +131,52 @@
 (defn- run-exchange!
   [runtime workbench prompt]
   (let [result (runtime/send-message runtime prompt)
-        event  (guard-assistant-event result workbench)]
+        event  (guard-assistant-event result workbench)
+        original (with-turn-id (public-event event) result)
+        original-turn-id (:turn-id original)]
+    ;; #region agent log
+    (spit "/opt/cursor/logs/debug.log"
+          (str (json/generate-string
+                {:hypothesisId "L"
+                 :location "workbench/loop.clj:run-exchange:guard"
+                 :message "evaluated Portal repair guard"
+                 :data {:turnId original-turn-id
+                        :needsRepair (boolean (::needs-repair? event))
+                        :claimsPortal (cite/claims-portal-delivery? (:exchange/response result))
+                        :submitSucceeded (cite/portal-submit-succeeded?
+                                          (tool-results result))
+                        :toolNames (mapv #(get-in % [:call :function :name])
+                                         (tool-results result))}
+                 :timestamp (System/currentTimeMillis)})
+               "\n")
+          :append true)
+    ;; #endregion
     (if-not (::needs-repair? event)
-      (with-turn-id (public-event event) result)
+      original
       (do
         (wb/publish! workbench
-                     {:role :system
-                     :text (str "Portal guard: claimed a viz without a successful "
-                                "portal_submit (or used a fake @portal id). Retrying once…")})
+                     (cond-> {:role :system
+                              :text (str "Portal guard: claimed a viz without a successful "
+                                         "portal_submit (or used a fake @portal id). Retrying once…")}
+                       original-turn-id (assoc :turn-id original-turn-id)))
         (let [repair (runtime/send-message runtime cite/repair-prompt)
-              fixed  (guard-assistant-event repair workbench)]
-          (with-turn-id (public-event fixed) repair))))))
+              fixed  (guard-assistant-event repair workbench)
+              repaired (with-turn-id (public-event fixed) repair)]
+          ;; #region agent log
+          (spit "/opt/cursor/logs/debug.log"
+                (str (json/generate-string
+                      {:hypothesisId "L"
+                       :location "workbench/loop.clj:run-exchange:repair"
+                       :message "linked original and repair turns"
+                       :data {:originalTurnId original-turn-id
+                              :repairTurnId (:turn-id repaired)
+                              :repairRole (some-> repaired :role name)
+                              :stillNeedsRepair (boolean (::needs-repair? fixed))}
+                       :timestamp (System/currentTimeMillis)})
+                     "\n")
+                :append true)
+          ;; #endregion
+          repaired)))))
 
 (defn- session-command?
   [text]

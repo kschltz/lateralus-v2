@@ -128,7 +128,9 @@
             (is (re-find #"focusComposer" js)
                 "JS restores chat caret after send / turn complete")
             (is (re-find #"inputEl\.readOnly" js)
-                "composer uses readOnly while busy so focus can stick"))
+                "composer uses readOnly while busy so focus can stick")
+            (is (re-find #"const meta = infoLink\(t\[\"turn-id\"\] \|\| t\.turnId, false\)" js)
+                "every transcript role can expose preserved turn details"))
           (finally
             (http/stop-server! server)))))))
 

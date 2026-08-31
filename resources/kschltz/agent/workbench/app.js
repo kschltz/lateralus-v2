@@ -215,7 +215,7 @@
         const thinking = t.thinking
           ? `<div class="thinking">${esc(t.thinking)}</div>`
           : "";
-        const meta = t.role === "assistant" || t.role === "error" ? infoLink(t["turn-id"] || t.turnId, false) : "";
+        const meta = infoLink(t["turn-id"] || t.turnId, false);
         return `<article class="turn ${role}"><div class="role">${role}${meta}</div>${esc(
           t.text || ""
         )}${refs ? `<div>${refs}</div>` : ""}${thinking}</article>`;
