@@ -65,6 +65,16 @@
     (is (= "[:map [:credential :string]]" (:input-schema normalized)))
     (is (proto/valid-tool-spec? normalized))))
 
+(deftest define-accepts-gemma-malli-shorthand
+  (let [normalized
+        (tools/normalize-tool-spec
+         {:name "credential_status"
+          :description "Classify credential presence"
+          :malli "{:credential {:type :string}}"
+          :invoke "(fn [args] (if (:credential args) \"available\" \"missing\"))"})]
+    (is (= "[:map [:credential :string]]" (:input-schema normalized)))
+    (is (proto/valid-tool-spec? normalized))))
+
 (deftest list-runtime-is-read-only
   (let [store (session/factory-session {})
         t (get (tools/factory-tools-registry store) "tool_list_runtime")
@@ -142,3 +152,16 @@
     (is (nil? (:transition untested)))
     (is (true? (:ok ready)))
     (is (= "promote-runtime-tool" (get-in ready [:transition :op])))))
+
+(deftest promote-tool-accepts-tool-name-alias
+  (let [store (session/factory-session {})
+        promote (get (tools/factory-tools-registry store) "tool_promote")
+        parsed (json/parse-string
+                (tool/invoke-tool promote
+                                  {:tool "not_defined"
+                                   :target "workspace"}
+                                  {})
+                true)]
+    (is (false? (:ok parsed)))
+    (is (= "not_defined" (:tool-name parsed)))
+    (is (= "unknown" (:phase parsed)))))
