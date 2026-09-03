@@ -16,6 +16,7 @@
 - **Secrets plugin:** `docs/secrets.md` (`kschltz.agent.secrets`, `:lateralus/secret-store` + `:lateralus/secret-plugin`, use-without-seeing)
 - **Network boundary matrix:** `docs/network-boundaries.md` (protocol isolation + Malli instrumentation)
 - **Memory v2 schema:** `docs/memory-v2.md`
+- **DuckDB core-store options:** `docs/duckdb-core-engine.md` (persistence substrate behind existing protocols; not a chain replacement)
 - **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)
 - **CLI profiles:** `~/.config/lateralus/` via `kschltz.agent.cli.profile.*` (no `--config` → interactive gate; secrets via `OLLAMA_API_KEY` only)
 - **v1 reference (archive):** https://github.com/kschltz/lateralus — port seed code only, do not copy `core.clj` or `loop.clj`

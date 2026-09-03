@@ -434,6 +434,7 @@ Notes:
 | [`docs/skills.md`](docs/skills.md) | Skill packs: Malli-enforced `.edn` skills, tiered progressive disclosure |
 | [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
+| [`docs/duckdb-core-engine.md`](docs/duckdb-core-engine.md) | Options: DuckDB as persistence substrate (not a chain replacement) |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and the `:kg-bm25` native default |
 | [`docs/network-boundaries.md`](docs/network-boundaries.md) | Protocol isolation + Malli instrumentation matrix |
 | [`docs/stream.md`](docs/stream.md) | Streaming bus design |

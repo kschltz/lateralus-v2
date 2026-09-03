@@ -55,6 +55,10 @@ The v1 plan originally considered Datalevin. It was dropped from v2 MVP because 
 
 The "boring" RAG stack. SQLite gives single-file ACID structured storage; `sqlite-vec` adds a `vec0` virtual table for KNN search. The friction is packaging the C extension for JVM distribution.
 
+### DuckDB
+
+Embedded OLAP + JSON + FTS (`match_bm25`) + experimental VSS/HNSW. Stronger fit than SQLite if the goal is a **shared query substrate** for memory, workbench sessions, stream history, and (later) a file-index — not just another `MemoryBackend`. JDBC driver; GraalVM native-image is documented but still a native `.so` plus air-gapped extension loading. **Do not replace the interceptor engine.** Options and a recommended `StoreEngine` façade are in [`duckdb-core-engine.md`](./duckdb-core-engine.md).
+
 ### clj-rocksdb / Asami / LMDB raw
 
 These are building blocks without vector search. They would need a companion vector index (Proximum, sqlite-vec, or a brute-force in-memory index) to implement semantic recall.
@@ -72,7 +76,7 @@ These are building blocks without vector search. They would need a companion vec
 
 1. Do we need a dense-vector backend in native-image? If yes, add an HTTP embedder to the native config (already supported via `kschltz.agent.memory.http-embedding`).
 2. Do we want a single-dependency Clojure-native backend for JVM? Datalevin remains the candidate.
-3. Do we want a SQL-backed backend? SQLite + sqlite-vec is the candidate if native-extension packaging is acceptable.
+3. Do we want a SQL-backed backend? DuckDB is the leading candidate if we want analytics + BM25 + one file for the harness (`docs/duckdb-core-engine.md`). SQLite + sqlite-vec remains the candidate if we want boring OLTP and accept C-extension packaging.
 
 ## Suggested next step
 
