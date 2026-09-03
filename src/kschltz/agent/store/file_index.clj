@@ -4,8 +4,7 @@
    The filesystem remains the source of truth. This index is advisory:
    a failed index write never fails a file mutation, and a stale hash
    still fails `file_patch`."
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [kschltz.agent.store.protocol :as store]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-safety :as fs]
@@ -115,11 +114,11 @@
                                 (- max-results (count @hits))))))
       @hits))
   (-edits [_ {:keys [path limit] :or {limit 50}}]
-    (vec (reverse
-          (store/-select engine :file_edits
-                         {:where (when path {:path path})
-                          :order [:ts]
-                          :limit limit}))))
+    (store/-select engine :file_edits
+                   {:where (when path {:path path})
+                    :order [:ts]
+                    :desc true
+                    :limit limit}))
   (-indexed-under? [_ path-prefix]
     (boolean
      (seq (store/-select engine :file_index

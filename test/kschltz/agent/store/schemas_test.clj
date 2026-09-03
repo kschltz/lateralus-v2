@@ -9,3 +9,7 @@
   (is (schemas/valid-store-config? {:impl :duckdb}))
   (is (schemas/valid-store-config? {:impl :duckdb :path "sessions/x.duckdb"}))
   (is (not (m/validate schemas/StoreConfig {:impl :postgres}))))
+
+(deftest select-opts-accept-desc
+  (is (m/validate schemas/SelectOpts {:order [:ts] :desc true :limit 10}))
+  (is (not (m/validate schemas/SelectOpts {:limit 0}))))

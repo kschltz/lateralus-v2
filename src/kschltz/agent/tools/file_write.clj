@@ -424,7 +424,8 @@
   [[fs/default-max-write-bytes]]), `:refuse-clojure?` (default true),
   `:blocked-paths` (default [[fs/default-blocked-paths]]), and
   `:clojure-guard?` (default false, enables rewrite-clj round-trip
-  validation of written Clojure/EDN source)."
+  validation of written Clojure/EDN source), and optional `:file-index`
+  (advisory `FileIndex` written after a verified commit).")
   ([] (write-file nil {}))
   ([workspace-root] (write-file workspace-root {}))
   ([workspace-root {:keys [max-write-bytes refuse-clojure? blocked-paths clojure-guard? file-index]}]

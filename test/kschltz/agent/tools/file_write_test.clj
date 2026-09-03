@@ -13,6 +13,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [kschltz.agent.store.file-index :as index]
+            [kschltz.agent.store.memory :as memory]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-write :as fw])
   (:import [java.io File]))
@@ -65,4 +67,21 @@
           parsed (json/parse-string out true)]
       (is (true? (:created parsed)) (str "out=" out))
       (is (true? (:changed parsed)))
+      (is (string? (:sha256 parsed)))
       (is (= "hi\n" (slurp (io/file @tmp-dir "hello.txt")))))))
+
+(deftest write-file-records-advisory-index
+  (let [i (index/file-index (memory/memory-store))
+        t (fw/write-file (str @tmp-dir) {:file-index i})
+        out (json/parse-string
+             (tool/invoke-tool t
+                               {:path "noted.txt"
+                                :content "indexed\n"
+                                :create-dirs true}
+                               dummy-ctx)
+             true)
+        path (.getPath (io/file @tmp-dir "noted.txt"))]
+    (is (true? (:changed out)))
+    (is (= (:sha256 out) (:sha256 (index/-lookup i path))))
+    (is (= 1 (count (index/-edits i {:path path}))))
+    (is (= "file_write" (:tool (first (index/-edits i {:path path})))))))

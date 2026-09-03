@@ -129,7 +129,7 @@
 
 (defrecord DuckDbEngine [^Connection conn]
   proto/StoreEngine
-  (-upsert! [_ table pk-cols row]
+  (-upsert! [_ table _pk-cols row]
     (let [cols (cols-for table)
           names (str/join ", " (map sql-col cols))
           marks (str/join ", " (repeat (count cols) "?"))
@@ -143,11 +143,12 @@
           sql (str "INSERT INTO " (table-sql table)
                    " (" names ") VALUES (" marks ")")]
       (jdbc-execute! {:conn conn :sql sql :params (row->sql-vals cols row)})))
-  (-select [_ table {:keys [where order limit]}]
+  (-select [_ table {:keys [where order desc limit]}]
     (let [cols (cols-for table)
           {:keys [clause params]} (where-sql (or where {}))
           order-sql (when (seq order)
-                      (str " ORDER BY " (str/join ", " (map sql-col order))))
+                      (str " ORDER BY " (str/join ", " (map sql-col order))
+                           (when desc " DESC")))
           limit-sql (when limit (str " LIMIT " (long limit)))
           sql (str "SELECT " (str/join ", " (map sql-col cols))
                    " FROM " (table-sql table)

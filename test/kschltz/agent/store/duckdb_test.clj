@@ -1,7 +1,7 @@
 (ns kschltz.agent.store.duckdb-test
   "JDBC leaf tests. Require duckdb_jdbc on the classpath (main dep)."
   (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [kschltz.agent.store.duckdb :as duckdb]
             [kschltz.agent.store.file-index :as index]
             [kschltz.agent.store.protocol :as proto]))
@@ -19,7 +19,17 @@
                       {:id "e1" :path "/a.txt" :tool "file_write"
                        :sha256-before nil :sha256-after "abc"
                        :start-line nil :end-line nil :ts 9})
-      (is (= 1 (count (proto/-select e :file_edits {:where {:path "/a.txt"}}))))
+      (proto/-insert! e :file_edits
+                      {:id "e0" :path "/a.txt" :tool "file_update"
+                       :sha256-before "abc" :sha256-after "def"
+                       :start-line nil :end-line nil :ts 3})
+      (is (= ["e0" "e1"]
+             (mapv :id (proto/-select e :file_edits {:where {:path "/a.txt"}
+                                                    :order [:ts]}))))
+      (is (= ["e1" "e0"]
+             (mapv :id (proto/-select e :file_edits {:where {:path "/a.txt"}
+                                                    :order [:ts]
+                                                    :desc true}))))
       (is (= {:rows 1} (proto/-delete! e :file_index {:path "/a.txt"})))
       (is (empty? (proto/-select e :file_index {:where {:path "/a.txt"}})))
       (finally

@@ -14,7 +14,7 @@
     "Append `row`. Returns {:rows n}.")
   (-select [engine table opts]
     "Return a vector of row maps. `opts` may include `:where`, `:order`,
-     and `:limit`.")
+     `:desc`, and `:limit`.")
   (-delete! [engine table where]
     "Delete rows matching `where`. Returns {:rows n}.")
   (-close [engine]

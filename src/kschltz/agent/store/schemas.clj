@@ -22,6 +22,7 @@
   [:map
    [:where {:optional true} Where]
    [:order {:optional true} [:vector :keyword]]
+   [:desc {:optional true} :boolean]
    [:limit {:optional true} [:int {:min 1}]]])
 
 (def ExecResult

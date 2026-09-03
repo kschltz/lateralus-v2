@@ -12,50 +12,54 @@
     (get row (first pk-cols))
     (mapv #(get row %) pk-cols)))
 
+(defn- under-prefix?
+  [path prefix]
+  (or (= path prefix)
+      (str/starts-with? (str path) (str prefix "/"))))
+
 (defn- match-where
   [row where]
-  (if (empty? where)
+  (if (or (nil? where) (empty? where))
     true
-    (let [{:keys [path path-prefix id]} where]
-      (cond
-        (and path (not= path (:path row))) false
-        (and id (not= id (:id row))) false
-        (and path-prefix
-             (let [p (str (:path row))]
-               (not (or (= p path-prefix)
-                        (str/starts-with? p (str path-prefix "/"))))))
-        false
-        :else true))))
+    (let [ok-path (if (contains? where :path)
+                    (= (:path where) (:path row))
+                    true)
+          ok-id (if (contains? where :id)
+                  (= (:id where) (:id row))
+                  true)
+          ok-prefix (if (contains? where :path-prefix)
+                      (under-prefix? (:path row) (:path-prefix where))
+                      true)]
+      (and ok-path ok-id ok-prefix))))
 
-(defn- apply-order
-  [rows order]
-  (if (seq order)
-    (sort-by (fn [row] (mapv #(get row %) order)) rows)
-    rows))
-
-(defrecord MemoryEngine [state]
+(defrecord MemoryEngine [tables]
   proto/StoreEngine
   (-upsert! [_ table pk-cols row]
     (let [k (row-key pk-cols row)]
-      (swap! state assoc-in [table k] row)
+      (swap! tables assoc-in [table k] row)
       {:rows 1}))
   (-insert! [_ table row]
     (let [k (or (:id row) (str (random-uuid)))]
-      (swap! state assoc-in [table k] (assoc row :id k))
+      (swap! tables assoc-in [table k] (assoc row :id k))
       {:rows 1}))
-  (-select [_ table {:keys [where order limit]}]
-    (let [rows (->> (vals (get @state table {}))
-                    (filter #(match-where % where))
-                    (apply-order order)
-                    vec)]
-      (if limit (vec (take limit rows)) rows)))
+  (-select [_ table opts]
+    (let [where (:where opts)
+          order (:order opts)
+          limit (:limit opts)
+          all (vec (vals (get @tables table {})))
+          matched (filterv #(match-where % where) all)
+          ordered (if (seq order)
+                    (vec (sort-by (fn [row] (vec (map #(get row %) order))) matched))
+                    matched)
+          ordered (if (:desc opts) (vec (rseq ordered)) ordered)]
+      (if limit (vec (take (long limit) ordered)) ordered)))
   (-delete! [_ table where]
-    (let [before (get @state table {})
+    (let [before (get @tables table {})
           doomed (into #{}
                        (keep (fn [[k row]]
                                (when (match-where row where) k)))
                        before)]
-      (swap! state update table
+      (swap! tables update table
              (fn [m] (apply dissoc (or m {}) doomed)))
       {:rows (count doomed)}))
   (-close [_]

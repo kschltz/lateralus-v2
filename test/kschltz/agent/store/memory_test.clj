@@ -20,7 +20,9 @@
       (proto/-insert! e :file_edits {:id "1" :path "/a.txt" :ts 2})
       (proto/-insert! e :file_edits {:id "2" :path "/a.txt" :ts 1})
       (is (= ["2" "1"]
-             (mapv :id (proto/-select e :file_edits {:order [:ts]})))))
+             (mapv :id (proto/-select e :file_edits {:order [:ts]}))))
+      (is (= ["1" "2"]
+             (mapv :id (proto/-select e :file_edits {:order [:ts] :desc true})))))
     (testing "delete"
       (is (= {:rows 1} (proto/-delete! e :file_index {:path "/a.txt"})))
       (is (empty? (proto/-select e :file_index {:where {:path "/a.txt"}}))))))

@@ -1,6 +1,6 @@
 (ns kschltz.agent.store.file-index-test
   (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [kschltz.agent.store.file-index :as index]
             [kschltz.agent.store.memory :as memory]
             [kschltz.agent.tools.file-safety :as fs])
@@ -25,11 +25,12 @@
 
 (deftest record-edit-and-list
   (let [i (idx)]
-    (index/-record-edit! i {:path "/ws/a.txt" :tool "file_write" :sha256-after "bb"})
+    (index/-record-edit! i {:path "/ws/a.txt" :tool "file_write" :sha256-after "bb" :ts 1})
+    (index/-record-edit! i {:path "/ws/a.txt" :tool "file_update" :sha256-after "cc" :ts 2})
     (let [edits (index/-edits i {:path "/ws/a.txt" :limit 10})]
-      (is (= 1 (count edits)))
-      (is (= "file_write" (:tool (first edits))))
-      (is (= "bb" (:sha256-after (first edits)))))))
+      (is (= 2 (count edits)))
+      (is (= ["file_update" "file_write"] (mapv :tool edits)))
+      (is (= "cc" (:sha256-after (first edits)))))))
 
 (deftest record-mutation-is-advisory
   (let [i (idx)

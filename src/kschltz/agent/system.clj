@@ -529,7 +529,6 @@
     (store/-close engine)))
 
 (defmethod ig/init-key :lateralus/file-index [_ {:keys [store max-content-bytes]}]
-  "FileIndex façade over a StoreEngine. Does not own the store connection."
   (file-index/file-index store {:max-content-bytes max-content-bytes}))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]

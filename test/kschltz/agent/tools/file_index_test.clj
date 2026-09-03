@@ -1,7 +1,7 @@
 (ns kschltz.agent.tools.file-index-test
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [kschltz.agent.store.file-index :as index]
             [kschltz.agent.store.memory :as memory]
             [kschltz.agent.tool :as tool]
