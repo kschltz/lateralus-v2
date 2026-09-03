@@ -11,7 +11,6 @@
    that shape ever drifts."
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [kschltz.agent.store.file-index :as index]
             [kschltz.agent.store.memory :as memory]
