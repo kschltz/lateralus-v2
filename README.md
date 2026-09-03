@@ -435,6 +435,7 @@ Notes:
 | [`docs/memory-v2.md`](docs/memory-v2.md) | Memory subsystem design and backend configuration reference |
 | [`docs/memory-backend-research.md`](docs/memory-backend-research.md) | Decision log for memory backend selection |
 | [`docs/duckdb-core-engine.md`](docs/duckdb-core-engine.md) | Options: DuckDB as persistence substrate (not a chain replacement) |
+| [`docs/file-index.md`](docs/file-index.md) | Opt-in workspace file index + edit log (`StoreEngine`) |
 | [`docs/memory-embedding-free-alternatives.md`](docs/memory-embedding-free-alternatives.md) | Embedding-free memory strategies and the `:kg-bm25` native default |
 | [`docs/network-boundaries.md`](docs/network-boundaries.md) | Protocol isolation + Malli instrumentation matrix |
 | [`docs/stream.md`](docs/stream.md) | Streaming bus design |
@@ -461,6 +462,7 @@ Notes:
 | [`src/kschltz/agent/skills.clj`](src/kschltz/agent/skills.clj) | Skills: Malli schema, fail-closed loader, catalog + tools |
 | [`src/kschltz/agent/tool.clj`](src/kschltz/agent/tool.clj) | `Tool` protocol and registry helpers |
 | [`src/kschltz/agent/transitions.clj`](src/kschltz/agent/transitions.clj) | Allowlisted state-transition algebra |
+| [`src/kschltz/agent/store/`](src/kschltz/agent/store/) | Opt-in `StoreEngine` + FileIndex (memory or DuckDB) |
 | [`src/kschltz/agent/tools/`](src/kschltz/agent/tools/) | Tool namespaces: `filesystem.clj`, `config/`, `runtime/`, `web/`, `workflow/`, plus MCP tool glue |
 | [`src/kschltz/agent/interceptors.clj`](src/kschltz/agent/interceptors.clj) | Core interceptor stages |
 | [`src/kschltz/agent/interceptors/schema.clj`](src/kschltz/agent/interceptors/schema.clj) | Interceptor and context Malli schemas |

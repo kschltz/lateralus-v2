@@ -1,0 +1,54 @@
+;; Opt-in workspace file index (Option D).
+;; Stub LLM + in-memory DuckDB store + file_index / file_edits.
+;; Does not change the default runtime profile.
+;;
+;;   clojure -M:run --config resources/lateralus/demo-file-index.edn "reindex the workspace"
+;;
+;; Swap :impl :duckdb :path "sessions/lateralus.duckdb" for a durable file.
+{:lateralus/llm-client     {:impl :stub}
+ :lateralus/llm-config     {}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :noop}
+ :lateralus/store          {:impl :duckdb}
+ :lateralus/file-index     {:store #ig/ref :lateralus/store}
+ :lateralus/file-tools     {:workspace-root "."
+                            :file-index #ig/ref :lateralus/file-index}
+ :lateralus/self-awareness-tools {}
+ :lateralus/clojure-tools        {}
+ :lateralus/config-tools         {:catalog :stub}
+ :lateralus/web-tools            {:provider :none}
+ :lateralus/runtime-tools        {:enabled? true :network? false}
+ :lateralus/cli-ui               {:enabled? :auto :theme :default}
+ :lateralus/thinking             {:mode :preview}
+ :lateralus/loop-opts            {}
+ :lateralus/mcp-tools            {:servers {} :dynamic {:enabled? true}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
+ :lateralus/factory-session      {:workspace-root "." :dynamic {:enabled? true}}
+ :lateralus/factory-tools        {:session #ig/ref :lateralus/factory-session}
+ :lateralus/factory-plugin       {:session #ig/ref :lateralus/factory-session}
+ :lateralus/workflow-tools       {}
+ :lateralus/stream-bus           {}
+ :lateralus/stream-plugin        {:bus #ig/ref :lateralus/stream-bus}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/mcp-session-tools
+                                  #ig/ref :lateralus/factory-tools
+                                  #ig/ref :lateralus/workflow-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                    :mcp-session #ig/ref :lateralus/mcp-tools
+                                    :factory-session #ig/ref :lateralus/factory-session}
+ :lateralus/plugins              [#ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/factory-plugin
+                                  #ig/ref :lateralus/stream-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}

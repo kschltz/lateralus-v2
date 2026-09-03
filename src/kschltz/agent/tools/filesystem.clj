@@ -35,8 +35,10 @@
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [kschltz.agent.store.file-index :as file-index]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-glob :as file-glob]
+            [kschltz.agent.tools.file-index :as index-tools]
             [kschltz.agent.tools.file-patch :as file-patch]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-read-policy :as read-policy
@@ -426,8 +428,18 @@
       (catch Throwable t
         (read-policy/error-result t)))))
 
+(defn- search-via-index
+  "Use the advisory file index when it has coverage under `path`.
+   Returns a hit vector, or nil to fall back to a filesystem walk."
+  [idx ^Path path pattern max-results]
+  (when (and (file-index/file-index? idx)
+             (file-index/-indexed-under? idx (fpath/path->str path)))
+    (file-index/-search idx {:path-prefix (fpath/path->str path)
+                             :pattern pattern
+                             :max-results max-results})))
+
 (deftype SearchFilesTool [workspace-root max-search-file-bytes default-max-search-results
-                          blocked-paths allow-read-outside-workspace?]
+                          blocked-paths allow-read-outside-workspace? file-index]
   tool/Tool
   (-name [_] "file_search")
   (-description [_]
@@ -436,17 +448,22 @@
   (-output-schema [_] OutputSchema:String)
   (-invoke [_ args _ctx]
     (try
-      (json/generate-string
-       (do-search-files (read-policy/resolve-readable-path
-                         workspace-root
-                         (:path args)
-                         blocked-paths
-                         allow-read-outside-workspace?)
-                        (:pattern args)
-                        (:max-results args)
-                        max-search-file-bytes
-                        default-max-search-results
-                        blocked-paths))
+      (let [root (read-policy/resolve-readable-path
+                  workspace-root
+                  (:path args)
+                  blocked-paths
+                  allow-read-outside-workspace?)
+            max (safe-int (:max-results args) default-max-search-results)
+            indexed (search-via-index file-index root (:pattern args) max)]
+        (json/generate-string
+         (if (some? indexed)
+           indexed
+           (do-search-files root
+                            (:pattern args)
+                            (:max-results args)
+                            max-search-file-bytes
+                            default-max-search-results
+                            blocked-paths))))
       (catch Throwable t
         (read-policy/error-result t)))))
 
@@ -500,8 +517,12 @@
                  fs/default-blocked-paths false))
   ([workspace-root max-search-file-bytes default-max-search-results
     blocked-paths allow-read-outside-workspace?]
+   (search-files workspace-root max-search-file-bytes default-max-search-results
+                 blocked-paths allow-read-outside-workspace? nil))
+  ([workspace-root max-search-file-bytes default-max-search-results
+    blocked-paths allow-read-outside-workspace? file-index]
    (->SearchFilesTool workspace-root max-search-file-bytes default-max-search-results
-                      blocked-paths allow-read-outside-workspace?)))
+                      blocked-paths allow-read-outside-workspace? file-index)))
 
 (defn create-file
   "Return a new `file_create` Tool instance."
@@ -568,33 +589,41 @@
             refuse-clojure?
             blocked-paths
             clojure-guard?
-            allow-read-outside-workspace?]}]
+            allow-read-outside-workspace?
+            file-index]}]
    (let [blocked-paths (or blocked-paths fs/default-blocked-paths)
          allow-read-outside-workspace? (boolean allow-read-outside-workspace?)
          write-opts {:max-write-bytes  max-write-bytes
                      :refuse-clojure? refuse-clojure?
                      :blocked-paths   blocked-paths
-                     :clojure-guard?  clojure-guard?}]
-     {"file_read"    (read-file workspace-root
-                                (or max-read-bytes default-max-read-bytes)
-                                blocked-paths
+                     :clojure-guard?  clojure-guard?
+                     :file-index      file-index}]
+     (merge
+      {"file_read"    (read-file workspace-root
+                                 (or max-read-bytes default-max-read-bytes)
+                                 blocked-paths
+                                 allow-read-outside-workspace?)
+       "file_list"    (list-directory workspace-root
+                                      (or max-list-entries default-max-list-entries)
+                                      blocked-paths
+                                      allow-read-outside-workspace?)
+       "file_info"    (file-info workspace-root blocked-paths
                                 allow-read-outside-workspace?)
-      "file_list"    (list-directory workspace-root
-                                     (or max-list-entries default-max-list-entries)
-                                     blocked-paths
-                                     allow-read-outside-workspace?)
-      "file_info"    (file-info workspace-root blocked-paths
-                               allow-read-outside-workspace?)
-      "file_glob"    (file-glob/file-glob
-                      workspace-root
-                      {:blocked-paths blocked-paths
-                       :max-results max-glob-results})
-      "file_patch"   (file-patch/file-patch workspace-root write-opts)
-      "file_create"  (create-file workspace-root write-opts)
-      "file_search"  (search-files workspace-root
-                                  (or max-search-file-bytes default-max-search-file-bytes)
-                                  (or max-search-results default-max-search-results)
-                                  blocked-paths
-                                  allow-read-outside-workspace?)
-      "file_write"   (fw/write-file workspace-root write-opts)
-      "file_update"  (fw/update-file workspace-root write-opts)})))
+       "file_glob"    (file-glob/file-glob
+                       workspace-root
+                       {:blocked-paths blocked-paths
+                        :max-results max-glob-results})
+       "file_patch"   (file-patch/file-patch workspace-root write-opts)
+       "file_create"  (create-file workspace-root write-opts)
+       "file_search"  (search-files workspace-root
+                                   (or max-search-file-bytes default-max-search-file-bytes)
+                                   (or max-search-results default-max-search-results)
+                                   blocked-paths
+                                   allow-read-outside-workspace?
+                                   file-index)
+       "file_write"   (fw/write-file workspace-root write-opts)
+       "file_update"  (fw/update-file workspace-root write-opts)}
+      (index-tools/index-tools file-index workspace-root
+                               {:blocked-paths blocked-paths
+                                :allow-read-outside-workspace? allow-read-outside-workspace?
+                                :max-search-file-bytes max-search-file-bytes})))))

@@ -1,7 +1,13 @@
 # DuckDB as a Lateralus core store — options
 
-**Status:** research / options — no implementation yet.
+**Status:** decision — Option D accepted (workspace index + edit log).
 **Date:** 2026-09-03
+**Decision:** The harness payoff is a file index and edit audit log. Filesystem
+bytes stay source of truth; a `StoreEngine` (memory for tests, DuckDB on JVM)
+holds `file_index` + `file_edits`. Mutations record witnesses after a successful
+commit. `file_search` may hit the index when it has coverage; otherwise it still
+walks. Secrets, the interceptor chain, native-image defaults, and Proximum stay
+unchanged. Session/stream façades (the rest of Option C) are deferred.
 
 This note answers: *what would it mean to put DuckDB at the center of the
 Lateralus harness, and which of those meanings are actually a good fit?*

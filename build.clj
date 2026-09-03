@@ -87,7 +87,8 @@
   (let [exclude? #{"src/kschltz/agent/memory/proximum_backend.clj"
                    "src/kschltz/agent/memory/langchain4j_embedding.clj"
                    "src/kschltz/agent/tools/web/mojeek.clj"
-                   "src/kschltz/agent/tools/web/ddg.clj"}]
+                   "src/kschltz/agent/tools/web/ddg.clj"
+                   "src/kschltz/agent/store/duckdb.clj"}]
     ;; Recreate class-dir with filtered source tree.
     (.mkdirs (java.io.File. class-dir))
     (doseq [src-dir ["resources" "src"]

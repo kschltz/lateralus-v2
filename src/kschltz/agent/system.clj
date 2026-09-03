@@ -67,7 +67,11 @@
             [kschltz.agent.memory.http-embedding :as http-embedding]
             [kschltz.agent.memory.noop-backend :as noop-memory]
             [kschltz.agent.memory.kg-bm25 :as kg-bm25-memory]
-            [kschltz.agent.memory.protocol :as memory-protocol]))
+            [kschltz.agent.memory.protocol :as memory-protocol]
+            [kschltz.agent.store.file-index :as file-index]
+            [kschltz.agent.store.memory :as store.memory]
+            [kschltz.agent.store.protocol :as store]
+            [kschltz.agent.store.schemas :as store.schemas]))
 
 ;; Load optional JVM-only implementations when present on the classpath.
 ;; The native-image build excludes these source files, so the require is
@@ -77,6 +81,7 @@
   (require 'kschltz.agent.memory.langchain4j-embedding)
   (require 'kschltz.agent.memory.proximum-backend)
   (require 'kschltz.agent.tools.web.mojeek)
+  (require 'kschltz.agent.store.duckdb)
   (catch Throwable _))
 
 ;; ---- Component definitions ----
@@ -228,7 +233,8 @@
    [:refuse-clojure? {:optional true} :boolean]
    [:blocked-paths {:optional true} [:set :string]]
    [:clojure-guard? {:optional true} :boolean]
-   [:allow-read-outside-workspace? {:optional true} :boolean]])
+   [:allow-read-outside-workspace? {:optional true} :boolean]
+   [:file-index {:optional true} :any]])
 
 (def ^:private ConfigToolsConfig
   [:map
@@ -251,6 +257,17 @@
 
 (defmethod ig/assert-key :lateralus/memory-backend [_ config]
   (assert-malli! :lateralus/memory-backend MemoryBackendConfig config))
+
+(def ^:private FileIndexIgConfig
+  [:map
+   [:store any?]
+   [:max-content-bytes {:optional true} :int]])
+
+(defmethod ig/assert-key :lateralus/store [_ config]
+  (assert-malli! :lateralus/store store.schemas/StoreConfig (or config {})))
+
+(defmethod ig/assert-key :lateralus/file-index [_ config]
+  (assert-malli! :lateralus/file-index FileIndexIgConfig config))
 
 (def ^:private SecretStoreConfig
   "Malli schema for :lateralus/secret-store."
@@ -493,6 +510,27 @@
   [registry rebuild]
   (with-meta registry
     (assoc (meta registry) :registry/rebuild rebuild)))
+
+(defmethod ig/init-key :lateralus/store [_ {:keys [impl] :as opts}]
+  "Optional structured store. `:memory` is the test/air-gapped default;
+   `:duckdb` is JVM-only and requires duckdb_jdbc on the classpath."
+  (case (keyword (or impl :memory))
+    :memory (store.memory/memory-store opts)
+    :duckdb (if-let [ctor (try (requiring-resolve 'kschltz.agent.store.duckdb/duckdb-store)
+                               (catch Throwable _ nil))]
+              (ctor opts)
+              (throw (ex-info
+                      "DuckDB store requested but kschltz.agent.store.duckdb is not on the classpath"
+                      {:opts opts})))
+    (throw (ex-info "Unknown :lateralus/store :impl" {:impl impl}))))
+
+(defmethod ig/halt-key! :lateralus/store [_ engine]
+  (when (store/store-engine? engine)
+    (store/-close engine)))
+
+(defmethod ig/init-key :lateralus/file-index [_ {:keys [store max-content-bytes]}]
+  "FileIndex façade over a StoreEngine. Does not own the store connection."
+  (file-index/file-index store {:max-content-bytes max-content-bytes}))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool

@@ -344,3 +344,21 @@
                     :runtime-tools (ig/ref :lateralus/runtime-tools)
                     :capabilities {"secret_check" {:labels :all}}}})]
       (is (true? (:ok result)) (pr-str result)))))
+
+(deftest file-index-store-inits-and-halts
+  (testing "opt-in memory store + file-index wires file_reindex into the registry"
+    (let [s (with-system
+              (assoc system/default-config
+                     :lateralus/store {:impl :memory}
+                     :lateralus/file-index {:store (ig/ref :lateralus/store)}
+                     :lateralus/file-tools {:workspace-root "."
+                                            :file-index (ig/ref :lateralus/file-index)}))]
+      (is (some? (:lateralus/store s)))
+      (is (some? (:lateralus/file-index s)))
+      (is (contains? (:lateralus/file-tools s) "file_reindex"))
+      (is (contains? (:lateralus/file-tools s) "file_edits")))))
+
+(deftest invalid-store-config-fails-fast
+  (let [data (init-throws? {:lateralus/store {:impl :postgres}})]
+    (is (= :lateralus/store (:key data)))
+    (is (seq (:problems data)))))

@@ -1,0 +1,49 @@
+# Workspace file index
+
+Opt-in advisory index of workspace files and an append-only edit log.
+The filesystem remains the source of truth. A stale SHA-256 still fails
+`file_patch`. Index failures never fail a successful file mutation.
+
+This is Option D from [`duckdb-core-engine.md`](./duckdb-core-engine.md).
+The interceptor chain is unchanged.
+
+## Components
+
+| Integrant key | Role |
+|---|---|
+| `:lateralus/store` | `StoreEngine` — `:memory` (tests / air-gap) or `:duckdb` (JVM) |
+| `:lateralus/file-index` | `FileIndex` façade over the store |
+| `:lateralus/file-tools` | Pass `:file-index #ig/ref :lateralus/file-index` to hook tools |
+
+Tables:
+
+- `file_index` — path, sha256, size, mtime, extracted text (capped), indexed_at
+- `file_edits` — path, tool, before/after SHA-256, optional line range, ts
+
+DuckDB never auto-`INSTALL`s extensions. Search is regex over stored
+content (same family as `file_search`), not the `fts` extension.
+
+## Tools
+
+When a FileIndex is wired, the filesystem registry also exposes:
+
+- `file_reindex` — walk a path (containment + blocked-path + size caps) and upsert
+- `file_edits` — list recent edit rows
+
+`file_search` uses the index when that tree has at least one indexed
+file; otherwise it still walks the disk. `file_write`, `file_update`,
+`file_create`, and `file_patch` record a mutation after a verified commit.
+
+## Config
+
+See `resources/lateralus/demo-file-index.edn`. Durable file:
+
+```clojure
+{:lateralus/store {:impl :duckdb :path "sessions/lateralus.duckdb"}
+ :lateralus/file-index {:store #ig/ref :lateralus/store}
+ :lateralus/file-tools {:workspace-root "."
+                        :file-index #ig/ref :lateralus/file-index}}
+```
+
+Native-image stays on the walk-only file tools. `store/duckdb.clj` is
+excluded from the filtered native classpath, same as Proximum.
