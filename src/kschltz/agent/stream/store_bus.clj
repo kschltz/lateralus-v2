@@ -26,7 +26,7 @@
   [s]
   (if (and (string? s) (pos? (count s)))
     (try (let [v (json/parse-string s true)]
-           (if (vector? v) v []))
+           (if (sequential? v) (vec v) []))
          (catch Throwable _ []))
     []))
 

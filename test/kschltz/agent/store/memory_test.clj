@@ -34,4 +34,4 @@
       (is (= ["s1"]
              (mapv :id (proto/-select e :sessions {:where {:current true}}))))
       (proto/-insert! e :events {:turn-id "t1" :seq 0 :type "text"})
-      (is (= 1 (count (proto/-select e :events {:where {:turn-id "t1"}}))))))))
+      (is (= 1 (count (proto/-select e :events {:where {:turn-id "t1"}})))))))

@@ -19,9 +19,6 @@
 
 (defn- now-ms [] (System/currentTimeMillis))
 
-(defn- truthy? [v]
-  (contains? #{true 1} v))
-
 (defn- read-edn
   [s]
   (when (and (string? s) (pos? (count s)))

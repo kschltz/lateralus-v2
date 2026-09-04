@@ -44,7 +44,7 @@
     (store/-insert! engine :events {:turn-id "t1" :seq 0 :type "text" :payload "{}"})
     (is (true? (proto/-delete! s "alpha")))
     (is (empty? (store/-select engine :turns {:where {:session-id "alpha"}})))
-    (is (empty? (store/-select engine :events {:where {:turn-id "t1"}}))))
+    (is (empty? (store/-select engine :events {:where {:turn-id "t1"}})))))
 
 (deftest rejects-bad-id
   (let [s (make-store)]
