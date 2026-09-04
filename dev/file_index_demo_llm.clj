@@ -33,6 +33,14 @@
    :choices [{:message {:role "assistant" :content text}
               :finish_reason "stop"}]})
 
+(defn sse-body
+  "Workbench HTTP client POSTs stream:true and parses SSE chunks.
+   One data: line with the full message is enough — consume-sse also
+   reads :message, not only :delta."
+  [payload]
+  (str "data: " (json/generate-string payload) "\n\n"
+       "data: [DONE]\n\n"))
+
 (defn- tool-names
   [messages]
   (->> messages
@@ -117,12 +125,17 @@
       (and (= :post (:request-method req))
            (or (str/ends-with? uri "/chat/completions")
                (= uri "/v1/chat/completions")))
-      (let [body (json/parse-string (slurp (:body req)) true)]
-        {:status 200
-         :headers {"Content-Type" "application/json"}
-         :body (json/generate-string
-                (next-reply (or (:model body) "file-index-demo")
-                            (or (:messages body) [])))})
+      (let [body (json/parse-string (slurp (:body req)) true)
+            payload (next-reply (or (:model body) "file-index-demo")
+                                (or (:messages body) []))]
+        (if (:stream body)
+          {:status 200
+           :headers {"Content-Type" "text/event-stream; charset=utf-8"
+                     "Cache-Control" "no-cache"}
+           :body (sse-body payload)}
+          {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body (json/generate-string payload)}))
 
       :else
       {:status 404

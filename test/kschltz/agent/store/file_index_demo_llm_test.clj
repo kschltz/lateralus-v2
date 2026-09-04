@@ -1,5 +1,6 @@
 (ns kschltz.agent.store.file-index-demo-llm-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [file-index-demo-llm :as demo]))
 
 (deftest next-reply-walks-file-index-tools
@@ -14,3 +15,10 @@
         n1 (get-in t1 [:tool_calls 0 :function :name])]
     (is (= "file_reindex" n0))
     (is (= "file_write" n1))))
+
+(deftest sse-body-includes-done
+  (let [s (demo/sse-body {:model "file-index-demo"
+                          :choices [{:message {:role "assistant" :content "hi"}
+                                     :finish_reason "stop"}]})]
+    (is (str/includes? s "data: "))
+    (is (str/includes? s "data: [DONE]"))))
