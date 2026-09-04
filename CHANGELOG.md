@@ -5,6 +5,21 @@ All notable changes to `lateralus-v2`.
 ## [Unreleased]
 
 ### Added
+- **Workspace file index (Option D)**: opt-in `:lateralus/store` (`StoreEngine`,
+  memory or DuckDB JDBC) and `:lateralus/file-index`. File mutations record
+  SHA-256 witnesses into `file_index` / `file_edits`; `file_search` uses the
+  index when that tree has coverage; `file_reindex` and `file_edits` tools
+  appear only when the index is wired. Filesystem remains source of truth.
+  Native-image excludes `store/duckdb.clj`. Workbench profile:
+  `resources/lateralus/demo-file-index-workbench.edn`. See `docs/file-index.md`.
+- **Session + historic stream store (Option C)**: opt-in
+  `:lateralus/session-store {:store …}` and
+  `:lateralus/stream-bus {:impl :store :store …}` on the same `StoreEngine`.
+  Catalog rows and closed-turn checkpoints live in `sessions` / `turns` /
+  `events`. Default `SessionStore` is still `sessions/workbench/catalog.edn`;
+  live SSE stays in-memory. Workbench accepts `:session-store`. MemoryBackend
+  and `store_query` stay deferred.
+
 - **Interceptor-native runtime control plane**: redacted `runtime_describe`;
   closed transitions for LLM, system-message, loop, tool, memory, and MCP
   policy; plus deferred `reload_runtime` with Integrant plugin/tool-registry

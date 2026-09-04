@@ -27,6 +27,7 @@
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [kschltz.agent.store.file-index :as file-index]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-safety :as fs])
@@ -243,7 +244,16 @@
 ;; Deftypes
 ;; ---------------------------------------------------------------------------
 
-(deftype WriteFileTool [workspace-root max-write-bytes refuse-clojure? blocked-paths clojure-guard?]
+(defn- note-mutation!
+  [idx {:keys [path tool sha256-before sha256-after content]}]
+  (when idx
+    (file-index/record-mutation! idx {:path path
+                                      :tool tool
+                                      :sha256-before sha256-before
+                                      :sha256-after sha256-after
+                                      :content content})))
+
+(deftype WriteFileTool [workspace-root max-write-bytes refuse-clojure? blocked-paths clojure-guard? file-index]
   tool/Tool
  (-name [_] "file_write")
   (-description [_]
@@ -297,16 +307,26 @@
                                           (String. ^bytes written StandardCharsets/UTF_8))]
                         (if (not= written-str content)
                           (json/generate-string {:error :write-verify-failed})
-                          (json/generate-string
-                           {:path          (fpath/path->str path)
-                            :bytes-written (count (.getBytes content "UTF-8"))
-                            :backup-path   backup
-                            :created       (not existed)
-                            :changed       true}))))))))))))
+                          (let [digest (when written (fs/sha256 written))
+                                prior  (when cur (fs/sha256 cur))]
+                            (note-mutation! file-index
+                                            {:path (fpath/path->str path)
+                                             :tool "file_write"
+                                             :sha256-before prior
+                                             :sha256-after digest
+                                             :content content})
+                            (json/generate-string
+                             {:path          (fpath/path->str path)
+                              :bytes-written (count (.getBytes content "UTF-8"))
+                              :backup-path   backup
+                              :created       (not existed)
+                              :changed       true
+                              :sha256        digest
+                              :previous-sha256 prior})))))))))))))
       (catch Throwable t
         (error-result t)))))
 
-(deftype UpdateFileTool [workspace-root max-write-bytes refuse-clojure? blocked-paths clojure-guard?]
+(deftype UpdateFileTool [workspace-root max-write-bytes refuse-clojure? blocked-paths clojure-guard? file-index]
   tool/Tool
  (-name [_] "file_update")
   (-description [_]
@@ -374,13 +394,22 @@
                                                                      StandardCharsets/UTF_8))]
                                           (if (not= written-str result-eol)
                                             (json/generate-string {:error :write-verify-failed})
-                                            (json/generate-string
-                                             {:path          (fpath/path->str path)
-                                              :bytes-written (count (.getBytes result-eol "UTF-8"))
-                                              :backup-path   backup
-                                              :edits-applied (count (:spans edit-out))
-                                              :fuzzy-fired   (:fuzzy-fired? edit-out)
-                                              :changed       true}))))))))))))))))))))
+                                            (let [digest (when written (fs/sha256 written))]
+                                              (note-mutation! file-index
+                                                              {:path (fpath/path->str path)
+                                                               :tool "file_update"
+                                                               :sha256-before (:sha256 sentinel)
+                                                               :sha256-after digest
+                                                               :content result-eol})
+                                              (json/generate-string
+                                               {:path          (fpath/path->str path)
+                                                :bytes-written (count (.getBytes result-eol "UTF-8"))
+                                                :backup-path   backup
+                                                :edits-applied (count (:spans edit-out))
+                                                :fuzzy-fired   (:fuzzy-fired? edit-out)
+                                                :changed       true
+                                                :sha256        digest
+                                                :previous-sha256 (:sha256 sentinel)})))))))))))))))))))))
       (catch Throwable t
         (error-result t)))))
 
@@ -395,15 +424,17 @@
   [[fs/default-max-write-bytes]]), `:refuse-clojure?` (default true),
   `:blocked-paths` (default [[fs/default-blocked-paths]]), and
   `:clojure-guard?` (default false, enables rewrite-clj round-trip
-  validation of written Clojure/EDN source)."
+  validation of written Clojure/EDN source), and optional `:file-index`
+  (advisory `FileIndex` written after a verified commit)."
   ([] (write-file nil {}))
   ([workspace-root] (write-file workspace-root {}))
-  ([workspace-root {:keys [max-write-bytes refuse-clojure? blocked-paths clojure-guard?]}]
+  ([workspace-root {:keys [max-write-bytes refuse-clojure? blocked-paths clojure-guard? file-index]}]
    (->WriteFileTool workspace-root
                     (or max-write-bytes fs/default-max-write-bytes)
                     (if (some? refuse-clojure?) refuse-clojure? true)
                     (or blocked-paths fs/default-blocked-paths)
-                    (boolean clojure-guard?))))
+                    (boolean clojure-guard?)
+                    file-index)))
 
 (defn update-file
  "Return a new `file_update` Tool instance.
@@ -411,9 +442,10 @@
   `opts` accepts the same keys as [[write-file]]."
   ([] (update-file nil {}))
   ([workspace-root] (update-file workspace-root {}))
-  ([workspace-root {:keys [max-write-bytes refuse-clojure? blocked-paths clojure-guard?]}]
+  ([workspace-root {:keys [max-write-bytes refuse-clojure? blocked-paths clojure-guard? file-index]}]
    (->UpdateFileTool workspace-root
                      (or max-write-bytes fs/default-max-write-bytes)
                      (if (some? refuse-clojure?) refuse-clojure? true)
                      (or blocked-paths fs/default-blocked-paths)
-                     (boolean clojure-guard?))))
+                     (boolean clojure-guard?)
+                     file-index)))

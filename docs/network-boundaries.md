@@ -15,8 +15,9 @@ schemas with always-on namespace instrumentation.
 | Runtime dependency resolution | `ClojureRuntime` | `tools.runtime.jvm` |
 
 The CLI model picker and profile wizard use `ModelCatalog`; they do not call
-the HTTP model-list functions directly. Local file I/O and the optional local
-`clj-kondo` subprocess are not network boundaries.
+the HTTP model-list functions directly. Local file I/O, the optional local
+`clj-kondo` subprocess, and the opt-in `StoreEngine` (memory / DuckDB JDBC)
+are not network boundaries. DuckDB never auto-installs extensions.
 
 When a secret store is active, runtime-authored tools run in SCI and cannot
 open sockets, use Java interop, load dependencies, or receive the host

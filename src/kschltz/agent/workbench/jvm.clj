@@ -4,6 +4,7 @@
    Requires the optional `:workbench` (or `:portal`) deps alias."
   (:require [kschltz.agent.runtime :as runtime]
             [kschltz.agent.session.manager :as sessions]
+            [kschltz.agent.session.protocol :as session.proto]
             [kschltz.agent.session.store :as session.store]
             [kschltz.agent.workbench.hub :as hub]
             [kschltz.agent.workbench.http :as http]
@@ -142,8 +143,10 @@
    Portal is on the classpath, opens Portal for the iframe pane."
   [opts]
   (let [opts        (schemas/decode-config (or opts {}))
-        sess-store  (session.store/create-store
-                     (or (:sessions-dir opts) "sessions/workbench"))
+        sess-store  (if (session.proto/session-store? (:session-store opts))
+                      (:session-store opts)
+                      (session.store/create-store
+                       (or (:sessions-dir opts) "sessions/workbench")))
         session-id  (or (:session-id opts) (str (random-uuid)))
         _           (sessions/ensure! sess-store {:id session-id :title session-id})
         runtime-atom (atom nil)

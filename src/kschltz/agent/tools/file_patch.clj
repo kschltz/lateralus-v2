@@ -1,6 +1,7 @@
 (ns kschltz.agent.tools.file-patch
   "Hash-anchored line-range patches for deterministic agent file editing."
   (:require [cheshire.core :as json]
+            [kschltz.agent.store.file-index :as file-index]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.file-path :as fpath]
             [kschltz.agent.tools.file-safety :as fs])
@@ -146,7 +147,7 @@
 
 (defn- apply-patch!
   [workspace-root blocked-paths max-write-bytes clojure-guard?
-   path expected-sha256 patches]
+   path expected-sha256 patches file-index]
   (let [target (resolve-target workspace-root path blocked-paths)
         target-str (fpath/path->str target)]
     (fs/with-path-lock target-str
@@ -191,14 +192,25 @@
               (when-not (java.util.Arrays/equals ^bytes result-bytes ^bytes written)
                 (throw (ex-info "Patch write verification failed"
                                 {:error :write-verify-failed})))
-              {:path target-str
-               :changed true
-               :patches-applied (count spans)
-               :backup-path backup
-               :previous-sha256 before-sha
-               :sha256 (fs/sha256 written)})))))))
+              (let [digest (fs/sha256 written)
+                    payload {:path target-str
+                             :changed true
+                             :patches-applied (count spans)
+                             :backup-path backup
+                             :previous-sha256 before-sha
+                             :sha256 digest}]
+                (when file-index
+                  (file-index/record-mutation! file-index
+                                               {:path target-str
+                                                :tool "file_patch"
+                                                :sha256-before before-sha
+                                                :sha256-after digest
+                                                :content result
+                                                :start-line (:start-line (first spans))
+                                                :end-line (:end-line (last spans))}))
+                payload))))))))
 
-(deftype FilePatchTool [workspace-root blocked-paths max-write-bytes clojure-guard?]
+(deftype FilePatchTool [workspace-root blocked-paths max-write-bytes clojure-guard? file-index]
   tool/Tool
   (-name [_] "file_patch")
   (-description [_]
@@ -211,7 +223,8 @@
        (apply-patch! workspace-root blocked-paths max-write-bytes clojure-guard?
                      (:path args)
                      (:expected-sha256 args)
-                     (:patches args)))
+                     (:patches args)
+                     file-index))
       (catch Throwable t
         (error-result t)))))
 
@@ -220,10 +233,11 @@
    (file-patch nil {}))
   ([workspace-root]
    (file-patch workspace-root {}))
-  ([workspace-root {:keys [blocked-paths max-write-bytes clojure-guard?]}]
+  ([workspace-root {:keys [blocked-paths max-write-bytes clojure-guard? file-index]}]
    (->FilePatchTool workspace-root
                     (or blocked-paths fs/default-blocked-paths)
                     (or max-write-bytes fs/default-max-write-bytes)
                     (if (some? clojure-guard?)
                       clojure-guard?
-                      true))))
+                      true)
+                    file-index)))

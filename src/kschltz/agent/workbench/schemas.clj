@@ -51,6 +51,7 @@
    [:stream-bus {:optional true} :any]
    [:session-id {:optional true} :string]
    [:sessions-dir {:optional true} :string]
+   [:session-store {:optional true} :any]
    [:secret-store {:optional true} some?]])
 
 (def PortalSubmitKind
