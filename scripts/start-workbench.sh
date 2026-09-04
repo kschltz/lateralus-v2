@@ -2,12 +2,39 @@
 # Start lateralus workbench (Docker): interactive profile gate, then CHAT | Portal.
 # Default: talk to host Ollama (Desktop / `ollama serve`) over the network —
 # no model-store mount, no copy. Compose Ollama is only a fallback.
+#
+# Store choice:
+#   ./scripts/start-workbench --store duckdb   # sessions/stream/file-index in one DuckDB file
+#   ./scripts/start-workbench --store memory   # built-in defaults (default when omitted)
+#   LATERALUS_STORE=duckdb ./scripts/start-workbench
+#   LATERALUS_STORE_PATH=/data/config/my.duckdb ./scripts/start-workbench --store duckdb
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 MODEL="${LATERALUS_MODEL:-llama3.2}"
+
+# --store memory|duckdb (flag wins over pre-set LATERALUS_STORE env).
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --store)
+      [[ $# -ge 2 ]] || { echo "error: --store requires a value (memory | duckdb)" >&2; exit 1; }
+      case "$2" in
+        memory|duckdb) LATERALUS_STORE="$2"; shift 2 ;;
+        *) echo "error: unknown --store '$2' (expected memory | duckdb)" >&2; exit 1 ;;
+      esac
+      ;;
+    --store=*)
+      case "${1#--store=}" in
+        memory|duckdb) LATERALUS_STORE="${1#--store=}"; shift ;;
+        *) echo "error: unknown --store '${1#--store=}' (expected memory | duckdb)" >&2; exit 1 ;;
+      esac
+      ;;
+    *) echo "error: unknown option '$1' (supported: --store memory|duckdb)" >&2; exit 1 ;;
+  esac
+done
+export LATERALUS_STORE="${LATERALUS_STORE:-}"
 COMPOSE=(docker compose)
 if ! docker compose version >/dev/null 2>&1; then
   if command -v docker-compose >/dev/null 2>&1; then
@@ -118,6 +145,16 @@ USE_HOST_OLLAMA=0
 # --build makes `run` use the image we just built, not a leftover tag.
 RUN_ARGS=(run --rm --service-ports --build)
 
+# Forward the store choice into the container (compose substitution covers
+# exported vars; explicit -e also covers a non-exported LATERALUS_STORE_PATH).
+STORE_ENV_ARGS=()
+if [[ -n "${LATERALUS_STORE:-}" ]]; then
+  STORE_ENV_ARGS+=(-e "LATERALUS_STORE")
+fi
+if [[ -n "${LATERALUS_STORE_PATH:-}" ]]; then
+  STORE_ENV_ARGS+=(-e "LATERALUS_STORE_PATH")
+fi
+
 if [[ "${LATERALUS_FORCE_DOCKER_OLLAMA:-0}" != "1" ]]; then
   # Compose publishes :11434 and blocks Desktop — stop it so we can reference the host.
   if compose_ollama_running; then
@@ -182,6 +219,11 @@ echo ""
 echo "==> starting lateralus (interactive profile gate, then workbench)"
 echo "    Workbench UI: http://localhost:7860"
 echo "    Ollama URL inside container: $LATERALUS_DOCKER_OLLAMA_URL"
+if [[ -n "${LATERALUS_STORE:-}" ]]; then
+  echo "    Store: $LATERALUS_STORE${LATERALUS_STORE_PATH:+ ($LATERALUS_STORE_PATH)}"
+else
+  echo "    Store: memory (defaults) — use --store duckdb for a durable DuckDB store"
+fi
 if [[ "$USE_HOST_OLLAMA" -eq 1 ]]; then
   echo "    Tip: localhost:11434 profiles rewrite to host.docker.internal."
 else
@@ -194,4 +236,5 @@ echo ""
 
 LATERALUS_MODEL="$MODEL" \
   LATERALUS_DOCKER_OLLAMA_URL="$LATERALUS_DOCKER_OLLAMA_URL" \
-  "${COMPOSE[@]}" "${RUN_ARGS[@]}" ${forward_key_envs[@]+"${forward_key_envs[@]}"} lateralus -i
+  "${COMPOSE[@]}" "${RUN_ARGS[@]}" ${STORE_ENV_ARGS[@]+"${STORE_ENV_ARGS[@]}"} \
+  ${forward_key_envs[@]+"${forward_key_envs[@]}"} lateralus -i

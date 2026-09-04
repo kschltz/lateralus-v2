@@ -11,7 +11,18 @@ DuckDB on JVM) holds `file_index`, `file_edits`, `sessions`, `turns`, and
 may hit the index when it has coverage; otherwise it still walks. Live SSE
 stays in-memory (64-turn cap); DuckDB is the checkpoint on `-close-turn!`.
 The default `SessionStore` remains the file catalog
-(`sessions/workbench/catalog.edn`). Secrets, the interceptor chain,
+(`sessions/workbench/catalog.edn`).
+
+Selecting DuckDB for the profile-gate workbench (no `--config`): set
+`LATERALUS_STORE=duckdb` or pass `--store duckdb` to
+`scripts/start-workbench`. The generated profile then wires one DuckDB
+StoreEngine into `:lateralus/session-store`, `:lateralus/stream-bus`, and
+`:lateralus/file-index`; `LATERALUS_STORE_PATH` overrides the file
+(default `/data/config/lateralus.duckdb` in Docker,
+`sessions/lateralus.duckdb` locally). `LATERALUS_STORE=memory` (or unset)
+keeps the built-in defaults. See
+[`resources/lateralus/demo-file-index-workbench.edn`](../resources/lateralus/demo-file-index-workbench.edn)
+for the equivalent explicit `--config` wiring. Secrets, the interceptor chain,
 native-image defaults, and Proximum stay unchanged. MemoryBackend-on-store
 and `store_query` (Option E) stay deferred.
 

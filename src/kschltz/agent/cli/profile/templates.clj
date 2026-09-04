@@ -157,6 +157,37 @@
     workbench? (assoc :logging   (ig/ref :lateralus/logging)
                       :workbench (ig/ref :lateralus/workbench))))
 
+(defn store-overlay
+  "Optional StoreEngine overlay for the workbench, selected by the
+   LATERALUS_STORE env var. Unset / `memory` keeps the built-in defaults
+   (file-backed session catalog, in-memory stream bus, no file index).
+   `duckdb` wires one DuckDB StoreEngine into sessions, stream events,
+   and the file index. LATERALUS_STORE_PATH overrides the DuckDB file
+   path (default: /data/config/lateralus.duckdb in Docker, else
+   sessions/lateralus.duckdb). Requires duckdb_jdbc on the classpath
+   (JVM-only; the :workbench alias and Docker uberjar include it).
+   Arity-1 is for tests: takes the raw LATERALUS_STORE value." 
+  ([] (store-overlay (System/getenv "LATERALUS_STORE")))
+  ([store]
+   (let [store-path (System/getenv "LATERALUS_STORE_PATH")
+         in-docker  (System/getenv "LATERALUS_IN_DOCKER")]
+     (case (some-> store not-empty str/lower-case)
+       nil {}
+       "memory" {}
+       "duckdb"
+       (let [path (or (not-empty store-path)
+                      (if (= "1" in-docker)
+                        "/data/config/lateralus.duckdb"
+                        "sessions/lateralus.duckdb"))]
+         {:lateralus/store         {:impl :duckdb :path path}
+          :lateralus/session-store {:store (ig/ref :lateralus/store)}
+          :lateralus/file-index    {:store (ig/ref :lateralus/store)}
+          :lateralus/file-tools    {:file-index (ig/ref :lateralus/file-index)}
+          :lateralus/stream-bus    {:impl :store :store (ig/ref :lateralus/store)}})
+       (throw (ex-info "Unsupported LATERALUS_STORE value (expected memory | duckdb)"
+                       {:value    store
+                        :supported [:memory :duckdb]}))))))
+
 (defn build
   "Expand profile settings into a full Integrant config map.
    Never includes `:api-key`."
@@ -165,7 +196,9 @@
         (normalize-settings settings)
         wb? (boolean workbench?)
         groups (normalize-tool-groups tool-groups wb?)
-        web-prov (if (:web groups) web-provider :none)]
+        web-prov (if (:web groups) web-provider :none)
+        ;; LATERALUS_STORE=duckdb selects the StoreEngine overlay.
+        overlay (store-overlay)]
     (cond-> (merge
              (llm-keys s)
              {:lateralus/embedder       {:method :noop}
@@ -232,7 +265,12 @@
                        :stream-bus (ig/ref :lateralus/stream-bus)}
                 portal-port (assoc :portal-port portal-port))
               :lateralus/workbench-plugin {:workbench (ig/ref :lateralus/workbench)}
-              :lateralus/workbench-tools  {:workbench (ig/ref :lateralus/workbench)}})))))
+              :lateralus/workbench-tools  {:workbench (ig/ref :lateralus/workbench)}})
+           overlay
+           (if (contains? overlay :lateralus/session-store)
+             {:lateralus/workbench
+              {:session-store (get overlay :lateralus/session-store)}}
+             {})))))
 
 (defn summarize
   "Human-facing summary of profile settings."

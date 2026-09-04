@@ -47,6 +47,11 @@ services:
       LATERALUS_IN_DOCKER: "1"
       LATERALUS_DOCKER_OLLAMA_URL: ${LATERALUS_DOCKER_OLLAMA_URL:-http://ollama:11434/v1}
       LATERALUS_LIST_CLOUD: ${LATERALUS_LIST_CLOUD:-0}
+      # StoreEngine choice: unset/memory = built-in defaults; duckdb = one
+      # DuckDB file for sessions + stream events + file index (see
+      # LATERALUS_STORE_PATH for the file location, default /data/config/lateralus.duckdb).
+      LATERALUS_STORE: ${LATERALUS_STORE:-}
+      LATERALUS_STORE_PATH: ${LATERALUS_STORE_PATH:-}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       LATERALUS_API_KEY: ${LATERALUS_API_KEY:-}
       LATERALUS_CONFIG_HOME: /data/config

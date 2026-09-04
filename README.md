@@ -332,6 +332,7 @@ See [`docker/README.md`](docker/README.md). Summary:
 | Config volume | `lateralus-config` → `/data/config` |
 | Local LLM | compose `ollama` service |
 | Cloud | `OLLAMA_API_KEY=…` and pick **ollama-cloud** in the profile gate (do not force `LATERALUS_BASE_URL` to the local Ollama service) |
+| Store | `--store memory\|duckdb` (or `LATERALUS_STORE`); `duckdb` puts sessions, stream checkpoints, and the file index in one DuckDB file (`LATERALUS_STORE_PATH`, default `/data/config/lateralus.duckdb`) |
 
 The uberjar build includes the `:workbench` alias (portal + http-kit).
 
