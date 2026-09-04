@@ -10,7 +10,8 @@ All notable changes to `lateralus-v2`.
   SHA-256 witnesses into `file_index` / `file_edits`; `file_search` uses the
   index when that tree has coverage; `file_reindex` and `file_edits` tools
   appear only when the index is wired. Filesystem remains source of truth.
-  Native-image excludes `store/duckdb.clj`. See `docs/file-index.md`.
+  Native-image excludes `store/duckdb.clj`. Workbench profile:
+  `resources/lateralus/demo-file-index-workbench.edn`. See `docs/file-index.md`.
 
 - **Interceptor-native runtime control plane**: redacted `runtime_describe`;
   closed transitions for LLM, system-message, loop, tool, memory, and MCP

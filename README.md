@@ -471,6 +471,7 @@ Notes:
 | [`resources/lateralus/config.edn`](resources/lateralus/config.edn) | JVM runtime default config (Proximum + LangChain4j + file-tools) |
 | [`resources/lateralus/native.edn`](resources/lateralus/native.edn) | Native-image config (KG-BM25 + noop embedder + file-tools) |
 | [`resources/lateralus/demo-workbench.edn`](resources/lateralus/demo-workbench.edn) | Ollama + CHAT \| Portal workbench profile (with commented secrets opt-in) |
+| [`resources/lateralus/demo-file-index-workbench.edn`](resources/lateralus/demo-file-index-workbench.edn) | Offline CHAT \| Portal + DuckDB file index (pair with `file-index-demo-llm`) |
 | [`resources/lateralus/`](resources/lateralus/) | Other runnable profiles (Ollama local/cloud, MCP, native, stub) |
 | [`AGENT_INSTRUCTIONS.md`](AGENT_INSTRUCTIONS.md) | Short contributor guide |
 

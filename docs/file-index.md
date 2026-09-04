@@ -36,7 +36,16 @@ file; otherwise it still walks the disk. `file_write`, `file_update`,
 
 ## Config
 
-See `resources/lateralus/demo-file-index.edn`. Durable file:
+CLI (stub LLM): `resources/lateralus/demo-file-index.edn`.
+
+Workbench (CHAT | Portal): start the demo LLM, then the workbench profile.
+
+```bash
+clojure -M:dev -m file-index-demo-llm 18765
+clojure -M:workbench:run -i --config resources/lateralus/demo-file-index-workbench.edn
+```
+
+The workbench workspace is `/tmp/lat-wb-index`. Durable file:
 
 ```clojure
 {:lateralus/store {:impl :duckdb :path "sessions/lateralus.duckdb"}

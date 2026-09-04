@@ -1,0 +1,74 @@
+;; Option D file index inside the CHAT | Portal workbench.
+;; Offline: start the demo LLM, then this profile.
+;;
+;;   clojure -M:dev -m file-index-demo-llm 18765
+;;   clojure -M:workbench:run -i --config resources/lateralus/demo-file-index-workbench.edn
+;;
+;; Workspace is /tmp/lat-wb-index (seed a file there before chatting).
+;; Swap :lateralus/store :path for a durable DuckDB file.
+{:lateralus/llm-client     {:impl :http
+                            :base-url "http://127.0.0.1:18765/v1"}
+ :lateralus/llm-config     {:base-url "http://127.0.0.1:18765/v1"
+                            :model "file-index-demo"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :noop}
+ :lateralus/store          {:impl :duckdb}
+ :lateralus/file-index     {:store #ig/ref :lateralus/store}
+ :lateralus/file-tools     {:workspace-root "/tmp/lat-wb-index"
+                            :file-index #ig/ref :lateralus/file-index}
+ :lateralus/self-awareness-tools {}
+ :lateralus/clojure-tools        {}
+ :lateralus/config-tools         {:catalog :stub}
+ :lateralus/web-tools            {:provider :none}
+ :lateralus/runtime-tools        {:enabled? true :network? false}
+ :lateralus/logging              {}
+ :lateralus/cli-ui               {:enabled? :auto :theme :default}
+ :lateralus/thinking             {:mode :preview}
+ :lateralus/loop-opts            {:max-tool-calls-per-turn 20
+                                  :max-tool-calls-per-exchange 20}
+ :lateralus/workbench            {:enabled? true
+                                  :stream-bus #ig/ref :lateralus/stream-bus
+                                  :host "127.0.0.1"
+                                  :port 7860
+                                  :portal? true
+                                  :open-browser? false
+                                  :app false
+                                  :window-title "lateralus file-index"}
+ :lateralus/workbench-plugin     {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/workbench-tools      {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/mcp-tools            {:servers {} :dynamic {:enabled? true}}
+ :lateralus/mcp-session-tools    {:session #ig/ref :lateralus/mcp-tools}
+ :lateralus/factory-session      {:workspace-root "/tmp/lat-wb-index"
+                                  :dynamic {:enabled? true}}
+ :lateralus/factory-tools        {:session #ig/ref :lateralus/factory-session}
+ :lateralus/factory-plugin       {:session #ig/ref :lateralus/factory-session}
+ :lateralus/workflow-tools       {}
+ :lateralus/stream-bus           {}
+ :lateralus/stream-plugin        {:bus #ig/ref :lateralus/stream-bus}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/config-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/workbench-tools
+                                  #ig/ref :lateralus/mcp-session-tools
+                                  #ig/ref :lateralus/factory-tools
+                                  #ig/ref :lateralus/workflow-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry
+                                  :mcp-session #ig/ref :lateralus/mcp-tools
+                                  :factory-session #ig/ref :lateralus/factory-session}
+ :lateralus/plugins              [#ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/factory-plugin
+                                  #ig/ref :lateralus/workbench-plugin
+                                  #ig/ref :lateralus/stream-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :logging        #ig/ref :lateralus/logging
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :workbench      #ig/ref :lateralus/workbench
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}
