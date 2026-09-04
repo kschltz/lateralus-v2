@@ -1,9 +1,12 @@
 (ns file-index-demo-llm
-  "OpenAI-compatible demo LLM that drives Option D file-index tools.
+  "OpenAI-compatible demo LLM for the workbench store profile.
 
-   Used by `resources/lateralus/demo-file-index-workbench.edn` so the
-   workbench can show real `file_reindex` / `file_write` / `file_search`
-   / `file_edits` / `portal_submit` results without a live provider.
+   File-index path: `file_reindex` / `file_write` / `file_search` /
+   `file_edits` / `portal_submit`.
+
+   Session-tool path (user text matches add_two / session tool /
+   tool_define): `tool_define` / `tool_test` / `add_two` /
+   `tool_list_runtime` / `portal_submit`.
 
    Start:
 
@@ -71,40 +74,126 @@
   (or (:cite (parse-json (:content (last-tool messages))))
       "@portal/file-index"))
 
+(defn- last-user-text
+  [messages]
+  (->> messages
+       (filter #(= "user" (:role %)))
+       last
+       :content
+       str))
+
+(defn factory-prompt?
+  "True when the latest user turn asks to author a session tool."
+  [text]
+  (boolean (re-find #"(?i)add_two|session tool|tool_define|define an"
+                    (str text))))
+
+(defn- add-two-spec
+  []
+  {:name "add_two"
+   :description "Add two integers"
+   :input-schema "[:map [:a :int] [:b :int]]"
+   :invoke "(fn [args _ctx] (str (+ (:a args) (:b args))))"})
+
+(defn- tool-json
+  [messages name]
+  (->> messages
+       (filter #(and (= "tool" (:role %)) (= name (:name %))))
+       last
+       :content
+       parse-json))
+
+(defn- factory-table
+  [messages]
+  (let [defined (tool-json messages "tool_define")
+        tested (tool-json messages "tool_test")
+        listed (tool-json messages "tool_list_runtime")
+        added (last (filter #(and (= "tool" (:role %)) (= "add_two" (:name %)))
+                            messages))]
+    [{:step "tool_define"
+      :ok (:ok defined)
+      :tool (or (:tool-name defined) "add_two")}
+     {:step "tool_test"
+      :ok (:ok tested)
+      :actual (:actual tested)}
+     {:step "add_two"
+      :result (or (:content added) "")}
+     {:step "tool_list_runtime"
+      :ephemeral (or (:ephemeral listed)
+                     (get-in listed [:status :ephemeral])
+                     [])}]))
+
+(defn- factory-reply
+  [model seen messages]
+  (cond
+    (not (contains? seen "tool_define"))
+    (assistant-tools model [(tool-call "tool_define" (add-two-spec))])
+
+    (not (contains? seen "tool_test"))
+    (assistant-tools model [(tool-call "tool_test"
+                                       {:name "add_two"
+                                        :arguments {:a 1 :b 2}
+                                        :expected-output "3"})])
+
+    (not (contains? seen "add_two"))
+    (assistant-tools model [(tool-call "add_two" {:a 10 :b 7})])
+
+    (not (contains? seen "tool_list_runtime"))
+    (assistant-tools model [(tool-call "tool_list_runtime" {})])
+
+    (not (contains? seen "portal_submit"))
+    (assistant-tools model [(tool-call "portal_submit"
+                                       {:label "session tool add_two"
+                                        :kind "table"
+                                        :value (factory-table messages)})])
+
+    :else
+    (assistant-text
+     model
+     (str "Session tool add_two is live on this workbench session. "
+          "I defined it, tested 1+2=3, called it with 10+7, and listed "
+          "runtime tools. Table: " (cite-from messages)))))
+
+(defn- file-index-reply
+  [model seen messages]
+  (cond
+    (not (contains? seen "file_reindex"))
+    (assistant-tools model [(tool-call "file_reindex" {:path "."})])
+
+    (not (contains? seen "file_write"))
+    (assistant-tools model [(tool-call "file_write"
+                                       {:path "note.txt"
+                                        :content "from workbench write\n"
+                                        :create-dirs true})])
+
+    (not (contains? seen "file_search"))
+    (assistant-tools model [(tool-call "file_search"
+                                       {:path "."
+                                        :pattern "needle"})])
+
+    (not (contains? seen "file_edits"))
+    (assistant-tools model [(tool-call "file_edits" {:limit 10})])
+
+    (not (contains? seen "portal_submit"))
+    (assistant-tools model [(tool-call "portal_submit"
+                                       {:label "file-index edits"
+                                        :kind "table"
+                                        :value (edits-table messages)})])
+
+    :else
+    (assistant-text
+     model
+     (str "File index is live. I reindexed the workspace, wrote note.txt "
+          "with a SHA-256 witness, searched the index for \"needle\", and "
+          "listed file_edits. Table: " (cite-from messages)))))
+
 (defn next-reply
   "Decide the next OpenAI-shaped chat completion from `messages`."
   [model messages]
   (let [seen (set (tool-names messages))]
-    (cond
-      (not (contains? seen "file_reindex"))
-      (assistant-tools model [(tool-call "file_reindex" {:path "."})])
-
-      (not (contains? seen "file_write"))
-      (assistant-tools model [(tool-call "file_write"
-                                         {:path "note.txt"
-                                          :content "from workbench write\n"
-                                          :create-dirs true})])
-
-      (not (contains? seen "file_search"))
-      (assistant-tools model [(tool-call "file_search"
-                                         {:path "."
-                                          :pattern "needle"})])
-
-      (not (contains? seen "file_edits"))
-      (assistant-tools model [(tool-call "file_edits" {:limit 10})])
-
-      (not (contains? seen "portal_submit"))
-      (assistant-tools model [(tool-call "portal_submit"
-                                         {:label "file-index edits"
-                                          :kind "table"
-                                          :value (edits-table messages)})])
-
-      :else
-      (assistant-text
-       model
-       (str "File index is live. I reindexed the workspace, wrote note.txt "
-            "with a SHA-256 witness, searched the index for \"needle\", and "
-            "listed file_edits. Table: " (cite-from messages))))))
+    (if (factory-prompt? (last-user-text messages))
+      (factory-reply model seen messages)
+      (file-index-reply model seen messages))))
 
 (defn- models-body
   []

@@ -12,7 +12,7 @@
                             :model "file-index-demo"}
  :lateralus/embedder       {:method :noop}
  :lateralus/memory-backend {:impl :noop}
- :lateralus/store          {:impl :duckdb :path "sessions/lateralus.duckdb"}
+ :lateralus/store          {:impl :duckdb :path "/tmp/lat-wb-session.duckdb"}
  :lateralus/session-store  {:store #ig/ref :lateralus/store}
  :lateralus/file-index     {:store #ig/ref :lateralus/store}
  :lateralus/file-tools     {:workspace-root "/tmp/lat-wb-index"
@@ -35,7 +35,7 @@
                                   :portal? true
                                   :open-browser? false
                                   :app false
-                                  :window-title "lateralus file-index"}
+                                  :window-title "lateralus session-store"}
  :lateralus/workbench-plugin     {:workbench #ig/ref :lateralus/workbench}
  :lateralus/workbench-tools      {:workbench #ig/ref :lateralus/workbench}
  :lateralus/mcp-tools            {:servers {} :dynamic {:enabled? true}}
