@@ -4,7 +4,7 @@
             [malli.core :as m]))
 
 (def Table
-  [:enum :file_index :file_edits])
+  [:enum :file_index :file_edits :sessions :turns :events])
 
 (def PkCols
   [:vector {:min 1} :keyword])
@@ -16,7 +16,10 @@
   [:map
    [:path {:optional true} :string]
    [:path-prefix {:optional true} :string]
-   [:id {:optional true} :string]])
+   [:id {:optional true} :string]
+   [:session-id {:optional true} :string]
+   [:turn-id {:optional true} :string]
+   [:current {:optional true} :boolean]])
 
 (def SelectOpts
   [:map

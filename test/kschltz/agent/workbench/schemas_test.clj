@@ -5,6 +5,10 @@
 (deftest decode-config-accepts-empty
   (is (= {} (schemas/decode-config {}))))
 
+(deftest decode-config-accepts-session-store
+  (is (= {:session-store :provided}
+         (schemas/decode-config {:session-store :provided}))))
+
 (deftest decode-message-requires-text
   (is (= {:text "hi" :refs []}
          (schemas/decode-message {:text "hi" :refs []})))

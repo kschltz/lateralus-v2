@@ -17,7 +17,9 @@
             [kschltz.agent.plugins.memory :as plugins.memory]
             [kschltz.agent.plugins.tools :as plugins.tools]
             [kschltz.agent.memory.embedding :as embedding]
-            [kschltz.agent.memory.protocol :as mem]))
+            [kschltz.agent.memory.protocol :as mem]
+            [kschltz.agent.session.protocol :as session]
+            [kschltz.agent.stream.protocol :as stream]))
 
 ;; ---- Fixtures ----
 
@@ -362,3 +364,28 @@
   (let [data (init-throws? {:lateralus/store {:impl :postgres}})]
     (is (= :lateralus/store (:key data)))
     (is (seq (:problems data)))))
+
+(deftest session-store-and-store-stream-bus-inits
+  (testing "opt-in memory store + session-store + historic stream-bus"
+    (let [s (with-system
+              (assoc system/default-config
+                     :lateralus/store {:impl :memory}
+                     :lateralus/session-store {:store (ig/ref :lateralus/store)}
+                     :lateralus/stream-bus {:impl :store
+                                            :store (ig/ref :lateralus/store)}))]
+      (is (session/session-store? (:lateralus/session-store s)))
+      (is (stream/stream-bus? (:lateralus/stream-bus s)))
+      (session/-upsert! (:lateralus/session-store s) {:id "alpha" :title "A"})
+      (is (= "alpha" (session/-current-id (:lateralus/session-store s)))))))
+
+(deftest session-store-file-fallback-inits
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                           (str "lat-sess-ig-" (random-uuid)))
+              (.mkdirs))
+        s (ig/init {:lateralus/session-store {:sessions-dir (str dir)}})]
+    (try
+      (is (session/session-store? (:lateralus/session-store s)))
+      (finally
+        (ig/halt! s)
+        (doseq [^java.io.File f (reverse (file-seq dir))]
+          (.delete f))))))

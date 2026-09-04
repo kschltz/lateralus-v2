@@ -8,7 +8,7 @@ while an exchange is running, then keeps the same snapshot after the turn ends.
 | Piece | Role |
 |---|---|
 | `LlmClient` + `StreamableLlmClient` | HTTP client POSTs `stream: true` and parses SSE (`llm.http` / `llm.http-stream`) |
-| `StreamBus` | In-process live + historic store (`:lateralus/stream-bus`) |
+| `StreamBus` | In-process live + historic store (`:lateralus/stream-bus`). Default is RAM (64-turn cap). `{:impl :store :store …}` checkpoints closed turns onto a `StoreEngine`. |
 | `stream-plugin` | `:guard` opens a turn and wraps the LLM client; `:observe` finalizes |
 | Workbench | Subtle `i` on assistant / in-flight turns → `/turn/<id>` in a new tab |
 

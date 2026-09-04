@@ -25,4 +25,13 @@
              (mapv :id (proto/-select e :file_edits {:order [:ts] :desc true})))))
     (testing "delete"
       (is (= {:rows 1} (proto/-delete! e :file_index {:path "/a.txt"})))
-      (is (empty? (proto/-select e :file_index {:where {:path "/a.txt"}}))))))
+      (is (empty? (proto/-select e :file_index {:where {:path "/a.txt"}}))))
+    (testing "session / turn / current filters"
+      (proto/-upsert! e :sessions [:id]
+                      {:id "s1" :current true :payload "{}"})
+      (proto/-upsert! e :sessions [:id]
+                      {:id "s2" :current false :payload "{}"})
+      (is (= ["s1"]
+             (mapv :id (proto/-select e :sessions {:where {:current true}}))))
+      (proto/-insert! e :events {:turn-id "t1" :seq 0 :type "text"})
+      (is (= 1 (count (proto/-select e :events {:where {:turn-id "t1"}}))))))))

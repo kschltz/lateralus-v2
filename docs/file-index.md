@@ -5,7 +5,8 @@ The filesystem remains the source of truth. A stale SHA-256 still fails
 `file_patch`. Index failures never fail a successful file mutation.
 
 This is Option D from [`duckdb-core-engine.md`](./duckdb-core-engine.md).
-The interceptor chain is unchanged.
+The same store can also hold workbench sessions and historic stream turns
+(Option C). The interceptor chain is unchanged.
 
 ## Components
 
@@ -14,11 +15,15 @@ The interceptor chain is unchanged.
 | `:lateralus/store` | `StoreEngine` — `:memory` (tests / air-gap) or `:duckdb` (JVM) |
 | `:lateralus/file-index` | `FileIndex` façade over the store |
 | `:lateralus/file-tools` | Pass `:file-index #ig/ref :lateralus/file-index` to hook tools |
+| `:lateralus/session-store` | Opt-in `SessionStore` over `sessions` (else `catalog.edn`) |
+| `:lateralus/stream-bus` | `{:impl :store :store …}` checkpoints closed turns |
 
 Tables:
 
 - `file_index` — path, sha256, size, mtime, extracted text (capped), indexed_at
 - `file_edits` — path, tool, before/after SHA-256, optional line range, ts
+- `sessions` — catalog row + EDN workspace payload (`turns` / `refs` / `agent-state`)
+- `turns` / `events` — historic stream snapshots (live SSE stays in RAM)
 
 DuckDB never auto-`INSTALL`s extensions. Search is regex over stored
 content (same family as `file_search`), not the `fts` extension.
@@ -50,8 +55,12 @@ The workbench workspace is `/tmp/lat-wb-index`. Durable file:
 ```clojure
 {:lateralus/store {:impl :duckdb :path "sessions/lateralus.duckdb"}
  :lateralus/file-index {:store #ig/ref :lateralus/store}
+ :lateralus/session-store {:store #ig/ref :lateralus/store}
+ :lateralus/stream-bus {:impl :store :store #ig/ref :lateralus/store}
  :lateralus/file-tools {:workspace-root "."
-                        :file-index #ig/ref :lateralus/file-index}}
+                        :file-index #ig/ref :lateralus/file-index}
+ :lateralus/workbench {:session-store #ig/ref :lateralus/session-store
+                       :stream-bus #ig/ref :lateralus/stream-bus}}
 ```
 
 Native-image stays on the walk-only file tools. `store/duckdb.clj` is

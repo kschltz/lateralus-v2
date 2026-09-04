@@ -12,6 +12,13 @@ All notable changes to `lateralus-v2`.
   appear only when the index is wired. Filesystem remains source of truth.
   Native-image excludes `store/duckdb.clj`. Workbench profile:
   `resources/lateralus/demo-file-index-workbench.edn`. See `docs/file-index.md`.
+- **Session + historic stream store (Option C)**: opt-in
+  `:lateralus/session-store {:store …}` and
+  `:lateralus/stream-bus {:impl :store :store …}` on the same `StoreEngine`.
+  Catalog rows and closed-turn checkpoints live in `sessions` / `turns` /
+  `events`. Default `SessionStore` is still `sessions/workbench/catalog.edn`;
+  live SSE stays in-memory. Workbench accepts `:session-store`. MemoryBackend
+  and `store_query` stay deferred.
 
 - **Interceptor-native runtime control plane**: redacted `runtime_describe`;
   closed transitions for LLM, system-message, loop, tool, memory, and MCP

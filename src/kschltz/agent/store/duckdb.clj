@@ -10,7 +10,10 @@
 
 (def ^:private table-sql
   {:file_index "file_index"
-   :file_edits "file_edits"})
+   :file_edits "file_edits"
+   :sessions   "sessions"
+   :turns      "turns"
+   :events     "events"})
 
 (def ^:private file-index-cols
   [:path :sha256 :size :mtime :content :indexed-at])
@@ -18,12 +21,31 @@
 (def ^:private file-edits-cols
   [:id :path :tool :sha256-before :sha256-after :start-line :end-line :ts])
 
+(def ^:private sessions-cols
+  [:id :title :created-at :updated-at :preview :current :payload])
+
+(def ^:private turns-cols
+  [:id :session-id :status :opened-at :closed-at :user-text :text
+   :thinking :model :usage :error :rev :tool-names])
+
+(def ^:private events-cols
+  [:turn-id :seq :type :payload])
+
 (def ^:private col-sql
   {:indexed-at "indexed_at"
    :sha256-before "sha256_before"
    :sha256-after "sha256_after"
    :start-line "start_line"
-   :end-line "end_line"})
+   :end-line "end_line"
+   :created-at "created_at"
+   :updated-at "updated_at"
+   :current "is_current"
+   :session-id "session_id"
+   :opened-at "opened_at"
+   :closed-at "closed_at"
+   :user-text "user_text"
+   :tool-names "tool_names"
+   :turn-id "turn_id"})
 
 (defn- sql-col
   [k]
@@ -103,15 +125,47 @@
                     "sha256_after VARCHAR, "
                     "start_line INTEGER, "
                     "end_line INTEGER, "
-                    "ts BIGINT)")]]
+                    "ts BIGINT)")
+               (str "CREATE TABLE IF NOT EXISTS sessions ("
+                    "id VARCHAR PRIMARY KEY, "
+                    "title VARCHAR, "
+                    "created_at BIGINT, "
+                    "updated_at BIGINT, "
+                    "preview VARCHAR, "
+                    "is_current BOOLEAN, "
+                    "payload VARCHAR)")
+               (str "CREATE TABLE IF NOT EXISTS turns ("
+                    "id VARCHAR PRIMARY KEY, "
+                    "session_id VARCHAR, "
+                    "status VARCHAR, "
+                    "opened_at BIGINT, "
+                    "closed_at BIGINT, "
+                    "user_text VARCHAR, "
+                    "text VARCHAR, "
+                    "thinking VARCHAR, "
+                    "model VARCHAR, "
+                    "usage VARCHAR, "
+                    "error VARCHAR, "
+                    "rev BIGINT, "
+                    "tool_names VARCHAR)")
+               (str "CREATE TABLE IF NOT EXISTS events ("
+                    "turn_id VARCHAR, "
+                    "seq INTEGER, "
+                    "type VARCHAR, "
+                    "payload VARCHAR, "
+                    "PRIMARY KEY (turn_id, seq))")]]
     (jdbc-execute! {:conn conn :sql sql :params []})))
 
 (defn- where-sql
   [where]
-  (let [{:keys [path path-prefix id]} where
+  (let [{:keys [path path-prefix id session-id turn-id current]} where
         parts (cond-> []
                 path (conj ["path = ?" path])
                 id (conj ["id = ?" id])
+                session-id (conj ["session_id = ?" session-id])
+                turn-id (conj ["turn_id = ?" turn-id])
+                (contains? where :current)
+                (conj ["is_current = ?" (boolean current)])
                 path-prefix (conj ["(path = ? OR path LIKE ?)"
                                    path-prefix
                                    (str path-prefix "/%")]))]
@@ -125,6 +179,9 @@
   (case table
     :file_index file-index-cols
     :file_edits file-edits-cols
+    :sessions sessions-cols
+    :turns turns-cols
+    :events events-cols
     (throw (ex-info "Unknown store table" {:error :unknown-table :table table}))))
 
 (defrecord DuckDbEngine [^Connection conn]

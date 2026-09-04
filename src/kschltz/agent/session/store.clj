@@ -1,5 +1,7 @@
 (ns kschltz.agent.session.store
-  "File-backed SessionStore. Catalog lives at `<root>/catalog.edn`."
+  "File-backed SessionStore. Catalog lives at `<root>/catalog.edn`.
+
+   The opt-in StoreEngine façade is `kschltz.agent.session.store-engine`."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]

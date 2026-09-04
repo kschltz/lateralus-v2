@@ -68,6 +68,8 @@
             [kschltz.agent.memory.noop-backend :as noop-memory]
             [kschltz.agent.memory.kg-bm25 :as kg-bm25-memory]
             [kschltz.agent.memory.protocol :as memory-protocol]
+            [kschltz.agent.session.store :as session.store]
+            [kschltz.agent.session.store-engine :as session.store-engine]
             [kschltz.agent.store.file-index :as file-index]
             [kschltz.agent.store.memory :as store.memory]
             [kschltz.agent.store.protocol :as store]
@@ -268,6 +270,16 @@
 
 (defmethod ig/assert-key :lateralus/file-index [_ config]
   (assert-malli! :lateralus/file-index FileIndexIgConfig config))
+
+(def ^:private SessionStoreIgConfig
+  "Opt-in SessionStore. `:store` selects the StoreEngine façade;
+   otherwise the file catalog under `:sessions-dir` is used."
+  [:map
+   [:store {:optional true} any?]
+   [:sessions-dir {:optional true} :string]])
+
+(defmethod ig/assert-key :lateralus/session-store [_ config]
+  (assert-malli! :lateralus/session-store SessionStoreIgConfig (or config {})))
 
 (def ^:private SecretStoreConfig
   "Malli schema for :lateralus/secret-store."
@@ -530,6 +542,15 @@
 
 (defmethod ig/init-key :lateralus/file-index [_ {:keys [store max-content-bytes]}]
   (file-index/file-index store {:max-content-bytes max-content-bytes}))
+
+(defmethod ig/init-key :lateralus/session-store [_ {:keys [store sessions-dir]}]
+  "Optional SessionStore. When `:store` is a StoreEngine, catalog rows
+   live in that engine (`sessions` table). Otherwise the file-backed
+   catalog under `:sessions-dir` (default `sessions/workbench`) is used.
+   Not in default-config."
+  (if store
+    (session.store-engine/store-session-store store)
+    (session.store/create-store (or sessions-dir "sessions/workbench"))))
 
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool

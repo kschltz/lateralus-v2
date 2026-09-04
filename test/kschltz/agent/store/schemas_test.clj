@@ -13,3 +13,9 @@
 (deftest select-opts-accept-desc
   (is (m/validate schemas/SelectOpts {:order [:ts] :desc true :limit 10}))
   (is (not (m/validate schemas/SelectOpts {:limit 0}))))
+
+(deftest where-accepts-session-and-turn
+  (is (m/validate schemas/Where {:session-id "s1" :turn-id "t1" :current true}))
+  (is (m/validate schemas/Table :sessions))
+  (is (m/validate schemas/Table :turns))
+  (is (m/validate schemas/Table :events)))

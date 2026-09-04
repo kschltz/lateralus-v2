@@ -2,9 +2,14 @@
   "JDBC leaf tests. Require duckdb_jdbc on the classpath (main dep)."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
+            [kschltz.agent.llm.stream :as llm.stream]
+            [kschltz.agent.session.protocol :as session]
+            [kschltz.agent.session.store-engine :as session.store]
             [kschltz.agent.store.duckdb :as duckdb]
             [kschltz.agent.store.file-index :as index]
-            [kschltz.agent.store.protocol :as proto]))
+            [kschltz.agent.store.protocol :as proto]
+            [kschltz.agent.stream.bus :as bus]
+            [kschltz.agent.stream.store-bus :as store-bus]))
 
 (deftest in-memory-duckdb-roundtrip
   (let [e (duckdb/duckdb-store {:path ":memory:"})]
@@ -63,6 +68,41 @@
       (try
         (is (= ["/p.txt"]
                (mapv :path (proto/-select e2 :file_index {}))))
+        (finally
+          (proto/-close e2))))
+    (doseq [^java.io.File f (reverse (file-seq dir))]
+      (.delete f))))
+
+(deftest duckdb-session-and-closed-turn-survive-reopen
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                           (str "lat-duck-sess-" (random-uuid)))
+              (.mkdirs))
+        path (str (io/file dir "store.duckdb"))
+        e1 (duckdb/duckdb-store {:path path})
+        sess (session.store/store-session-store e1)
+        stream (store-bus/store-bus e1)
+        tid (atom nil)]
+    (try
+      (session/-upsert! sess {:id "sess1"
+                              :title "One"
+                              :turns [{:id "keep"}]
+                              :refs {}
+                              :agent-state {:n 1}})
+      (reset! tid (bus/open-turn! stream {:session-id "sess1" :user-text "q"}))
+      (bus/emit! stream @tid (llm.stream/event :text-delta {:text "a"}))
+      (bus/close-turn! stream @tid :done {})
+      (finally
+        (proto/-close e1)))
+    (let [e2 (duckdb/duckdb-store {:path path})
+          sess2 (session.store/store-session-store e2)
+          stream2 (store-bus/store-bus e2)]
+      (try
+        (is (= "sess1" (session/-current-id sess2)))
+        (is (= {:n 1} (:agent-state (session/-get sess2 "sess1"))))
+        (is (= [{:id "keep"}] (:turns (session/-get sess2 "sess1"))))
+        (is (= "a" (:text (bus/snapshot stream2 @tid))))
+        (is (= "q" (:user-text (bus/snapshot stream2 @tid))))
+        (is (= @tid (bus/latest-id stream2)))
         (finally
           (proto/-close e2))))
     (doseq [^java.io.File f (reverse (file-seq dir))]

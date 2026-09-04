@@ -4,6 +4,7 @@
             [kschltz.agent.stream.plugin :as stream.plugin]
             [kschltz.agent.stream.protocol :as proto]
             [kschltz.agent.stream.wiring :as wiring]
+            [kschltz.agent.store.memory :as store.memory]
             [kschltz.agent.system :as system]))
 
 (deftest default-keys-include-bus-and-plugin
@@ -21,3 +22,18 @@
                 (flatten (:lateralus/plugins sys))))
       (finally
         (ig/halt! sys)))))
+
+(deftest empty-config-is-memory-bus
+  (let [bus (ig/init-key :lateralus/stream-bus {})]
+    (is (proto/stream-bus? bus))
+    (is (nil? (:engine bus)))))
+
+(deftest store-impl-requires-engine
+  (is (thrown? clojure.lang.ExceptionInfo
+               (ig/init-key :lateralus/stream-bus {:impl :store}))))
+
+(deftest store-impl-wraps-engine
+  (let [engine (store.memory/memory-store)
+        bus (ig/init-key :lateralus/stream-bus {:impl :store :store engine})]
+    (is (proto/stream-bus? bus))
+    (is (identical? engine (:engine bus)))))

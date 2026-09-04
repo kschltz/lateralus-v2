@@ -1,13 +1,19 @@
 # DuckDB as a Lateralus core store — options
 
-**Status:** decision — Option D accepted (workspace index + edit log).
-**Date:** 2026-09-03
-**Decision:** The harness payoff is a file index and edit audit log. Filesystem
-bytes stay source of truth; a `StoreEngine` (memory for tests, DuckDB on JVM)
-holds `file_index` + `file_edits`. Mutations record witnesses after a successful
-commit. `file_search` may hit the index when it has coverage; otherwise it still
-walks. Secrets, the interceptor chain, native-image defaults, and Proximum stay
-unchanged. Session/stream façades (the rest of Option C) are deferred.
+**Status:** shipped — Option D (workspace index + edit log) and Option C
+session/stream façades on the same `StoreEngine`.
+**Date:** 2026-09-04
+**Decision:** The harness payoff is a file index, an edit audit log, and
+(opt-in) a session catalog plus historic stream checkpoints in one store.
+Filesystem bytes stay source of truth; a `StoreEngine` (memory for tests,
+DuckDB on JVM) holds `file_index`, `file_edits`, `sessions`, `turns`, and
+`events`. Mutations record witnesses after a successful commit. `file_search`
+may hit the index when it has coverage; otherwise it still walks. Live SSE
+stays in-memory (64-turn cap); DuckDB is the checkpoint on `-close-turn!`.
+The default `SessionStore` remains the file catalog
+(`sessions/workbench/catalog.edn`). Secrets, the interceptor chain,
+native-image defaults, and Proximum stay unchanged. MemoryBackend-on-store
+and `store_query` (Option E) stay deferred.
 
 This note answers: *what would it mean to put DuckDB at the center of the
 Lateralus harness, and which of those meanings are actually a good fit?*
@@ -387,9 +393,11 @@ tests; the chain does not change.
    tests against the KG-BM25 / Proximum contract (`-store-message`,
    `-recall-hybrid`, `-close`). Keep Proximum as JVM default until recall
    quality is measured.
-3. **Option C without files.** Point `SessionStore` and historic `StreamBus`
-   at the same `:lateralus/store`. Stop rewriting `catalog.edn`. Raise or
-   drop the 64-turn cap for *historic* rows; live bus stays capped in RAM.
+3. **Option C without files (shipped, opt-in).** Point `SessionStore` and
+   historic `StreamBus` at the same `:lateralus/store`. File `catalog.edn`
+   remains the default; `:lateralus/session-store {:store …}` and
+   `:lateralus/stream-bus {:impl :store :store …}` select the façades.
+   Live SSE stays capped in RAM; closed turns are checkpointed.
 4. **Option D.** File index + edit log hooked from existing mutation
    tools (they already have witnesses). `file_search` FTS path is opt-in.
 5. **Option E.** Read-only `store_query` + Portal viewer. Air-gapped views
