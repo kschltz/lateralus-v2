@@ -747,3 +747,98 @@ result is the agent-world analogue of ORCA's telemetry replay.
   DR/triage but are not papers or OSS forums.
 - Retrieval date: 2026-09-10. Preprints and open PRs may have been revised
   after this note.
+
+---
+
+## 10. Where `lateralus-v2` sits
+
+`lateralus-v2` is a **single-user LLM agent**, not a Kubernetes SRE, not a
+microservice auto-remediator, and not a crash-to-PR backend. It belongs
+with the 2026 *self-healing of agents* cluster (§4), not with PASE / E2E-REME
+/ ORCA / SHADE / K8sGPT.
+
+The closest paper is *Self-Healing Agentic Orchestrators* (arXiv:2606.01416):
+reliability as a bounded runtime control problem over tool-augmented LLM
+failures. Lateralus implements that idea as an **interceptor microkernel**:
+the model is untrusted; typed `Tool`s, Malli schemas, and deterministic
+loop interceptors are the trusted actuation surface. That is the same
+philosophy as MPI-SWS *Rebooting Microreboot* (untrusted agents, typed ISA,
+trusted kernel) applied to one agent process instead of a service graph.
+
+It is **not** MAPER. MAPER puts an LLM *inside* MAPE-K to invent strategies
+for unforeseen managed-system states. Lateralus uses **deterministic**
+interceptors for a closed set of *agent-loop* failure classes, and uses the
+LLM only as the thing being repaired. The chain slots (`:guard` → `:enrich`
+→ `:compose` → `:llm` → `:tools` → `:finalize` → `:history` → `:persist`) are
+MAPE-K-shaped, but the managed system is the exchange itself.
+
+### What it already heals (closed failure classes)
+
+| Failure class (2026 vocabulary) | Lateralus mechanism | Budget |
+|----------------------------------|---------------------|--------|
+| Malformed outgoing `ChatRequest` | `llm-call-with-self-heal`: Malli explain → system message → re-enqueue remaining queue (must preserve tools/finalize) | 3 |
+| Empty first-turn reply | `compose-empty-retry` + strip tools / `tool-choice none` | 2 |
+| Blank after tools / cap / stall | summary mini-chain; attempt 2 condenses history; then **deterministic** `synthesize-from-results` fallback | 2 + fallback |
+| Semantic silent “I’ll implement…” yield | `loop.act` planning-only detector → one act-nudge with tools still attached | 1 |
+| Tool call narrated in prose, not `tool_calls` | `loop.rescue/pseudo-calls` — only **registered** names, brace-balanced JSON | implicit |
+| Truncated tool-argument JSON | `[:truncated n]` instead of `{}` so the model is told to split, not re-emit | n/a (structured error) |
+| `tool_define` + call in one batch | `retry-now-available` re-dispatches after registry apply | same turn |
+| Untested runtime tool claimed done | `nudge-untested-runtime-tools` forces define → test → promote → inventory | n/a |
+| Exact-signature retry loop | `loop.stall` exact-stall → stop + summary | session-durable counters |
+| Same primary arg failing (`clojure_add_lib :lib`) | shape-stall even if sibling tools succeed | count ≥ 2 |
+| Mid-loop throw | `error-boundary` persists partial tool transcript into `:agent/state-delta` | always |
+| HTTP 429 | `llm.http/post-with-retry` | header-bounded sleep |
+
+Caps live in `kschltz.agent.loop` (`max-self-heal-attempts` 3, empty-retry 2,
+summary 2, default depth 5) plus `act/max-act-nudge-attempts` (1, because two
+nudges on weak models produced announce-churn). This is the 2026
+orchestrator paper’s “recovery under explicit budgets,” implemented as
+integers on ctx, not as an RL policy.
+
+### What it shares with the OSS *gate* culture (not with AIOps 2.0)
+
+Open-source 2026 healers (HolmesGPT, k8s-mechanic, Helix) refuse to give the
+LLM raw write authority. Lateralus does the same *inside the agent*:
+
+- Network I/O only behind protocols + Malli instrumentation
+  (`docs/network-boundaries.md`).
+- Runtime-authored tools run in SCI; no sockets, no host ctx, no secret
+  plaintext (`docs/runtime-tools.md`, `docs/secrets.md`).
+- Filesystem mutations: SHA-256 witnesses, per-path locks, backups, atomic
+  move, Clojure round-trip parse before commit — closer to a local Helix
+  *writer* than to kubectl apply.
+- Web: SSRF pin, air-gap default `:provider :none`.
+- Transitions are an allowlisted JSON envelope, not arbitrary ctx mutation.
+
+There is **no** Slack Approve / GitOps PR / Mutation CR, because Lateralus
+does not mutate a cluster. The human gate is the operator sitting on the
+CLI/workbench turn.
+
+### What it is not (honest gaps vs 2026 SOTA)
+
+| 2026 approach | Lateralus today |
+|---------------|-----------------|
+| R2Act / E2E-REME / ORCA / PASE | Does not diagnose or remediate *other* systems from telemetry. No playbook generation, no world-model plan check, no telemetry-replay patch verifier. |
+| VAI | Does not retrain adaptation knowledge from failed adaptations. Memory is recall+persist, not a second MAPE loop on the adapter. |
+| AgentTether | No Critical Transition Graph / RCA of agent trajectories. |
+| AgentRewind | No aligned checkpoints of agent+environment; immutability of ctx is weaker recoverability (you can inspect, not rewind a side-effecting tool). |
+| SelfHeal / AgentDefect | Does not mine SO/GitHub for agent-bug fix patterns or auto-patch *its own* source. `reload_runtime` is an explicit, allowlisted namespace reload after the model already edited files. |
+| Fraunhofer K8s 7B prototype | Same *constituency* (local/small models — `rescue`, compact tool schemas, Ollama) but a different managed object (chat exchange vs cluster). |
+| K8sGPT / HolmesGPT / Karpenter | Out of domain. |
+
+The orchestrator paper’s headline result — **verifier-guided 0% semantic
+silent failures** — is the gap that matters most. Lateralus stops
+announce-then-yield and empty replies; it does not check that a non-blank
+final answer is *true*. `tool_test` exact-output is a verifier only for
+factory-authored tools, not for the agent’s user-facing claim.
+
+### One-line placement
+
+> Lateralus-v2 is a typed interceptor kernel that self-heals the **agent
+> exchange** (schema, stall, empty, plan-without-act, truncated args,
+> same-turn registry races) under integer budgets. It is not a
+> self-healing application platform. Relative to 2026, it is an
+> implementation of the agentic-orchestrator + untrusted-agent/ISA pattern,
+> with OSS-grade gates, and without RCA-to-actuation, semantic verification,
+> or managed-system MAPE-K.
+
