@@ -7,7 +7,8 @@
    trip even when the same failing `clojure_add_lib` is mixed with
    successful sibling calls — the live verify-round-3 failure mode
    where `every?` turn-error reset the whole-turn counter."
-  (:require [cheshire.core :as json]))
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]))
 
 (def stall-state-keys
   "Session keys copied from `:agent/state` onto a fresh exchange ctx."
@@ -20,7 +21,15 @@
   "Tool name -> arg keys that identify the *target* of a call.
    Same primary arg + differing secondary args (add-lib `:require`)
    share one shape for stall detection."
-  {"clojure_add_lib" [:lib :coords]})
+  {"clojure_add_lib" [:lib :coords]
+   "tool_test" [:name :tool]})
+
+(def tool-test-args-hint
+  "System message injected when tool_test stalls on arg-shape errors."
+  (str "tool_test arguments/args must be a JSON object, e.g. "
+       "{\"url\":\"ws://127.0.0.1:8765\"} — not a string. "
+       "EDN maps such as {:url \"ws://127.0.0.1:8765\"} also work. "
+       "Do not file_read factory source. Omit expected-output to probe."))
 
 (defn seed-from-state
   "Copy missing stall counters from `:agent/state` onto `ctx`."
@@ -68,17 +77,39 @@
   [status]
   (contains? #{:error :timeout "error" "timeout"} status))
 
+(def ^:private tool-test-error-phases
+  "tool_test phases that count as arg/unknown failures for stall.
+   `probe` is a successful discovery step — do not stall on it."
+  #{"args" "unknown"})
+
 (defn result-error-shape?
   "True when a tool result is a failure shape: JSON status error/timeout,
-   `:loaded? false`, or the unavailable-tool marker."
+   `:loaded? false`, tool_test arg/unknown (`:ok false`), input
+   validation, or the unavailable-tool marker. `phase: probe` is not
+   an error shape."
   [result-map]
   (let [r (:result result-map)]
     (if (string? r)
       (if-let [parsed (try (json/parse-string r true) (catch Throwable _ nil))]
         (or (error-status? (:status parsed))
-            (false? (:loaded? parsed)))
-        (boolean (re-find #"is not available in this session" (str r))))
+            (false? (:loaded? parsed))
+            (and (false? (:ok parsed))
+                 (contains? tool-test-error-phases (str (:phase parsed)))))
+        (or (boolean (re-find #"is not available in this session" (str r)))
+            (str/includes? (str r) "input validation failed")))
       false)))
+
+(defn inject-tool-test-args-hint
+  "Append object-args recovery text when this turn's tool_test results
+   include arg-shape / validation failures."
+  [ctx]
+  (if (some result-error-shape?
+            (filter (fn [entry]
+                      (= "tool_test" (get-in entry [:call :function :name])))
+                    (or (:tool/results ctx) [])))
+    (update-in ctx [:llm/request :messages] (fnil conj [])
+               {:role "system" :content tool-test-args-hint})
+    ctx))
 
 (defn- primary-shape
   "Primary-arg shape when the tool is tracked; otherwise nil."

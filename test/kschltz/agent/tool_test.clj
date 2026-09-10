@@ -211,6 +211,36 @@
       (is (str/includes? (:error parsed) "explosion")))))
 
 
+(deftest invoke-tool-coerces-nested-json-and-edn-object-args
+  (let [t (reify tool/Tool
+            (-name [_] "tool_test")
+            (-description [_] "test")
+            (-input-schema [_] [:map
+                                 [:name :string]
+                                 [:args {:optional true} :map]
+                                 [:arguments {:optional true} :map]])
+            (-output-schema [_] :string)
+            (-invoke [_ args _] (pr-str (or (:args args) (:arguments args)))))]
+    (is (= "{:url \"ws://127.0.0.1:8765\"}"
+           (tool/invoke-tool t {:name "ws_live"
+                                :args "{\"url\":\"ws://127.0.0.1:8765\"}"}
+                             {})))
+    (is (= "{:url \"ws://127.0.0.1:8765\"}"
+           (tool/invoke-tool t {:name "ws_live"
+                                :arguments "{:url \"ws://127.0.0.1:8765\"}"}
+                             {})))))
+
+(deftest invoke-tool-hints-when-nested-args-remain-a-string
+  (let [t (reify tool/Tool
+            (-name [_] "tool_test")
+            (-description [_] "test")
+            (-input-schema [_] [:map [:name :string] [:args :map]])
+            (-output-schema [_] :string)
+            (-invoke [_ _ _] "ok"))
+        err (tool/invoke-tool t {:name "ws_live" :args "ws://not-a-map"} {})]
+    (is (str/includes? err "input validation failed"))
+    (is (str/includes? err "JSON object"))))
+
 (deftest truncated-args-legible-error
   (testing "unterminated JSON arguments produce an actionable split hint,"
     " not a confusing schema error"

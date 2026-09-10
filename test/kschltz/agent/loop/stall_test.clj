@@ -1,6 +1,7 @@
 (ns kschltz.agent.loop.stall-test
   "Unit tests for ReAct stall detection and session-durable counters."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kschltz.agent.loop.stall :as stall]))
 
@@ -105,3 +106,76 @@
     (is (= :continue (:action after-ok)))
     (is (zero? (get-in after-ok [:patch :agent/shape-err-counts
                                  (stall/tool-call-shape ok-call)])))))
+
+(defn- tool-test-call
+  [id args-json]
+  {:id id :type "function"
+   :function {:name "tool_test" :arguments args-json}})
+
+(defn- tool-test-args-fail
+  [call]
+  {:call call
+   :result (json/generate-string
+            {:ok false
+             :tool "tool_test"
+             :phase "args"
+             :error stall/tool-test-args-hint})})
+
+(defn- tool-test-probe
+  [call]
+  {:call call
+   :result (json/generate-string
+            {:ok false
+             :tool "tool_test"
+             :phase "probe"
+             :actual "<html>ticks</html>"})})
+
+(deftest result-error-shape-treats-tool-test-args-not-probe
+  (is (true? (stall/result-error-shape?
+               (tool-test-args-fail (tool-test-call "t" "{\"name\":\"ws\"}")))))
+  (is (false? (stall/result-error-shape?
+                (tool-test-probe (tool-test-call "t" "{\"name\":\"ws\"}")))))
+  (is (true? (stall/result-error-shape?
+               {:call {:function {:name "tool_test"}}
+                :result "Tool 'tool_test' input validation failed: {:args [\"invalid type\"]}"}))))
+
+(deftest decide-shape-stall-on-repeated-tool-test-args
+  (let [c1 (tool-test-call "t1" "{\"name\":\"ws_live\",\"args\":\"ws://x\"}")
+        first (stall/decide {:tool/calls [c1]
+                              :tool/results [(tool-test-args-fail c1)]})
+        c2 (tool-test-call "t2" "{\"name\":\"ws_live\",\"args\":\"ws://y\"}")
+        second (stall/decide (merge {:tool/calls [c2]
+                                      :tool/results [(tool-test-args-fail c2)]}
+                                     (:patch first)))]
+    (is (= :continue (:action first)))
+    (is (= :shape-stall (:action second)))
+    (is (>= (get-in second [:patch :agent/shape-err-counts
+                             (stall/tool-call-shape c2)]
+                    0)
+            2))))
+
+(deftest decide-does-not-stall-on-repeated-tool-test-probe
+  (let [c1 (tool-test-call "t1" "{\"name\":\"ws_live\"}")
+        first (stall/decide {:tool/calls [c1]
+                              :tool/results [(tool-test-probe c1)]})
+        c2 (tool-test-call "t2" "{\"name\":\"ws_live\",\"args\":{}}")
+        second (stall/decide (merge {:tool/calls [c2]
+                                      :tool/results [(tool-test-probe c2)]}
+                                     (:patch first)))]
+    (is (= :continue (:action first)))
+    (is (= :continue (:action second)))
+    (is (zero? (get-in second [:patch :agent/shape-err-counts
+                                (stall/tool-call-shape c2)]
+                       0)))))
+
+(deftest inject-tool-test-args-hint-on-args-failure
+  (let [call (tool-test-call "t1" "{\"name\":\"ws_live\",\"args\":\"ws://x\"}")
+        ctx {:llm/request {:messages []}
+             :tool/results [(tool-test-args-fail call)]}
+        out (stall/inject-tool-test-args-hint ctx)
+        msg (peek (get-in out [:llm/request :messages]))]
+    (is (= "system" (:role msg)))
+    (is (str/includes? (:content msg) "JSON object"))
+    (is (str/includes? (:content msg) "file_read")
+        "hint tells the model not to inspect factory source")))
+

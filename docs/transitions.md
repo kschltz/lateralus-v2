@@ -147,9 +147,9 @@ are protected recovery tools.
 
 Define a real in-process `Tool` from a persistable spec, test it through the
 guarded registry, drop it, or write it to disk as a reusable plugin.
-`tool_test` records a passing exact-output assertion against the current
-spec fingerprint; redefinition invalidates it and `tool_promote` refuses
-untested specs. Runtime-tool maps replace (rather than deep-merge) in the
+`tool_test` records a passing exact / sha256 / large-substring assertion
+against the current spec fingerprint (omit expected-output to probe);
+redefinition invalidates it and `tool_promote` refuses untested specs. Runtime-tool maps replace (rather than deep-merge) in the
 outer runtime so forget/promote removals are durable. See
 [`docs/runtime-tools.md`](runtime-tools.md).
 

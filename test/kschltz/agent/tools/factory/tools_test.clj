@@ -171,7 +171,8 @@
     (is (= "record-runtime-tool-test" (get-in passing [:transition :op])))
     (is (false? (:ok failing)))
     (is (= "3" (:actual failing)))
-    (is (nil? (:transition failing)))))
+    (is (nil? (:transition failing)))
+    (is (= "exact" (:match passing)))))
 
 (deftest test-tool-tolerates-small-model-argument-aliases
   (let [store (session/factory-session {})
@@ -223,6 +224,110 @@
                 true)]
     (is (true? (:ok parsed)))
     (is (= "add_two" (:tool-name parsed)))))
+
+(deftest test-tool-accepts-json-and-edn-string-args
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        ctx {:agent/tool-registry (merge registry (proto/-registry store))}
+        test-tool (get registry "tool_test")
+        json-args (json/parse-string
+                   (tool/invoke-tool
+                    test-tool
+                    {:name "add_two"
+                     :args "{\"a\":1,\"b\":2}"
+                     :expected-output "3"}
+                    ctx)
+                   true)
+        edn-args (json/parse-string
+                  (tool/invoke-tool
+                   test-tool
+                   {:name "add_two"
+                    :arguments "{:a 1 :b 2}"
+                    :expected-output "3"}
+                   ctx)
+                  true)]
+    (is (true? (:ok json-args)))
+    (is (= "exact" (:match json-args)))
+    (is (true? (:ok edn-args)))
+    (is (= "3" (:actual edn-args)))))
+
+(deftest test-tool-rejects-non-object-args-with-friendly-error
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 (get registry "tool_test")
+                 {:name "add_two"
+                  :args "ws://127.0.0.1:8765"
+                  :expected-output "3"}
+                 {:agent/tool-registry
+                  (merge registry (proto/-registry store))})
+                true)]
+    (is (false? (:ok parsed)))
+    (is (= "args" (:phase parsed)))
+    (is (str/includes? (str (:error parsed)) "JSON object"))
+    (is (not (str/includes? (str (:error parsed)) "invalid type")))
+    (is (nil? (:transition parsed)))))
+
+(deftest test-tool-accepts-sha256-expected-output
+  (let [store (session/factory-session {})
+        _ (proto/-define! store spec {})
+        registry (tools/factory-tools-registry store)
+        digest (tools/sha256-hex "3")
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 (get registry "tool_test")
+                 {:name "add_two"
+                  :arguments {:a 1 :b 2}
+                  :expected-output (str "sha256:" digest)}
+                 {:agent/tool-registry
+                  (merge registry (proto/-registry store))})
+                true)]
+    (is (true? (:ok parsed)))
+    (is (= "sha256" (:match parsed)))
+    (is (= "record-runtime-tool-test" (get-in parsed [:transition :op])))))
+
+(def html-spec
+  {:name "html_page"
+   :description "Return a large HTML page"
+   :input-schema "[:map]"
+   :invoke "(fn [_ _] (str \"<html><body>\" (apply str (repeat 20 \"live-websocket-tick \")) \"</body></html>\"))"})
+
+(deftest test-tool-matches-large-html-substring
+  (let [store (session/factory-session {})
+        _ (proto/-define! store html-spec {})
+        registry (tools/factory-tools-registry store)
+        ctx {:agent/tool-registry (merge registry (proto/-registry store))}
+        test-tool (get registry "tool_test")
+        probe (json/parse-string
+               (tool/invoke-tool test-tool {:name "html_page" :arguments {}} ctx)
+               true)
+        actual (:actual probe)
+        parsed (json/parse-string
+                (tool/invoke-tool
+                 test-tool
+                 {:name "html_page"
+                  :arguments {}
+                  :expected-output "live-websocket-tick live-websocket"}
+                 ctx)
+                true)]
+    (is (false? (:ok probe)))
+    (is (= "probe" (:phase probe)))
+    (is (nil? (:transition probe)))
+    (is (>= (count actual) 256))
+    (is (true? (:ok parsed)))
+    (is (= "contains" (:match parsed)))
+    (is (= "record-runtime-tool-test" (get-in parsed [:transition :op])))))
+
+(deftest output-matches-modes
+  (is (= :exact (tools/output-matches? "3" "3")))
+  (is (= :sha256 (tools/output-matches? (tools/sha256-hex "hello") "hello")))
+  (let [html (str "<html>" (apply str (repeat 40 "tick-token ")) "</html>")]
+    (is (>= (count html) 256))
+    (is (= :contains (tools/output-matches? "tick-token tick-token tick-token" html))))
+  (is (nil? (tools/output-matches? "nope" "3"))))
 
 (deftest test-tool-probes-when-expected-output-is-missing
   (let [store (session/factory-session {})

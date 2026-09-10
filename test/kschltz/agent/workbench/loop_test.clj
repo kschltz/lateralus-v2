@@ -198,5 +198,34 @@
                           (ex-info "connection refused" {:kind :transport}) nil)
                          "network error")))
     (testing "result map with :error/raised gets the same treatment"
-      (let [result {:error/raised {:exception (http-ex 429 "quota")}}]
-        (is (str/includes? (loop/friendly-exchange-error nil result) "429"))))))
+      (is (str/includes? (loop/friendly-exchange-error
+                           nil {:error/raised {:exception (http-ex 403 "nope")}})
+                         "403")))))
+
+(defn- silent-wb []
+  (reify proto/Workbench
+    (-url [_] "")
+    (-portal-url [_] nil)
+    (-publish! [_ _])
+    (-await-human! [_ _] {})
+    (-attach-selection! [_] nil)
+    (-submit-portal! [_ _ _] {})
+    (-clear-portal! [_] {})
+    (-snapshot [_] {})
+    (-tools [_] {})
+    (-portal-selection [_] nil)
+    (-close! [_] nil)))
+
+(deftest guard-caps-huge-html-tool-results-in-chat
+  (let [html (str "<html><body>" (apply str (repeat 80 "tick ")) "</body></html>")
+        event (loop/guard-assistant-event
+               {:exchange/response ""
+                :agent/all-tool-results
+                [{:call {:function {:name "ws_live"}}
+                  :result html}]}
+               (silent-wb))]
+    (is (= :assistant (:role event)))
+    (is (str/includes? (:text event) "HTML"))
+    (is (str/includes? (:text event) "portal_submit"))
+    (is (< (count (:text event)) (count html)))
+    (is (not (str/includes? (:text event) (apply str (repeat 20 "tick ")))))))

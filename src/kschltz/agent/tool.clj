@@ -12,6 +12,7 @@
    every external/network dependency must be protocol-bound and
    schema-instrumented."
   (:require [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [malli.core :as m]
@@ -95,6 +96,51 @@
   [schema]
   (json-safe schema))
 
+(defn parse-json-or-edn-map
+  "If `x` is a map, return it with keyword keys. If it is a JSON or EDN
+   string of a map, parse it. Otherwise nil.
+
+   Models often stringify nested objects (`:args \"{:url \\\"ws://…\\\"}\"`)
+   so callers that expect a map must coerce before Malli `:map` checks."
+  [x]
+  (letfn [(keywordize [m]
+            (into {}
+                  (map (fn [[k v]]
+                         [(if (or (string? k) (keyword? k))
+                            (keyword (name k))
+                            k)
+                          v]))
+                  m))]
+    (cond
+      (map? x) (keywordize x)
+      (string? x)
+      (let [s (str/trim x)]
+        (when (seq s)
+          (or (try
+                (let [parsed (json/parse-string s true)]
+                  (when (map? parsed) (keywordize parsed)))
+                (catch Throwable _))
+              (try
+                (let [parsed (edn/read-string {:eof nil} s)]
+                  (when (map? parsed) (keywordize parsed)))
+                (catch Throwable _)))))
+      :else nil)))
+
+(defn coerce-nested-object-args
+  "Parse JSON/EDN maps at the top level and in `:args` / `:arguments`.
+   Leaves other values unchanged."
+  [args]
+  (let [top (or (when (string? args) (parse-json-or-edn-map args)) args)]
+    (if-not (map? top)
+      args
+      (reduce (fn [m k]
+                (let [v (get m k)]
+                  (if-let [parsed (parse-json-or-edn-map v)]
+                    (assoc m k parsed)
+                    m)))
+              top
+              [:args :arguments]))))
+
 (defn- parse-arguments
   "Parse the JSON arguments string that the model returned. Returns
    [:ok m] on success, [:truncated n] when the JSON is unparseable —
@@ -142,18 +188,24 @@
    field failed, not just THAT something failed (audit 2026-07 rec #7:
    the old message omitted the tool name and the failing key path, so
    an `AddLibInput` mistake gave the model nothing concrete to fix)."
-  [tool phase _schema _value explain]
+  [tool phase _schema value explain]
   (let [human (me/humanize explain)
         extras (disallowed-keys human)
-        hint (when (seq extras)
-               (str " Extra keys are not accepted: "
-                    (str/join ", " extras)
-                    ". Retry with only the documented fields."))]
-    (format "Tool '%s' %s validation failed: %s%s"
+        extra-hint (when (seq extras)
+                     (str " Extra keys are not accepted: "
+                          (str/join ", " extras)
+                          ". Retry with only the documented fields."))
+        args-hint (when (and (= "input" phase)
+                              (or (string? (get value :args))
+                                  (string? (get value :arguments))))
+                   (str " arguments/args must be a JSON object, e.g. "
+                        "{\"url\":\"ws://127.0.0.1:8765\"} — not a string."))]
+    (format "Tool '%s' %s validation failed: %s%s%s"
             (-name tool)
             phase
             (pr-str human)
-            (or hint ""))))
+            (or extra-hint "")
+            (or args-hint ""))))
 
 (defn invoke-tool
   "Call `tool` with parsed `args` and interceptor `ctx`. Validates
@@ -169,7 +221,8 @@
      `Tool execution error: <msg>` one-line string so existing
      string-matching callers/tests still match."
   [tool args ctx]
-  (let [input-schema  (-input-schema tool)
+  (let [args          (coerce-nested-object-args args)
+        input-schema  (-input-schema tool)
         output-schema (-output-schema tool)]
     (if-let [explain (m/explain input-schema args)]
       (validation-error tool "input" input-schema args explain)
