@@ -9,14 +9,18 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 
 ## Quick start
 
-**Docker (recommended for a full workbench):** Java/Ollama packaged; interactive profile gate + CHAT | Portal UI.
+**Workbench** (prompts for local Clojure vs Docker):
 
 ```bash
 ./scripts/start-workbench                  # macOS / Linux / WSL / Git Bash
 # .\scripts\start-workbench.ps1            # Windows PowerShell
+./scripts/start-workbench --local        # skip prompt: Java 22+ clojure CLI
+./scripts/start-workbench --docker       # skip prompt: Compose uberjar
 ```
 
 Open **http://localhost:7860** (Portal iframe on **:7870**). Details: [`docker/README.md`](docker/README.md).
+
+On a TTY the script asks whether to use **local Clojure** (repo as workspace — `file_create`, `clojure_*`, `tool_promote`, `reload_runtime`) or **Docker**. Docker bind-mounts the checkout at `/workspace` so file tools see the same tree; remaining gaps are the isolated `/data/config` profile volume and Ollama Cloud catalog merge (off unless `LATERALUS_LIST_CLOUD=1`).
 
 **Local Clojure** (Java 22+; JVM flags are baked into `:run` / `:workbench`):
 
@@ -326,7 +330,7 @@ See [`docker/README.md`](docker/README.md). Summary:
 
 | Item | Value |
 |------|--------|
-| One-liner | `./scripts/start-workbench` |
+| One-liner | `./scripts/start-workbench` (prompts local Clojure vs Docker) |
 | Workbench | http://localhost:7860 |
 | Portal iframe | http://localhost:7870 |
 | Config volume | `lateralus-config` → `/data/config` |

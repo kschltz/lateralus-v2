@@ -18,7 +18,7 @@
 - **Memory v2 schema:** `docs/memory-v2.md`
 - **DuckDB core-store options:** `docs/duckdb-core-engine.md` (persistence substrate behind existing protocols; not a chain replacement)
 - **Workspace file index + store façades:** `docs/file-index.md` (`:lateralus/store`, `:lateralus/file-index`, opt-in `:lateralus/session-store` + store `StreamBus`)
-- **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (profile gate + CHAT\|Portal; Portal `:7870`)
+- **Docker / workbench ship:** `docker/README.md`, `./scripts/start-workbench` (local Clojure vs Docker prompt, then profile gate + CHAT\|Portal; Portal `:7870`)
 - **CLI profiles:** `~/.config/lateralus/` via `kschltz.agent.cli.profile.*` (no `--config` → interactive gate; secrets via `OLLAMA_API_KEY` only)
 - **v1 reference (archive):** https://github.com/kschltz/lateralus — port seed code only, do not copy `core.clj` or `loop.clj`
 - **Historical goals/plans (archived):** `goals/lateralus-file-editing/`, `docs/archive/arch-remediation-plan.md`, `docs/archive/clj-edit-implementation-plan.md`, `docs/archive/memory-system-mvi.md`
@@ -60,7 +60,7 @@ clojure -M:e2e:workbench -n kschltz.agent.runtime-harness-e2e-test # offline run
 LATERALUS_E2E_MCP=live clojure -M:e2e -n kschltz.agent.tools.mcp.mcp-e2e-test
 clojure -T:build uber                           # JVM distributable (includes :workbench)
 ./target/lateralus-v2 -h                        # smoke-test launcher
-./scripts/start-workbench                       # Docker: Ollama + profile gate + workbench
+./scripts/start-workbench                       # prompt: local Clojure vs Docker workbench
 clojure -M:workbench:run -i                     # local workbench (JVM flags in alias)
 rg 'add-.*-tool!' src/                          # no matches
 rg 'http/completion' src/                       # only in llm/http.clj

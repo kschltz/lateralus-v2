@@ -1,11 +1,42 @@
-# Start lateralus workbench (Docker): interactive profile setup, then CHAT | Portal.
+# Start lateralus workbench: local Clojure or Docker.
 # Default: host Ollama over host.docker.internal (no model mount/copy).
+[CmdletBinding()]
+param(
+  [ValidateSet("local", "docker")]
+  [string]$Mode,
+  [switch]$Local,
+  [switch]$Docker,
+  [ValidateSet("memory", "duckdb")]
+  [string]$Store,
+  [switch]$DryRun,
+  [switch]$Help
+)
+
 $ErrorActionPreference = "Stop"
+
+if ($Help) {
+  Write-Host @"
+Usage: .\scripts\start-workbench.ps1 [-Local] [-Docker] [-Mode local|docker] [-Store memory|duckdb] [-DryRun]
+
+  -Local / -Docker   Choose runtime (skips the prompt)
+  -Mode              Same as -Local / -Docker
+  -Store             LATERALUS_STORE
+  -DryRun            Print the chosen command and exit
+
+On an interactive console with no runtime flag, the script asks 1=local / 2=docker.
+"@
+  exit 0
+}
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
 $Model = if ($env:LATERALUS_MODEL) { $env:LATERALUS_MODEL } else { "llama3.2" }
+$Runtime = $env:LATERALUS_WORKBENCH_RUNTIME
+if ($Local) { $Runtime = "local" }
+if ($Docker) { $Runtime = "docker" }
+if ($Mode) { $Runtime = $Mode }
+if ($Store) { $env:LATERALUS_STORE = $Store }
 
 function Invoke-Compose {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
@@ -61,6 +92,71 @@ function Stop-OldWorkbench {
   } else {
     Write-Host "    none running"
   }
+}
+
+function Get-WorkbenchRuntime {
+  if ($Runtime -eq "local" -or $Runtime -eq "docker") { return $Runtime }
+  if ($Runtime -and $Runtime -ne "") {
+    throw "unknown LATERALUS_WORKBENCH_RUNTIME '$Runtime' (expected local | docker)"
+  }
+  if ([Console]::IsInputRedirected) {
+    Write-Host "note: no TTY — using Docker (pass -Local or -Docker to choose)"
+    return "docker"
+  }
+  $default = 2
+  if (Get-Command clojure -ErrorAction SilentlyContinue) { $default = 1 }
+  Write-Host ""
+  Write-Host "How do you want to run the Lateralus workbench?"
+  Write-Host ""
+  Write-Host "  1) Local Clojure   — Java 22+ on this machine; repo is the workspace"
+  Write-Host "  2) Docker          — uberjar in Compose; checkout mounted at /workspace"
+  Write-Host ""
+  $answer = Read-Host "Choice [$default]"
+  if (-not $answer) { $answer = "$default" }
+  switch -Regex ($answer) {
+    '^(1|local|clojure|l)$' { return "local" }
+    '^(2|docker|d)$' { return "docker" }
+    default { throw "unknown choice '$answer' (expected 1 or 2)" }
+  }
+}
+
+function Start-LocalWorkbench {
+  if (-not (Get-Command clojure -ErrorAction SilentlyContinue)) {
+    throw "clojure CLI not found. Install Clojure or use -Docker."
+  }
+  Write-Host "==> runtime: local Clojure"
+  Write-Host "    Command: clojure -M:workbench:run -i"
+  Write-Host "    Workspace: $Root"
+  Write-Host "    Workbench UI: http://localhost:7860"
+  if ($DryRun) {
+    Write-Host "mode=local"
+    Write-Host "workspace=$Root"
+    Write-Host "command=clojure -M:workbench:run -i"
+    return
+  }
+  Stop-OldWorkbench
+  Start-Job -ScriptBlock {
+    Start-Sleep -Seconds 4
+    Start-Process "http://localhost:7860"
+  } | Out-Null
+  & clojure -M:workbench:run -i
+  exit $LASTEXITCODE
+}
+
+$chosen = Get-WorkbenchRuntime
+if ($chosen -eq "local") {
+  Start-LocalWorkbench
+  return
+}
+
+$env:LATERALUS_WORKSPACE = if ($env:LATERALUS_WORKSPACE) { $env:LATERALUS_WORKSPACE } else { "$Root" }
+
+if ($DryRun) {
+  Write-Host "==> runtime: Docker"
+  Write-Host "mode=docker"
+  Write-Host "workspace=$($env:LATERALUS_WORKSPACE)"
+  Write-Host "command=docker compose run --rm --service-ports lateralus -i"
+  return
 }
 
 Write-Host "==> checking Docker"
@@ -132,6 +228,7 @@ Write-Host ""
 Write-Host "==> starting lateralus (interactive profile gate, then workbench)"
 Write-Host "    Workbench UI: http://localhost:7860"
 Write-Host "    Ollama URL inside container: $($env:LATERALUS_DOCKER_OLLAMA_URL)"
+Write-Host "    Workspace: /workspace (host $($env:LATERALUS_WORKSPACE))"
 Write-Host ""
 
 Start-Job -ScriptBlock {
