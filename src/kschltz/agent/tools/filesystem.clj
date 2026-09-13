@@ -37,6 +37,7 @@
             [clojure.string :as str]
             [kschltz.agent.store.file-index :as file-index]
             [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.file-changeset :as file-changeset]
             [kschltz.agent.tools.file-glob :as file-glob]
             [kschltz.agent.tools.file-index :as index-tools]
             [kschltz.agent.tools.file-patch :as file-patch]
@@ -614,6 +615,7 @@
                        {:blocked-paths blocked-paths
                         :max-results max-glob-results})
        "file_patch"   (file-patch/file-patch workspace-root write-opts)
+       "file_change_set" (file-changeset/file-change-set workspace-root write-opts)
        "file_create"  (create-file workspace-root write-opts)
        "file_search"  (search-files workspace-root
                                    (or max-search-file-bytes default-max-search-file-bytes)
