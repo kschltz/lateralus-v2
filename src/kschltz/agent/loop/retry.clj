@@ -3,8 +3,10 @@
 
    Dispatch runs before transition apply, so a parallel `weather_now`
    call looks unregistered. After apply refreshes the registry, retry
-   those unavailable results. If a tool was defined but has no passing
-   tool_test evidence, nudge the follow-up turn to test it."
+   those unavailable results. If a tool was defined but not invoked
+   successfully, nudge a probe `tool_test` (omit expected-output). A
+   same-turn successful call or `portal_submit` skips that nudge;
+   promotion still requires a passing test."
   (:require [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.transitions :as tr]
@@ -47,6 +49,30 @@
            (let [parsed (tr/parse-tool-result (:result entry))]
              (and (= "tool_test" (get-in entry [:call :function :name]))
                   (= name (:tool-name parsed))
+                  (true? (:ok parsed)))))
+         (or results []))))
+
+(defn- runtime-tool-used-successfully?
+  "True when this turn invoked `name` and the result is usable
+   (not unavailable, not input-validation, not JSON `:ok false`)."
+  [results name]
+  (boolean
+   (some (fn [entry]
+           (let [called (get-in entry [:call :function :name])
+                 result (str (:result entry))
+                 parsed (tr/parse-tool-result (:result entry))]
+             (and (= called name)
+                  (not (unavailable-result? entry))
+                  (not (str/includes? result "validation failed"))
+                  (not (false? (:ok parsed))))))
+         (or results []))))
+
+(defn- portal-submit-ok?
+  [results]
+  (boolean
+   (some (fn [entry]
+           (let [parsed (tr/parse-tool-result (:result entry))]
+             (and (= "portal_submit" (get-in entry [:call :function :name]))
                   (true? (:ok parsed)))))
          (or results []))))
 
@@ -96,29 +122,45 @@
                     replace-turn-results (count results) retried))))))
 
 (defn nudge-untested-runtime-tools
-  "Drive define → tool_test → promote → inventory verification."
+  "Drive define → (optional probe) → promote → inventory verification.
+
+   A same-turn successful call of the new tool (or a successful
+   `portal_submit`) skips the test nudge — the tool is already usable.
+   `tool_test` remains required before `tool_promote`."
   [ctx]
   (let [results (:tool/results ctx)
+        defined (defined-tool-names results)
         untested (into []
-                       (remove #(tested-ok? (:tool/results ctx) %))
-                       (defined-tool-names results))
+                       (remove #(tested-ok? results %))
+                       defined)
+        used-or-submitted
+        (into []
+              (filter (fn [name]
+                        (or (runtime-tool-used-successfully? results name)
+                            (portal-submit-ok? results))))
+              untested)
+        still-untested (into [] (remove (set used-or-submitted) untested))
         tested (successful-control-tool-names results "tool_test")
         promoted (into []
                        (remove #(inventory-confirms? results %))
                        (successful-control-tool-names
                         results "tool_promote"))]
     (cond
-      (seq untested)
+      (seq still-untested)
       (-> ctx
-          (assoc :agent/runtime-tool-test-nudge untested)
+          (assoc :agent/runtime-tool-test-nudge still-untested)
           (update-in [:llm/request :messages] (fnil conj [])
                      {:role "system"
                       :content
                       (str "Runtime tool(s) now registered: "
-                           (str/join ", " untested)
-                           ". Call tool_test for each now with real arguments "
-                           "and exact expected-output. Do not claim success or "
-                           "call tool_promote until tool_test returns ok=true.")}))
+                           (str/join ", " still-untested)
+                           ". Probe with tool_test using a JSON object for "
+                           "arguments/args (not a string), e.g. "
+                           "{\"a\":1,\"b\":2}, and omit expected-output. "
+                           "Do not file_read factory source. "
+                           "Live viz: return HTML/JS and portal_submit — "
+                           "do not open JVM sockets. "
+                           "tool_test is required only before tool_promote.")}))
 
       (seq tested)
       (-> ctx

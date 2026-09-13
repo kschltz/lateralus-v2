@@ -332,13 +332,15 @@
                 (let [{:keys [action patch]} (stall/decide ctx)]
                   (case action
                     :exact-stall
-                    (stall/persist ctx (assoc patch
-                                              :agent/loop-continuing? false
-                                              :agent/stall-hit true))
+                    (-> (stall/persist ctx (assoc patch
+                                                   :agent/loop-continuing? false
+                                                   :agent/stall-hit true))
+                        stall/inject-tool-test-args-hint)
                     :shape-stall
-                    (stall/persist ctx (assoc patch
-                                              :agent/loop-continuing? false
-                                              :agent/shape-stall-hit true))
+                    (-> (stall/persist ctx (assoc patch
+                                                   :agent/loop-continuing? false
+                                                   :agent/shape-stall-hit true))
+                        stall/inject-tool-test-args-hint)
                     (-> (stall/persist ctx (assoc patch :agent/loop-continuing? true))
                         (chain/enqueue (-follow-up-chain loop
                                                          (or (:agent/tool-registry ctx) {})))))))))})

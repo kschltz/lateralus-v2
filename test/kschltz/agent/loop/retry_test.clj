@@ -53,7 +53,10 @@
     (is (= ["add_two"] (:agent/runtime-tool-test-nudge out)))
     (is (= "system" (:role last-msg)))
     (is (str/includes? (:content last-msg) "add_two"))
-    (is (str/includes? (:content last-msg) "tool_test"))))
+    (is (str/includes? (:content last-msg) "tool_test"))
+    (is (str/includes? (:content last-msg) "omit expected-output"))
+    (is (str/includes? (:content last-msg) "JSON object"))
+    (is (not (str/includes? (:content last-msg) "exact expected-output")))))
 
 (deftest passing-tool-test-advances-to-promotion-nudge
   (let [envelope (tr/encode-result
@@ -76,7 +79,7 @@
     (is (str/includes? (get-in out [:llm/request :messages 0 :content])
                        "tool_promote"))))
 
-(deftest direct-call-does-not-satisfy-promotion-test-nudge
+(deftest same-turn-call-skips-test-nudge
   (let [define-result
         (tr/encode-result
          {:ok true
@@ -90,9 +93,44 @@
                 :result define-result}
                {:call {:function {:name "add_two"}}
                 :result "3"}]})]
+    (is (nil? (:agent/runtime-tool-test-nudge out)))
+    (is (empty? (get-in out [:llm/request :messages])))))
+
+(deftest same-turn-portal-submit-skips-test-nudge
+  (let [define-result
+        (tr/encode-result
+         {:ok true
+          :tool "tool_define"
+          :tool-name "ws_live"
+          :transition {:op :register-runtime-tool :spec spec}})
+        submit (tr/encode-result {:ok true :tool "portal_submit"
+                                  :cite "@portal/abc"})
+        out (retry/nudge-untested-runtime-tools
+             {:llm/request {:messages []}
+              :tool/results
+              [{:call {:function {:name "tool_define"}}
+                :result define-result}
+               {:call {:function {:name "portal_submit"}}
+                :result submit}]})]
+    (is (nil? (:agent/runtime-tool-test-nudge out)))))
+
+(deftest failed-direct-call-still-nudges-probe
+  (let [define-result
+        (tr/encode-result
+         {:ok true
+          :tool "tool_define"
+          :tool-name "add_two"
+          :transition {:op :register-runtime-tool :spec spec}})
+        out (retry/nudge-untested-runtime-tools
+             {:llm/request {:messages []}
+              :tool/results
+              [{:call {:function {:name "tool_define"}}
+                :result define-result}
+               {:call {:function {:name "add_two"}}
+                :result "Tool 'add_two' input validation failed: {:a missing}"}]})
+        content (get-in out [:llm/request :messages 0 :content])]
     (is (= ["add_two"] (:agent/runtime-tool-test-nudge out)))
-    (is (str/includes? (get-in out [:llm/request :messages 0 :content])
-                       "tool_test"))))
+    (is (str/includes? content "omit expected-output"))))
 
 (deftest passing-tool-test-nudges-promotion-and-inventory
   (let [test-result
@@ -203,7 +241,8 @@
     (is (>= (count @reqs) 2))
     (is (some #(and (= "system" (:role %))
                     (str/includes? (str (:content %)) "add_two")
-                    (str/includes? (str (:content %)) "tool_test"))
+                    (str/includes? (str (:content %)) "tool_test")
+                    (str/includes? (str (:content %)) "omit expected-output"))
               (:messages (second @reqs))))
     (is (some #(= "add_two" (get-in % [:function :name]))
               (:tools (second @reqs))))))

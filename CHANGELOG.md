@@ -4,6 +4,15 @@ All notable changes to `lateralus-v2`.
 
 ## [Unreleased]
 
+### Changed
+- **Runtime `tool_test` UX**: coerce JSON/EDN string `arguments`/`args`
+  into a map before Malli; probe-first nudge after `tool_define` (omit
+  expected-output); skip the test nudge when the new tool already ran
+  successfully this turn; match large HTML via SHA-256 hex or a 32+
+  character substring; stall repeated `tool_test` arg-shape failures with
+  an object-args hint (`phase: probe` does not stall). Workbench/Portal
+  human chat caps huge HTML tool results instead of dumping `pr-str`.
+
 ### Added
 - **Workspace file index (Option D)**: opt-in `:lateralus/store` (`StoreEngine`,
   memory or DuckDB JDBC) and `:lateralus/file-index`. File mutations record

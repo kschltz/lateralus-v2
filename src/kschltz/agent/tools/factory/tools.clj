@@ -164,21 +164,16 @@
    [:name proto/portable-tool-name]])
 
 (def TestInput
-  [:and
-   [:map
-    [:name {:optional true} proto/portable-tool-name]
-    [:tool {:optional true} proto/portable-tool-name]
-    [:arguments {:optional true} :map]
-    [:args {:optional true} :map]
-    [:expected-output {:optional true} :string]
-    [:expected_output {:optional true} :string]
-    [:expected {:optional true} :string]
-    [:input-context {:optional true} :map]
-    [:output-context {:optional true} :map]]
-   [:fn {:error/message "tool_test requires arguments or args"}
-    (fn [input]
-      (or (map? (:arguments input))
-          (map? (:args input))))]])
+  [:map
+   [:name {:optional true} proto/portable-tool-name]
+   [:tool {:optional true} proto/portable-tool-name]
+   [:arguments {:optional true} :any]
+   [:args {:optional true} :any]
+   [:expected-output {:optional true} :string]
+   [:expected_output {:optional true} :string]
+   [:expected {:optional true} :string]
+   [:input-context {:optional true} :map]
+   [:output-context {:optional true} :map]])
 
 (def ListInput
   "Read-only inventory. Extra keys (name/all/page) from small models are ignored."
@@ -213,12 +208,55 @@
   [session input]
   (let [input (coerce-control-input input)
         expected (or (:expected-output input)
-                     (:expected input))]
+                     (:expected input))
+        arguments (or (tool/parse-json-or-edn-map (:arguments input))
+                       (:arguments input))
+        args (or (tool/parse-json-or-edn-map (:args input))
+                 (:args input))]
     (cond-> (dissoc input :expected)
       (string? expected) (assoc :expected-output expected)
+      (map? arguments) (assoc :arguments arguments)
+      (map? args) (assoc :args args)
       (nil? (:name input))
       (assoc :name (or (:tool input)
                        (unique-status-name session [:ephemeral :tested]))))))
+
+(defn sha256-hex
+  "Lowercase hex SHA-256 of `s`."
+  [s]
+  (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                        (.getBytes (str s) java.nio.charset.StandardCharsets/UTF_8))]
+    (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))
+
+(def ^:private large-output-chars 256)
+(def ^:private contains-fingerprint-chars 32)
+
+(defn output-matches?
+  "How `expected` compares to `actual`.
+
+   `:exact` — byte-equal (small tools like add_two).
+   `:sha256` — expected is the SHA-256 hex of actual (optional `sha256:` prefix).
+   `:contains` — actual is large HTML/text and expected is a distinctive substring.
+   `nil` — no match."
+  [expected actual]
+  (let [e (str expected)
+        a (str actual)
+        digest (sha256-hex a)
+        candidate (-> e str/trim str/lower-case (str/replace #"^sha-?256:" ""))]
+    (cond
+      (= e a) :exact
+      (and (= 64 (count candidate)) (= candidate digest)) :sha256
+      (and (>= (count a) large-output-chars)
+           (>= (count e) contains-fingerprint-chars)
+           (< (count e) (count a))
+           (str/includes? a e))
+      :contains
+      :else nil)))
+
+(def ^:private args-object-error
+  (str "tool_test arguments/args must be a JSON object, e.g. "
+       "{\"url\":\"ws://127.0.0.1:8765\"} — not a string. "
+       "EDN maps such as {:url \"ws://127.0.0.1:8765\"} are also accepted."))
 
 (defn- coerce-promote-input
   [session input]
@@ -237,7 +275,7 @@
   tool/Tool
   (-name [_] "tool_define")
   (-description [_]
-    "Create a callable session tool now: name, description, input-schema (EDN Malli string or schema object), invoke (Clojure string of (fn [args ctx] result); one-argument (fn [args] result) is also accepted). Do not use clojure_eval. In a secret-enabled Workbench, code runs in SCI: ctx is nil, Java/I/O/libs/require/interceptors are forbidden, and protocol I/O must use (lateralus.runtime/call-tool \"operator_allowlisted_tool\" args). Runtime tools receive {{secret:label}} handles, never plaintext. Call tool_test after define; only a passing exact-output test permits workspace spec promotion. Emits a transition; compile + registry refresh happen before compose.")
+    "Create a callable session tool now: name, description, input-schema (EDN Malli string or schema object), invoke (Clojure string of (fn [args ctx] result); one-argument (fn [args] result) is also accepted). Do not use clojure_eval. In a secret-enabled Workbench, code runs in SCI: ctx is nil, Java/I/O/libs/require/interceptors are forbidden, and protocol I/O must use (lateralus.runtime/call-tool \"operator_allowlisted_tool\" args). Runtime tools receive {{secret:label}} handles, never plaintext. Call the tool this turn (or portal_submit). tool_test is only required before tool_promote — probe first (omit expected-output). Live viz: return HTML/JS and portal_submit; do not open JVM sockets. Emits a transition; compile + registry refresh happen before compose.")
   (-input-schema [_] DefineInput)
   (-output-schema [_] :string)
   (-invoke [_ spec _ctx]
@@ -296,13 +334,13 @@
   tool/Tool
   (-name [_] "tool_test")
   (-description [_]
-    "Test one tool_define tool before promotion. Calls it with arguments (or args) through the current guarded registry and passes only when its string result exactly equals expected-output (aliases: expected_output, expected). name may be omitted when this session has exactly one ephemeral tool; tool is an alias for name. Omit expected-output to probe: the result includes actual and does not mark the tool tested. A passing test is tied to the current tool spec; redefining the tool invalidates it. Inspect actual on failure, fix or adjust the tool, and test again before tool_promote.")
+    "Test one tool_define tool before promotion. arguments/args must be a JSON object (not a string), e.g. {\"url\":\"ws://127.0.0.1:8765\"}; EDN maps also work. Omit expected-output to probe: the result includes actual and does not mark the tool tested. Then retry with expected-output set to that actual string, its sha256 hex, or (for large HTML) a 32+ char distinctive substring. name may be omitted when this session has exactly one ephemeral tool; tool is an alias for name. A passing test is required before tool_promote and is invalidated by redefinition. Do not file_read factory source to debug arg shape.")
   (-input-schema [_] TestInput)
   (-output-schema [_] :string)
   (-invoke [_ raw-input ctx]
     (if-not (proto/runtime-tool-store? session)
       (tr/encode-result {:ok false :tool "tool_test"
-                         :error "No factory session on context"})
+                           :error "No factory session on context"})
       (let [{:keys [name arguments args expected-output]}
             (coerce-test-input session raw-input)]
         (cond
@@ -316,7 +354,11 @@
                 runtime-tool (get (proto/-registry session) name)
                 effective-tool (or (tool/resolve-tool
                                     (:agent/tool-registry ctx) name)
-                                   runtime-tool)]
+                                   runtime-tool)
+                invoke-args (or (tool/parse-json-or-edn-map arguments)
+                                 (tool/parse-json-or-edn-map args)
+                                 arguments
+                                 args)]
             (cond
               (nil? spec)
               (tr/encode-result {:ok false :tool "tool_test"
@@ -328,8 +370,20 @@
                                  :phase "unavailable"
                                  :error (str "Runtime tool is not callable: " name)})
 
+              (not (map? invoke-args))
+              (tr/encode-result
+               {:ok false
+                :tool "tool_test"
+                :tool-name name
+                :phase "args"
+                :error args-object-error})
+
               :else
-              (let [actual (tool/invoke-tool effective-tool (or arguments args) ctx)]
+              (let [actual (tool/invoke-tool effective-tool invoke-args ctx)
+                    match (when-not (invocation-error? name actual)
+                            (when (string? expected-output)
+                              (output-matches? expected-output actual)))
+                    passed? (some? match)]
                 (cond
                   (not (string? expected-output))
                   (tr/encode-result
@@ -338,32 +392,32 @@
                     :tool-name name
                     :phase "probe"
                     :actual actual
-                    :error (str "tool_test requires expected-output. "
-                                "If actual is correct, retry with expected-output "
-                                "set to that exact string.")})
+                    :error (str "Probe only — tool_test did not mark this tool tested. "
+                                "If actual is correct, retry with expected-output set to "
+                                "that exact string, its sha256 hex, or (for large HTML) a "
+                                "distinctive 32+ character substring.")})
 
                   :else
-                  (let [passed? (and (not (invocation-error? name actual))
-                                     (= expected-output actual))]
-                    (tr/encode-result
-                     (cond-> {:ok passed?
-                              :tool "tool_test"
-                              :tool-name name
-                              :expected expected-output
-                              :actual actual}
-                       (not passed?)
-                       (assoc :phase (if (invocation-error? name actual)
-                                       "execution"
-                                       "assertion")
-                              :error (if (invocation-error? name actual)
-                                       "Tool invocation failed"
-                                       "Actual output did not exactly match expected-output"))
-                       passed?
-                       (assoc :pending "same-exchange"
-                              :transition
-                              {:op :record-runtime-tool-test
-                               :tool-name name
-                               :spec-id (proto/spec-id spec)})))))))))))))
+                  (tr/encode-result
+                   (cond-> {:ok passed?
+                            :tool "tool_test"
+                            :tool-name name
+                            :expected expected-output
+                            :actual actual}
+                     match (assoc :match (clojure.core/name match))
+                     (not passed?)
+                     (assoc :phase (if (invocation-error? name actual)
+                                     "execution"
+                                     "assertion")
+                            :error (if (invocation-error? name actual)
+                                     "Tool invocation failed"
+                                     "Actual output did not match expected-output (exact, sha256, or large-output substring)"))
+                     passed?
+                     (assoc :pending "same-exchange"
+                            :transition
+                            {:op :record-runtime-tool-test
+                             :tool-name name
+                             :spec-id (proto/spec-id spec)}))))))))))))
 
 (defrecord ToolListRuntimeTool [session]
   tool/Tool

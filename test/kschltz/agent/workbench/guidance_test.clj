@@ -22,6 +22,9 @@
   (is (re-find #"tool_promote" guidance/self-update-system-guidance))
   (is (re-find #"not clojure_eval" guidance/self-update-system-guidance))
   (is (re-find #"protocol-backed" guidance/self-update-system-guidance))
+  (is (re-find #"portal_submit" guidance/self-update-system-guidance))
+  (is (re-find #"omit expected-output" guidance/self-update-system-guidance))
+  (is (not (re-find #"exact expected output" guidance/self-update-system-guidance)))
   (is (not (re-find #"live HTTP use java\.net\.URL"
                     guidance/self-update-system-guidance)))
   (is (re-find #"workflow_run" guidance/self-update-system-guidance))

@@ -38,5 +38,8 @@
       (is (some? guide))
       (is (re-find #"tool_define" factory.plugin/system-guidance))
       (is (re-find #"tool_test" factory.plugin/system-guidance))
+      (is (re-find #"portal_submit" factory.plugin/system-guidance))
+      (is (re-find #"omit expected-output" factory.plugin/system-guidance))
+      (is (not (re-find #"exact expected output" factory.plugin/system-guidance)))
       (is (re-find #"tool_define"
                    (:agent/system-append ((:enter guide) {})))))))

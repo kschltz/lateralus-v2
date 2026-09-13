@@ -10,13 +10,33 @@
             [kschltz.agent.portal.protocol :as ui]
             [kschltz.agent.runtime :as runtime]))
 
+(def ^:private tool-result-preview-chars 400)
+
+(defn- htmlish-tool-result?
+  [s]
+  (let [lower (str/lower-case (str s))]
+    (or (str/includes? lower "<html")
+        (str/includes? lower "<!doctype")
+        (and (str/includes? lower "<") (str/includes? lower "</")))))
+
+(defn- preview-tool-result
+  [result]
+  (let [s (str result)
+        n (count s)]
+    (cond
+      (and (htmlish-tool-result? s) (>= n 256))
+      (str "HTML (" n " chars) — use portal_submit; do not paste into chat")
+      (> n tool-result-preview-chars)
+      (str (subs s 0 tool-result-preview-chars) "… (" n " chars)")
+      :else s)))
+
 (defn- tool-summary
   [tools]
   (str "The assistant used tools but produced no final text.\n"
        (str/join "\n"
                  (map (fn [{:keys [call result]}]
                         (str "- " (get-in call [:function :name])
-                             ": " (pr-str result)))
+                             ": " (preview-tool-result result)))
                       tools))))
 
 (defn- assistant-event

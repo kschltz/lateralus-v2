@@ -19,7 +19,12 @@ The factory is the missing bridge:
 
 1. **Define** — compile a persistable spec into a `Tool`.
 2. **Test** — `tool_test` invokes the tool through the current guarded
-   registry with real arguments and requires an exact expected string.
+   registry. Omit `expected-output` to probe (`phase: probe`, not tested).
+   A passing match is exact (small strings), SHA-256 hex of the actual
+   output, or a 32+ character substring when actual is large (≥256 chars).
+   `arguments`/`args` must be a JSON object (or EDN map), not a string.
+   A passing test is required before `tool_promote`, not before using the
+   tool in this session.
 3. **Promote** — write an on-disk spec/catalog entry (or generated source in
    a non-sandboxed profile). Promotion is explicit and requires a passing
    test of the current spec fingerprint.
@@ -29,7 +34,7 @@ The factory is the missing bridge:
 | Tool | Role |
 |------|------|
 | `tool_define` | Propose `:register-runtime-tool`. Compile + overlay happen in apply. |
-| `tool_test` | Invoke with real arguments; record exact-output evidence for the current spec. |
+| `tool_test` | Invoke with real object args; probe (omit expected-output) or record exact / sha256 / large-substring evidence. |
 | `tool_list_runtime` | Read-only inventory of ephemeral + promoted overlay names. Extra keys (`name`, `all`, `page`) are ignored so small models do not burn a turn on a closed empty map. |
 | `tool_forget` | Drop a runtime tool from the session overlay. |
 | `tool_promote` | Write a workspace spec + catalog in sandbox mode; non-sandboxed operator profiles may also generate project source. |
@@ -65,8 +70,10 @@ or raw network access.
 `:as-plugin true` is available only outside the sandbox. Sandboxed runtime
 interceptors are forbidden because they would receive the host context.
 
-Defining a tool never writes files. Redefinition invalidates prior test
-evidence. Promotion is always explicit and refuses an untested current spec.
+Defining a tool never writes files. The new tool is callable on the same
+turn (and live viz should return HTML/JS for `portal_submit` rather than
+opening JVM sockets). Redefinition invalidates prior test evidence.
+Promotion is always explicit and refuses an untested current spec.
 
 ## Integrant
 
