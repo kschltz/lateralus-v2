@@ -1,0 +1,58 @@
+;; Ollama Cloud + CHAT | Portal workbench (README / live demo).
+;;   OLLAMA_API_KEY=… clojure -M:workbench:run -i \
+;;     --config resources/lateralus/demo-workbench-cloud.edn \
+;;     --base-url https://ollama.com/v1 \
+;;     --model kimi-k2.7-code
+;; API key is read from OLLAMA_API_KEY (never stored in EDN).
+{:lateralus/llm-client     {:impl :http
+                            :base-url "https://ollama.com/v1"}
+ :lateralus/llm-config     {:base-url "https://ollama.com/v1"
+                            :model "kimi-k2.7-code"}
+ :lateralus/embedder       {:method :noop}
+ :lateralus/memory-backend {:impl :kg-bm25
+                            :store {:backend :memory}}
+ :lateralus/memory-plugin  {:backend  #ig/ref :lateralus/memory-backend
+                            :embedder #ig/ref :lateralus/embedder
+                            :top-y    3
+                            :last-n   5}
+ :lateralus/file-tools           {}
+ :lateralus/self-awareness-tools {}
+ :lateralus/clojure-tools        {}
+ :lateralus/logging             {}
+ :lateralus/cli-ui              {:enabled? :auto :theme :default}
+ :lateralus/thinking            {:mode :preview}
+ :lateralus/workbench           {:enabled? true
+                                 :host "127.0.0.1"
+                                 :port 7860
+                                 :portal? true
+                                 :open-browser? false
+                                 :app false
+                                 :window-title "lateralus"}
+ :lateralus/workbench-plugin    {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/workbench-tools     {:workbench #ig/ref :lateralus/workbench}
+ :lateralus/web-tools      {:provider :none}
+ :lateralus/runtime-tools        {:enabled? true :network? true}
+ :lateralus/loop-opts            {:max-tool-calls-per-turn 100
+                                  :max-tool-calls-per-exchange 20
+                                  :tool-content-caps {"clojure_eval" 12000
+                                                      "clojure_add_lib" 12000}}
+ :lateralus/tool-registry        [#ig/ref :lateralus/file-tools
+                                  #ig/ref :lateralus/self-awareness-tools
+                                  #ig/ref :lateralus/clojure-tools
+                                  #ig/ref :lateralus/web-tools
+                                  #ig/ref :lateralus/runtime-tools
+                                  #ig/ref :lateralus/workbench-tools]
+ :lateralus/tools-plugin         {:registry #ig/ref :lateralus/tool-registry}
+ :lateralus/plugins              [#ig/ref :lateralus/memory-plugin
+                                  #ig/ref :lateralus/tools-plugin
+                                  #ig/ref :lateralus/workbench-plugin]
+ :lateralus/agent                {:plugins        #ig/ref :lateralus/plugins
+                                  :llm-client     #ig/ref :lateralus/llm-client
+                                  :llm-config     #ig/ref :lateralus/llm-config
+                                  :embedder       #ig/ref :lateralus/embedder
+                                  :memory-backend #ig/ref :lateralus/memory-backend
+                                  :logging        #ig/ref :lateralus/logging
+                                  :cli-ui         #ig/ref :lateralus/cli-ui
+                                  :thinking       #ig/ref :lateralus/thinking
+                                  :workbench      #ig/ref :lateralus/workbench
+                                  :loop-opts      #ig/ref :lateralus/loop-opts}}

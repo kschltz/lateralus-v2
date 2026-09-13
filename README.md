@@ -7,6 +7,24 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 **License:** [Eclipse Public License 2.0](LICENSE)  
 **Suite:** 940 tests / 3,142 assertions, green; `clj-kondo` 0 errors
 
+## Demo
+
+Live CHAT | Portal session on **Ollama Cloud** (`kimi-k2.7-code`): ask for a black-angora pet-shop landing page, watch it land in Portal, then float / resize / dock the pane.
+
+<video src="docs/assets/workbench-demo.mp4" controls playsinline poster="docs/assets/workbench-demo-poster.jpg" width="720">
+Your browser does not support video. <a href="docs/assets/workbench-demo.mp4">Download the workbench demo (mp4)</a>
+</video>
+
+Reproduce locally (needs `OLLAMA_API_KEY`):
+
+```bash
+clojure -M:workbench:run -i \
+  --config resources/lateralus/demo-workbench-cloud.edn \
+  --base-url https://ollama.com/v1 \
+  --model kimi-k2.7-code
+# open http://localhost:7860
+```
+
 ## Quick start
 
 **Workbench** (prompts for local Clojure vs Docker):
@@ -18,7 +36,7 @@ Greenfield rewrite of [Lateralus](https://github.com/kschltz/lateralus) (v1 arch
 ./scripts/start-workbench --docker       # skip prompt: Compose uberjar
 ```
 
-Open **http://localhost:7860** (Portal iframe on **:7870**). Details: [`docker/README.md`](docker/README.md).
+Open **http://localhost:7860** (Portal is served on the same origin/port). Details: [`docker/README.md`](docker/README.md).
 
 On a TTY the script asks whether to use **local Clojure** (repo as workspace — `file_create`, `clojure_*`, `tool_promote`, `reload_runtime`) or **Docker**. Docker bind-mounts the checkout at `/workspace` so file tools see the same tree; remaining gaps are the isolated `/data/config` profile volume and Ollama Cloud catalog merge (off unless `LATERALUS_LIST_CLOUD=1`).
 
