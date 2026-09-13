@@ -252,6 +252,19 @@
   [ret]
   (if (string? ret) ret (pr-str ret)))
 
+(defn invoke-tool-fn
+  "Invoke a runtime-authored function with the supported two-arg/one-arg
+   compatibility contract. Promoted source calls this same helper so warm and
+   restarted tools cannot disagree about arity."
+  [invoke-fn args ctx]
+  (try
+    (invoke-fn args ctx)
+    (catch clojure.lang.ArityException two-arity-error
+      (try
+        (invoke-fn args)
+        (catch clojure.lang.ArityException _
+          (throw two-arity-error))))))
+
 (deftype RuntimeDefinedTool [spec invoke-fn schema sandbox-config]
   tool/Tool
   (-name [_] (:name spec))
@@ -263,13 +276,7 @@
      (if (:enabled? sandbox-config)
        (sandbox/invoke-sandboxed
         invoke-fn args ctx (set (:call-tools sandbox-config)))
-       (try
-         (invoke-fn args ctx)
-         (catch clojure.lang.ArityException two-arity-error
-           (try
-             (invoke-fn args)
-             (catch clojure.lang.ArityException _
-               (throw two-arity-error))))))))
+       (invoke-tool-fn invoke-fn args ctx))))
   tool/ToolTrust
   (-trust-tier [_] :untrusted-runtime))
 
@@ -380,6 +387,7 @@
 (m/=> compile-fn [:=> [:cat :string] fn?])
 (m/=> sandbox-compile-fn [:=> [:cat :string] fn?])
 (m/=> parse-coords [:=> [:cat [:maybe :string]] [:maybe :map]])
+(m/=> invoke-tool-fn [:=> [:cat fn? :map :any] :any])
 
 (defn instrument!
   []
