@@ -4,7 +4,9 @@
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.tools :as plugins.tools]
-            [kschltz.agent.tool :as tool]))
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.tools.workflow.protocol :as workflow.proto]
+            [kschltz.agent.tools.workflow.session :as workflow.session]))
 
 (deftype FakeTool []
   tool/Tool
@@ -29,6 +31,24 @@
     (let [plugin (plugins.tools/tools-plugin)]
       (is (vector? plugin))
       (is (= 1 (count plugin))))))
+
+(deftest tools-plugin-rehydrates-and-persists-workflow-snapshot
+  (let [engine (workflow.session/workflow-session)
+        action {:name "durable" :needs [] :produces ["proof"]
+                :run {:op :literal :values {"proof" true}}}
+        snapshot {:actions {"durable" action} :store {} :last-run nil}
+        ix (first (plugins.tools/tools-plugin
+                   {}
+                   {:workflow-engine engine}))
+        entered ((:enter ix) {:agent/state {:agent/workflow snapshot}})]
+    (is (= 1 (:action-count (workflow.proto/-status engine))))
+    (workflow.proto/-run! engine {})
+    (let [left ((:leave ix) entered)]
+      (is (true? (get-in left
+                         [:agent/state-delta :agent/workflow :store "proof"])))
+      (is (= :done
+             (get-in left
+                     [:agent/state-delta :agent/workflow :last-run :status]))))))
 
 (deftest session-tool-overlay-filters-seed-and-refresh
   (let [registry {"fake" (->FakeTool)

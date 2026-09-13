@@ -606,9 +606,12 @@
                  {:runtime/enabled? (get opts :enabled? true)})]
     (rebuildable-registry (build) build)))
 
-(defmethod ig/init-key :lateralus/tools-plugin [_ {:keys [registry mcp-session factory-session]}]
+(defmethod ig/init-key :lateralus/tools-plugin
+  [_ {:keys [registry mcp-session factory-session workflow-tools]}]
   (plugins.tools/tools-plugin registry {:mcp-session mcp-session
-                                        :factory-session factory-session}))
+                                        :factory-session factory-session
+                                        :workflow-engine
+                                        (-> workflow-tools meta :workflow/engine)}))
 
 (defn- rebuild-plugin
   [p]
@@ -711,7 +714,8 @@
                                     (ig/ref :lateralus/factory-tools) (ig/ref :lateralus/workflow-tools)]
    :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)
                                     :mcp-session (ig/ref :lateralus/mcp-tools)
-                                    :factory-session (ig/ref :lateralus/factory-session)}
+                                    :factory-session (ig/ref :lateralus/factory-session)
+                                    :workflow-tools (ig/ref :lateralus/workflow-tools)}
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)
                                     (ig/ref :lateralus/factory-plugin)
