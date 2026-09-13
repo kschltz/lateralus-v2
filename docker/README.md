@@ -1,18 +1,29 @@
 # lateralus Docker
 
 Ships the JVM uberjar (workbench included). By default it **references host
-Ollama over the network** — no copying or mounting `~/.ollama`.
+Ollama over the network** — no copying or mounting `~/.ollama`. The host
+checkout is bind-mounted at `/workspace` so file tools match local Clojure.
 
 ## Quick start
 
 ```bash
 # Host: Ollama Desktop (or `ollama serve`) with your models pulled
-./scripts/start-workbench
+./scripts/start-workbench                  # TTY: asks local Clojure vs Docker
+./scripts/start-workbench --docker      # skip the prompt
+./scripts/start-workbench --local       # clojure -M:workbench:run -i
 ```
 
 Windows PowerShell: `.\scripts\start-workbench.ps1`
 
-`start-workbench` will:
+On a TTY, `start-workbench` asks **1) local Clojure** vs **2) Docker**. `--local` / `--docker` skip the menu. `--dry-run` prints the chosen command.
+
+Local Clojure is the fuller operator surface: it runs as your login user against
+`~/.config/lateralus` and merges Ollama Cloud ids into Model `?` when keyed.
+Docker now bind-mounts the checkout so `file_*` / `clojure_*` see the same tree,
+but it still uses uid `10001` (writes to host-owned files may fail), an isolated
+profile volume, and skips the cloud catalog unless `LATERALUS_LIST_CLOUD=1`.
+
+Docker `start-workbench --docker` will:
 
 1. Stop any leftover workbench on `:7860` / `:7870`, then rebuild the uberjar when `src/` or `resources/` changed (set `LATERALUS_DOCKER_NO_CACHE=1` to force a full rebuild)
 2. Stop compose `ollama` if it was stealing `:11434`
@@ -45,6 +56,8 @@ name — the iframe no longer depends on a published **7870**.
 | `LATERALUS_PORTAL_PORT` | `7870` (Docker) | Private Portal server port (optional; iframe uses :7860) |
 | `OLLAMA_API_KEY` | _(empty)_ | Required for Ollama Cloud profiles |
 | `LATERALUS_CONFIG_HOME` | `/data/config` | Profile store inside the container |
+| `LATERALUS_WORKBENCH_RUNTIME` | _(prompt / docker)_ | `local` or `docker` (skips the menu) |
+| `LATERALUS_WORKSPACE` | host checkout | Bind-mounted at `/workspace` (JVM cwd for file tools) |
 
 ## Ollama Cloud inside Docker
 

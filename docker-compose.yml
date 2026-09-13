@@ -40,6 +40,10 @@ services:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # File tools / clojure_* / factory resolve "." against the JVM cwd.
+    # Bind-mount the host checkout so Docker sees the same workspace as
+    # `clojure -M:workbench:run` (override with LATERALUS_WORKSPACE).
+    working_dir: /workspace
     environment:
       LATERALUS_WORKBENCH_HOST: "0.0.0.0"
       LATERALUS_WORKBENCH_PUBLIC_HOST: localhost
@@ -57,6 +61,7 @@ services:
       LATERALUS_CONFIG_HOME: /data/config
     volumes:
       - lateralus-config:/data/config
+      - ${LATERALUS_WORKSPACE:-.}:/workspace
     ports:
       - "7860:7860"
       - "7870:7870"
