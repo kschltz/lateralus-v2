@@ -14,6 +14,7 @@
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.config.catalog :as catalog]
             [kschltz.agent.transitions :as tr]
+            [kschltz.agent.workspace :as workspace]
             [malli.core :as m]
             [malli.instrument :as mi]))
 
@@ -53,6 +54,10 @@
    tr/MemoryPolicyPatch
    [:fn {:error/message "provide at least one memory policy field"}
     (fn [m] (boolean (seq m)))]])
+
+(def SetWorkspaceRootInput
+  [:map {:closed true}
+   [:workspace-root [:string {:min 1}]]])
 
 (def ReloadRuntimeInput
   [:and
@@ -183,6 +188,34 @@
                        :tool-name tool-name
                        :enabled enabled}})))))
 
+(defrecord SetWorkspaceRootTool []
+  tool/Tool
+  (-name [_] "set_workspace_root")
+  (-description [_]
+    "Change this session's workspace root for file and Clojure tools.
+     The path must exist and be a directory. Applies before the next
+     tool call in this exchange and persists for the session.")
+  (-input-schema [_] SetWorkspaceRootInput)
+  (-output-schema [_] :string)
+  (-invoke [_ {:keys [workspace-root]} ctx]
+    (let [before-root (workspace/effective-root (:agent/state ctx)
+                                              (:agent/workspace-default-root ctx))
+          err (workspace/validate-root workspace-root)]
+      (if err
+        (tr/encode-result
+         {:ok false
+          :tool "set_workspace_root"
+          :error err
+          :workspace-root workspace-root})
+        (tr/encode-result
+         {:ok true
+          :tool "set_workspace_root"
+          :pending "same-exchange"
+          :before {:workspace-root before-root}
+          :after {:workspace-root (workspace/normalize-root workspace-root)}
+          :transition {:op :set-workspace-root
+                       :workspace-root workspace-root}})))))
+
 (defrecord SetMemoryPolicyTool []
   tool/Tool
   (-name [_] "set_memory_policy")
@@ -274,6 +307,7 @@
       "set_loop_policy"  (->SetLoopPolicyTool)
       "set_tool_enabled"  (->SetToolEnabledTool)
       "set_memory_policy" (->SetMemoryPolicyTool)
+      "set_workspace_root" (->SetWorkspaceRootTool)
       "reload_runtime"    (->ReloadRuntimeTool)
       "list_llm_models"  (->ListLlmModelsTool cat)})))
 

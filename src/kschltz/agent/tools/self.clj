@@ -12,7 +12,8 @@
    helper, satisfying the project rule that every capability
    exposed to the model must be protocol-bound and instrumented."
   (:require [cheshire.core :as json]
-            [kschltz.agent.tool :as tool])
+            [kschltz.agent.tool :as tool]
+            [kschltz.agent.workspace :as workspace])
   (:import [java.lang Runtime]
            [java.time Instant]))
 
@@ -69,8 +70,9 @@
                        :memory      (or (:agent/memory state)
                                        (some-> (:memory/backend ctx) meta :memory-backend/impl name)
                                        "unknown")}
+          effective   (workspace/effective-root state workspace-root)
           location    {:cwd            (System/getProperty "user.dir")
-                       :workspace-root (or workspace-root "unset")}
+                       :workspace-root effective}
           context     {:message-count (count (:agent/last-request-messages state))}
           usage       (:agent/token-usage state)
           payload     {:time        iso-time
@@ -96,10 +98,13 @@
 (defn- runtime-summary
   [ctx workspace-root]
   (let [state (:agent/state ctx)
-        agent-map (:agent/agent-map ctx)]
+        agent-map (:agent/agent-map ctx)
+        default (or workspace-root
+                    (:agent/workspace-default-root ctx)
+                    ".")]
     {:session-id (or (:agent/session-id state)
                      (:exchange/session-id ctx))
-     :workspace-root (or workspace-root "unset")
+     :workspace-root (workspace/effective-root state default)
      :configuration
      {:model (:model state)
       :base-url (:base-url state)

@@ -781,3 +781,68 @@ body[data-portal-mode="hidden"] #portal-show { display: inline-flex; }
 }
 .field-status.ok { color: var(--accent); }
 .field-status.err { color: #ff8d7a; }
+.workspace-root-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+.folder-picker-card {
+  width: min(34rem, 100%);
+  max-height: min(80vh, 46rem);
+  display: flex;
+  flex-direction: column;
+}
+.folder-picker-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0.35rem 0 0.5rem;
+}
+.folder-picker-path {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 10rem;
+  max-height: min(42vh, 22rem);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.folder-picker-list li {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+.folder-picker-list li:last-child { border-bottom: none; }
+.folder-picker-list button {
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 12px/1.35 "IBM Plex Mono", ui-monospace, monospace;
+  cursor: pointer;
+}
+.folder-picker-list button:hover,
+.folder-picker-list button:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  outline: none;
+}
+.folder-picker-list .empty {
+  padding: 0.75rem 0.55rem;
+  color: var(--muted);
+  font-size: 12px;
+}
+.folder-picker-actions { margin-top: 0.55rem; }

@@ -118,7 +118,14 @@
         (do
           (require 'kschltz.agent.workbench.settings-http)
           ((resolve 'kschltz.agent.workbench.settings-http/list-models) r q))
-        {:models [] :error "runtime not attached yet"}))}
+        {:models [] :error "runtime not attached yet"}))
+    :browse-fn
+    (fn [q]
+      (if-let [r @runtime-atom]
+        (do
+          (require 'kschltz.agent.workbench.settings-http)
+          ((resolve 'kschltz.agent.workbench.settings-http/browse-workspace) r q))
+        {:error "runtime not attached yet"}))}
    :secret-ops
    {:view-fn
     (fn []

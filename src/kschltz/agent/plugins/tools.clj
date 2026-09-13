@@ -14,7 +14,8 @@
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as factory.proto]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
-            [kschltz.agent.tools.workflow.protocol :as workflow.proto]))
+            [kschltz.agent.tools.workflow.protocol :as workflow.proto]
+            [kschltz.agent.workspace :as workspace]))
 
 (defn live-registry
   "Merge static tool map with live MCP and factory session registries."
@@ -31,6 +32,18 @@
   "Remove session-disabled tool names from `registry`."
   [registry state]
   (apply dissoc (or registry {}) (or (:agent/disabled-tools state) [])))
+
+(defn- workspace-transform
+  "Rebind filesystem/Clojure tools from the current ctx state when the
+   workspace plugin seeded opts on ctx."
+  [ctx registry]
+  (let [opts (:agent/workspace-tool-opts ctx)
+        default (:agent/workspace-default-root ctx)]
+    (if opts
+      (workspace/rebind-registry registry opts
+                                 (workspace/effective-root (:agent/state ctx)
+                                                           default))
+      registry)))
 
 (defn refresh-live-tools
   "Re-merge static ∪ MCP ∪ factory registries onto ctx and patch
@@ -52,9 +65,10 @@
                    (:agent/static-tool-registry ctx)
                    {})
         raw-reg (live-registry static session factory)
-        transformed-reg (if-let [transform (:agent/tool-registry-transform ctx)]
-                          (transform raw-reg)
-                          raw-reg)
+        transformed-reg (let [reg (if-let [transform (:agent/tool-registry-transform ctx)]
+                                    (transform raw-reg)
+                                    raw-reg)]
+                          (workspace-transform ctx reg))
         reg (apply-tool-overlay transformed-reg (:agent/state ctx))
         req (:llm/request ctx)]
     (cond-> (assoc ctx :agent/tool-registry reg)

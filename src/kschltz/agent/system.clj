@@ -37,7 +37,9 @@
             [kschltz.agent.plugins.secrets :as plugins.secrets]
             [kschltz.agent.plugins.skills :as plugins.skills]
             [kschltz.agent.plugins.tools :as plugins.tools]
+            [kschltz.agent.plugins.workspace :as plugins.workspace]
             [kschltz.agent.plugins.workbench :as plugins.workbench]
+            [kschltz.agent.workspace :as workspace]
             [kschltz.agent.tools.filesystem :as tools.filesystem]
             [kschltz.agent.tools.self :as tools.self]
             [kschltz.agent.tools.config :as tools.config]
@@ -552,6 +554,19 @@
     (session.store-engine/store-session-store store)
     (session.store/create-store (or sessions-dir "sessions/workbench"))))
 
+(defmethod ig/init-key :lateralus/workspace-opts [_ {:keys [file-tools clojure-tools default-root]}]
+  "Shared workspace-root tool configuration for file/Clojure tools and
+   the workspace plugin. Kept as a plain map so CLI overrides and the
+   settings HTTP surface can read the configured default."
+  (let [file (or file-tools {})
+        clj (or clojure-tools {})]
+    {:file-tools file
+     :clojure-tools clj
+     :default-root (or default-root (:workspace-root file) ".")}))
+
+(defmethod ig/init-key :lateralus/workspace-plugin [_ opts]
+  (plugins.workspace/workspace-plugin (or opts {})))
+
 (defmethod ig/init-key :lateralus/file-tools [_ opts]
   "Convenience Integrant component that returns the filesystem tool
    registry (`file_read`, `file_list`, `file_info`, `file_glob`,
@@ -620,7 +635,8 @@
     p))
 
 (defmethod ig/init-key :lateralus/agent
-  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts cli-ui thinking portal workbench]}]
+  [_ {:keys [plugins llm-client embedder memory-backend llm-config logging loop-opts
+             cli-ui thinking portal workbench factory-session workspace-opts]}]
   ;; The agent-map is what the runtime consumes. `:initial-state`
   ;; seeds the runtime's state atom so compose-context sees the
   ;; LLM config (:base-url / :api-key / :model) and any other
@@ -650,6 +666,9 @@
      :agent/thinking    (or thinking (thinking/normalize {:mode :off}))
      :agent/workbench   workbench
      :agent/portal      portal
+     :agent/factory-session factory-session
+     :agent/workspace-tool-opts workspace-opts
+     :agent/workspace-default-root (:default-root (or workspace-opts {}))
      :agent/plugins     plugins
      :agent/rebuild-chain rebuild-chain
      :assembled         assembled
@@ -692,6 +711,9 @@
    :lateralus/cli-ui              {:enabled? :auto :theme :default}
    :lateralus/thinking            {:mode :preview}
    :lateralus/loop-opts            {}
+   :lateralus/workspace-opts         {:file-tools {:workspace-root "."}
+                                     :clojure-tools {:workspace-root "."}
+                                     :default-root "."}
    :lateralus/file-tools           {:workspace-root "."}
    :lateralus/self-awareness-tools {:workspace-root "."}
    :lateralus/clojure-tools        {:workspace-root "."}
@@ -716,8 +738,10 @@
                                     :mcp-session (ig/ref :lateralus/mcp-tools)
                                     :factory-session (ig/ref :lateralus/factory-session)
                                     :workflow-tools (ig/ref :lateralus/workflow-tools)}
+   :lateralus/workspace-plugin     (ig/ref :lateralus/workspace-opts)
    :lateralus/plugins              [(ig/ref :lateralus/memory-plugin)
                                     (ig/ref :lateralus/tools-plugin)
+                                    (ig/ref :lateralus/workspace-plugin)
                                     (ig/ref :lateralus/factory-plugin)
                                     (ig/ref :lateralus/stream-plugin)]
    :lateralus/agent                {:plugins        (ig/ref :lateralus/plugins)
@@ -728,4 +752,6 @@
                                     :logging        (ig/ref :lateralus/logging)
                                     :cli-ui         (ig/ref :lateralus/cli-ui)
                                     :thinking       (ig/ref :lateralus/thinking)
-                                    :loop-opts      (ig/ref :lateralus/loop-opts)}})
+                                    :loop-opts      (ig/ref :lateralus/loop-opts)
+                                    :factory-session (ig/ref :lateralus/factory-session)
+                                    :workspace-opts (ig/ref :lateralus/workspace-opts)}})

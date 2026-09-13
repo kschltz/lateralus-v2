@@ -21,7 +21,8 @@
             [kschltz.agent.tools.factory.protocol :as factory.proto]
             [kschltz.agent.tools.mcp.protocol :as mcp-proto]
             [kschltz.agent.tools.mcp.schemas :as mcp.schemas]
-            [kschltz.agent.transitions :as tr]))
+            [kschltz.agent.transitions :as tr]
+            [kschltz.agent.workspace :as workspace]))
 
 (defn- normalize-transition
   "Coerce a JSON-round-tripped transition map into the schema shape
@@ -93,6 +94,20 @@
   [^Throwable t]
   (let [p (:phase (ex-data t))]
     (if (keyword? p) (name p) "tool")))
+
+(defn- reconcile-workspace-root-op
+  "Validate and apply a workspace-root change to the factory session."
+  [factory op]
+  (if-not (factory.proto/runtime-tool-store? factory)
+    {:ok true}
+    (try
+      (let [root (factory.proto/-set-workspace-root! factory (:workspace-root op))]
+        {:ok true :workspace-root root})
+      (catch Throwable t
+        {:ok false
+         :error (or (ex-message t) (.getName (class t)))
+         :phase (or (:phase (ex-data t)) "workspace-root")
+         :class (.getName (class t))}))))
 
 (defn- reconcile-mcp-op
   "Run live McpSession I/O for one MCP transition. Returns
@@ -244,6 +259,24 @@
                         :outcomes outcomes
                         :factory-outcomes (conj factory-outcomes
                                                 {:op op :outcome outcome})}))
+
+                   (= :set-workspace-root (:op op))
+                   (let [err (workspace/validate-root (:workspace-root op))]
+                     (if err
+                       {:applied applied
+                        :outcomes (conj outcomes
+                                        {:op op
+                                         :outcome {:ok false
+                                                   :error err
+                                                   :phase "workspace-root"
+                                                   :class "clojure.lang.ExceptionInfo"}})
+                        :factory-outcomes factory-outcomes}
+                       (let [outcome (reconcile-workspace-root-op factory op)]
+                         {:applied (cond-> applied (:ok outcome) (conj op))
+                          :outcomes (cond-> outcomes
+                                      (not (:ok outcome))
+                                      (conj {:op op :outcome outcome}))
+                          :factory-outcomes factory-outcomes})))
 
                    :else
                    {:applied (conj applied op)

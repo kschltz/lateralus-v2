@@ -22,7 +22,7 @@
   (let [reg (cfg-registry)]
     (is (= #{"set_llm_config" "set_system_message"
              "set_loop_policy" "set_tool_enabled" "set_memory_policy"
-             "reload_runtime" "list_llm_models"}
+             "set_workspace_root" "reload_runtime" "list_llm_models"}
            (set (keys reg))))
     (is (every? tool/tool? (vals reg)))))
 
@@ -53,6 +53,16 @@
     (is (= "super-secret" (:api-key (first transitions))))
     (is (nil? (get-in visible [:transition :api-key])))
     (is (true? (get-in visible [:transition :api-key-set])))))
+
+(deftest set-workspace-root-emits-transition
+  (let [t (get (cfg-registry) "set_workspace_root")
+        result (-> (tool/invoke-tool t {:workspace-root (System/getProperty "user.dir")}
+                                     {:agent/state {}
+                                      :agent/workspace-default-root "."})
+                   (json/parse-string true))]
+    (is (true? (:ok result)))
+    (is (= "set-workspace-root"
+           (name (keyword (get-in result [:transition :op])))))))
 
 (deftest runtime-policy-tools-emit-allowlisted-transitions
   (let [reg (cfg-registry)

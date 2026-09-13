@@ -34,7 +34,8 @@
   []
   (runtime/start (assoc (fake-agent-map)
                         :initial-state {:model "m0" :base-url "http://x/v1"
-                                        :api-key "secret"})))
+                                        :api-key "secret"}
+                        :agent/workspace-default-root ".")))
 
 (defn handler-with-settings
   []
@@ -42,7 +43,8 @@
         h   (hub/create-hub {:session-id "settings-test"})
         ops {:view-fn   #(settings/settings-view rt)
              :apply-fn  #(settings/apply-op! h rt %)
-             :models-fn (fn [_] {:models ["fake/m1" "fake/m2"]})}]
+             :models-fn (fn [_] {:models ["fake/m1" "fake/m2"]})
+             :browse-fn #(settings/browse-workspace rt %)}]
     {:handler (http/make-handler h {:settings-ops ops})
      :runtime rt
      :hub     h}))
@@ -103,6 +105,35 @@
          {:op {:op "set-system-message" :message "custom prompt"}})
     (let [view (json/parse-string (:body (req handler :get "/api/settings")) true)]
       (is (= "custom prompt" (:system-message view))))))
+
+(deftest settings-workspace-browse-endpoint
+  (let [{:keys [handler]} (handler-with-settings)
+        root (System/getProperty "user.dir")
+        res  (req handler :get (str "/api/settings/workspace-browse?path="
+                                    (java.net.URLEncoder/encode root "UTF-8")))
+        body (json/parse-string (:body res) true)]
+    (is (= 200 (:status res)))
+    (is (= root (:path body)))
+    (is (vector? (:entries body)))
+    (is (string? (:home body)))))
+
+(deftest settings-workspace-browse-rejects-missing-path
+  (let [{:keys [handler]} (handler-with-settings)
+        res  (req handler :get "/api/settings/workspace-browse?path=/no/such/lateralus-dir")
+        body (json/parse-string (:body res) true)]
+    (is (= 400 (:status res)))
+    (is (string? (:error body)))))
+
+(deftest settings-apply-set-workspace-root
+  (let [{:keys [handler]} (handler-with-settings)
+        root (System/getProperty "user.dir")
+        res  (req handler :post "/api/settings"
+                  {:op {:op :set-workspace-root :workspace-root root}})
+        body (json/parse-string (:body res) true)]
+    (is (= 200 (:status res)))
+    (is (true? (:ok body)))
+    (let [view (json/parse-string (:body (req handler :get "/api/settings")) true)]
+      (is (= root (:workspace-root view))))))
 
 (deftest settings-models-endpoint
   (let [{:keys [handler]} (handler-with-settings)

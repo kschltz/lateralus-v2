@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>lateralus workbench</title>
-  <link rel="stylesheet" href="/app.css?v=19" />
+  <link rel="stylesheet" href="/app.css?v=21" />
 </head>
 <body data-portal-mode="split" data-mobile-pane="chat">
   <div id="shell">
@@ -93,6 +93,16 @@
       <p class="session-hint">Applies to the current session immediately (same allowlisted transitions the agent's config tools use). Secrets stay in memory.</p>
 
       <details open>
+        <summary>Workspace</summary>
+        <label>Workspace root</label>
+        <div class="workspace-root-row">
+          <input id="set-workspace-root" type="text" placeholder="/path/to/project" />
+          <button type="button" id="settings-browse-workspace" class="meta-btn" title="Choose folder">Browse…</button>
+        </div>
+        <button type="button" id="settings-save-workspace" class="save-btn">Apply workspace root</button>
+      </details>
+
+      <details open>
         <summary>Model &amp; endpoint</summary>
         <label>Model <span class="inline-btns"><button type="button" id="settings-list-models" class="meta-btn">list models</button></span></label>
         <input id="set-model" type="text" placeholder="model id" list="model-options" />
@@ -158,7 +168,26 @@
       <div id="settings-status" class="field-status" role="status"></div>
     </div>
   </div>
+  <div id="workspace-picker" class="session-panel hidden" role="dialog" aria-label="Choose workspace folder" hidden>
+    <div class="session-panel-card folder-picker-card">
+      <header>
+        <h2>Choose folder</h2>
+        <button type="button" id="workspace-picker-close" class="meta-btn">close</button>
+      </header>
+      <p class="session-hint">Pick a directory on this machine. The agent's file tools will use it as the workspace root.</p>
+      <div class="folder-picker-toolbar">
+        <button type="button" id="workspace-picker-up" class="meta-btn" disabled>Up</button>
+        <button type="button" id="workspace-picker-home" class="meta-btn">Home</button>
+        <code id="workspace-picker-path" class="folder-picker-path"></code>
+      </div>
+      <ul id="workspace-picker-list" class="folder-picker-list"></ul>
+      <div class="folder-picker-actions">
+        <button type="button" id="workspace-picker-select" class="save-btn">Use this folder</button>
+      </div>
+      <div id="workspace-picker-status" class="field-status" role="status"></div>
+    </div>
+  </div>
   <div id="drag-shield" aria-hidden="true"></div>
-  <script src="/app.js?v=19"></script>
+  <script src="/app.js?v=21"></script>
 </body>
 </html>

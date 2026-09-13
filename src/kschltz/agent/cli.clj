@@ -27,7 +27,8 @@
      --config PATH          Integrant EDN config (default: built-in)
      --model NAME           LLM model name (overrides config)
      --base-url URL         LLM base URL (overrides config)
-     --api-key KEY          LLM API key (overrides config; else OLLAMA_API_KEY)"
+     --api-key KEY          LLM API key (overrides config; else OLLAMA_API_KEY)
+     --workspace-root PATH  workspace root for file/Clojure tools (overrides config)"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.cli :as cli]
@@ -72,7 +73,9 @@
    [nil "--base-url URL" "LLM base URL (overrides config)"
     :id :base-url]
    [nil "--api-key KEY" "LLM API key (overrides config; else OLLAMA_API_KEY)"
-    :id :api-key]])
+    :id :api-key]
+   [nil "--workspace-root PATH" "workspace root for file/Clojure tools (overrides config)"
+    :id :workspace-root]])
 
 (defn parse-args
   "Parse a seq of CLI strings into a CLI options map.
@@ -114,6 +117,7 @@
      --model NAME             LLM model name (overrides config)
      --base-url URL           LLM base URL (overrides config)
      --api-key KEY            LLM API key (overrides config; else OLLAMA_API_KEY)
+     --workspace-root PATH    workspace root for file/Clojure tools (overrides config)
 
    When --config is omitted on a TTY, lateralus always opens the
    profile gate (AWS-style): pick or edit a saved profile under
@@ -219,6 +223,22 @@
       (merge base (ig/read-string (slurp config)))
       base)))
 
+(defn- apply-workspace-root-overrides
+  "Apply CLI `--workspace-root` onto Integrant config keys that carry
+   filesystem containment."
+  [config root]
+  (if (str/blank? (str root))
+    config
+    (let [root (str root)]
+      (-> config
+          (assoc-in [:lateralus/file-tools :workspace-root] root)
+          (assoc-in [:lateralus/clojure-tools :workspace-root] root)
+          (assoc-in [:lateralus/self-awareness-tools :workspace-root] root)
+          (assoc-in [:lateralus/factory-session :workspace-root] root)
+          (assoc-in [:lateralus/workspace-opts :file-tools :workspace-root] root)
+          (assoc-in [:lateralus/workspace-opts :clojure-tools :workspace-root] root)
+          (assoc-in [:lateralus/workspace-opts :default-root] root)))))
+
 (defn- apply-llm-overrides
   "Apply CLI flags / env onto an llm client/config map.
    Precedence: CLI flag > existing profile/config value > LATERALUS_*/OLLAMA_API_KEY.
@@ -261,8 +281,8 @@
    (`LATERALUS_BASE_URL`, `LATERALUS_MODEL`, `OLLAMA_API_KEY`) override
    the resulting :lateralus/llm-client entry. Profiles never store
    api-keys."
-  [{:keys [model base-url api-key] :as opts}]
-  (let [base       (config-base opts)
+  [{:keys [model base-url api-key workspace-root] :as opts}]
+  (let [base       (apply-workspace-root-overrides (config-base opts) workspace-root)
         overrides  {:model model :base-url base-url :api-key api-key}
         profile-ctx (select-keys opts [:profile-name :profile-settings :session-api-key])
         client-llm  (apply-llm-overrides (:lateralus/llm-client base) overrides profile-ctx)

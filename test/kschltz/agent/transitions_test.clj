@@ -63,6 +63,14 @@
     (is (= [] (:agent/disabled-tools enabled)))
     (is (= ["file_write"] (:agent/disabled-tools delta)))))
 
+(deftest set-workspace-root-transition-is-durable
+  (let [op {:op :set-workspace-root :workspace-root "/tmp/lateralus-ws"}
+        after (tr/apply-transition {} op)
+        delta (tr/durable-delta {} after [op])]
+    (is (tr/valid-transition? op))
+    (is (= "/tmp/lateralus-ws" (:agent/workspace-root after)))
+    (is (= "/tmp/lateralus-ws" (:agent/workspace-root delta)))))
+
 (deftest memory-policy-transition-is-merged-and-durable
   (let [op {:op :set-memory-policy
             :top-y 7

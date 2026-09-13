@@ -10,17 +10,20 @@
    Writes go through `kschltz.agent.transitions/apply-transition` onto
    the runtime state atom (the same algebra the chain commits), never
    ad-hoc mutation. Secrets are never returned: only `:api-key-set`."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.config.catalog :as catalog]
             [kschltz.agent.transitions :as tr]
+            [kschltz.agent.workspace :as workspace]
+            [kschltz.agent.workspace-apply :as workspace.apply]
             [kschltz.agent.workbench.hub :as hub]))
 
 (def ^:private editable-ops
   "Transition ops the settings menu may apply. Mirrors the `config`
    tool group; MCP ops need a live session and stay LLM-only."
   #{:set-llm :set-system-message :set-loop-opts
-    :set-tool-enabled :set-memory-policy})
+    :set-tool-enabled :set-memory-policy :set-workspace-root})
 
 (defn- busy?
   [hub]
@@ -51,9 +54,11 @@
   [runtime]
   (let [state @(:state runtime)
         reg   (static-registry runtime)
-        disabled (set (:agent/disabled-tools state))]
+        disabled (set (:agent/disabled-tools state))
+        default-root (or (:agent/workspace-default-root (:agent-map runtime)) ".")]
     {:session-id    (or (:agent/session-id state) (:session-id runtime))
      :llm           (llm-view state)
+     :workspace-root (workspace/effective-root state default-root)
      :system-message (or (:agent/system-message state) "")
      :loop-opts     (or (:agent/loop-opts state) {})
      :memory-policy (or (:agent/memory-policy state) {})
@@ -84,9 +89,51 @@
     {:ok false :error (pr-str (tr/explain-transition op))}
 
     :else
-    (do
-      (swap! (:state runtime) tr/apply-transition op)
-      {:ok true :op (:op op)})))
+    (if (= :set-workspace-root (:op op))
+      (workspace.apply/apply-workspace-root! runtime op)
+      (do
+        (swap! (:state runtime) tr/apply-transition op)
+        {:ok true :op (:op op)}))))
+
+(defn- default-browse-path
+  [runtime]
+  (let [state @(:state runtime)
+        default (or (:agent/workspace-default-root (:agent-map runtime)) ".")]
+    (workspace/effective-root state default)))
+
+(defn browse-workspace
+  "List child directories for the workbench folder picker.
+   `path` is optional; defaults to the effective workspace root."
+  [runtime {:keys [path]}]
+  (let [start (or (some-> path not-empty workspace/normalize-root)
+                  (default-browse-path runtime))
+        dir   (io/file start)]
+    (cond
+      (nil? start)
+      {:error "workspace path is required"}
+
+      (not (.exists dir))
+      {:error (str "path does not exist: " start)}
+
+      (not (.isDirectory dir))
+      {:error (str "not a directory: " start)}
+
+      :else
+      (let [canonical (.getCanonicalPath dir)
+            parent-file (.getParentFile dir)
+            parent (when parent-file (.getCanonicalPath parent-file))
+            entries
+            (->> (.listFiles dir)
+                 (filter #(.isDirectory %))
+                 (map (fn [f]
+                        {:name (.getName f)
+                         :path (.getCanonicalPath f)}))
+                 (sort-by (comp str/lower-case :name))
+                 vec)]
+        {:path canonical
+         :parent parent
+         :home (System/getProperty "user.home")
+         :entries entries}))))
 
 (defn list-models
   "Model ids for `base-url` (falls back to the session's base-url).

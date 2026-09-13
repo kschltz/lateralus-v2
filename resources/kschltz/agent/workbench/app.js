@@ -831,6 +831,7 @@
     settingsSessionId = view["session-id"] || lastSessionId;
     const $ = (id) => document.getElementById(id);
     const llm = view.llm || {};
+    if ($("set-workspace-root")) $("set-workspace-root").value = view["workspace-root"] || "";
     if ($("set-model")) $("set-model").value = llm.model || "";
     if ($("set-base-url")) $("set-base-url").value = llm["base-url"] || "";
     if ($("set-api-key")) $("set-api-key").value = "";
@@ -985,6 +986,160 @@
     return Number.isFinite(n) ? n : undefined;
   }
 
+  // ---- Workspace folder picker (server-side browse) ----
+  const workspacePicker = document.getElementById("workspace-picker");
+  const workspacePickerPath = document.getElementById("workspace-picker-path");
+  const workspacePickerList = document.getElementById("workspace-picker-list");
+  const workspacePickerStatus = document.getElementById("workspace-picker-status");
+  const workspacePickerUp = document.getElementById("workspace-picker-up");
+  const workspacePickerHome = document.getElementById("workspace-picker-home");
+  let workspaceBrowse = { path: "", parent: null, home: "" };
+
+  function workspacePickerOpen() {
+    return workspacePicker && !workspacePicker.classList.contains("hidden");
+  }
+
+  function setWorkspacePickerStatus(msg, cls) {
+    if (!workspacePickerStatus) return;
+    workspacePickerStatus.textContent = msg || "";
+    workspacePickerStatus.className = "field-status" + (cls ? " " + cls : "");
+  }
+
+  function closeWorkspacePicker() {
+    if (!workspacePicker) return;
+    workspacePicker.hidden = true;
+    workspacePicker.classList.add("hidden");
+    setWorkspacePickerStatus("");
+  }
+
+  async function fetchWorkspaceBrowse(path) {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    const res = await fetch("/api/settings/workspace-browse?" + params.toString(), {
+      cache: "no-store",
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "folder browse failed");
+    return body;
+  }
+
+  function renderWorkspaceBrowse(view) {
+    workspaceBrowse = view;
+    if (workspacePickerPath) workspacePickerPath.textContent = view.path || "";
+    if (workspacePickerUp) workspacePickerUp.disabled = !view.parent;
+    const entries = view.entries || [];
+    if (!workspacePickerList) return;
+    workspacePickerList.innerHTML = entries.length
+      ? entries
+          .map(
+            (e) =>
+              `<li><button type="button" class="folder-entry" data-path="${esc(e.path)}">📁 ${esc(e.name)}</button></li>`
+          )
+          .join("")
+      : `<li class="empty">No subfolders here.</li>`;
+  }
+
+  async function openWorkspacePicker(startPath) {
+    if (!workspacePicker) return;
+    workspacePicker.hidden = false;
+    workspacePicker.classList.remove("hidden");
+    setWorkspacePickerStatus("loading…");
+    try {
+      const view = await fetchWorkspaceBrowse(startPath || "");
+      renderWorkspaceBrowse(view);
+      setWorkspacePickerStatus("");
+    } catch (e) {
+      setWorkspacePickerStatus(e.message || "failed to load folders", "err");
+    }
+  }
+
+  on("settings-browse-workspace", async () => {
+    const $ = (id) => document.getElementById(id);
+    const current = ($("set-workspace-root") || {}).value?.trim() || "";
+    await openWorkspacePicker(current);
+  });
+
+  on("workspace-picker-close", closeWorkspacePicker);
+
+  on("workspace-picker-up", async () => {
+    if (!workspaceBrowse.parent) return;
+    setWorkspacePickerStatus("loading…");
+    try {
+      renderWorkspaceBrowse(await fetchWorkspaceBrowse(workspaceBrowse.parent));
+      setWorkspacePickerStatus("");
+    } catch (e) {
+      setWorkspacePickerStatus(e.message || "failed", "err");
+    }
+  });
+
+  on("workspace-picker-home", async () => {
+    if (!workspaceBrowse.home) return;
+    setWorkspacePickerStatus("loading…");
+    try {
+      renderWorkspaceBrowse(await fetchWorkspaceBrowse(workspaceBrowse.home));
+      setWorkspacePickerStatus("");
+    } catch (e) {
+      setWorkspacePickerStatus(e.message || "failed", "err");
+    }
+  });
+
+  on("workspace-picker-select", async () => {
+    const $ = (id) => document.getElementById(id);
+    const path = workspaceBrowse.path || "";
+    if (!path) return;
+    if ($("set-workspace-root")) $("set-workspace-root").value = path;
+    closeWorkspacePicker();
+    setSettingsStatus("applying workspace root…");
+    try {
+      await postSettingsOp({ op: "set-workspace-root", "workspace-root": path });
+      const view = await fetchSettings();
+      renderSettings(view);
+      setSettingsStatus("workspace root updated", "ok");
+    } catch (e) {
+      setSettingsStatus(e.message || "workspace update failed", "err");
+    }
+  });
+
+  if (workspacePickerList) {
+    workspacePickerList.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button.folder-entry");
+      if (!btn) return;
+      const path = btn.dataset.path;
+      if (!path) return;
+      setWorkspacePickerStatus("loading…");
+      try {
+        renderWorkspaceBrowse(await fetchWorkspaceBrowse(path));
+        setWorkspacePickerStatus("");
+      } catch (err) {
+        setWorkspacePickerStatus(err.message || "failed", "err");
+      }
+    });
+  }
+
+  if (workspacePicker) {
+    workspacePicker.addEventListener("click", (e) => {
+      if (e.target === workspacePicker) closeWorkspacePicker();
+    });
+  }
+
+  on("settings-save-workspace", async () => {
+    const $ = (id) => document.getElementById(id);
+    const root = ($("set-workspace-root") || {}).value?.trim() || "";
+    if (!root) {
+      setSettingsStatus("workspace root is required", "err");
+      return;
+    }
+    setSettingsStatus("applying workspace root…");
+    try {
+      await postSettingsOp({ op: "set-workspace-root", "workspace-root": root });
+      const view = await fetchSettings();
+      renderSettings(view);
+      setSettingsStatus("workspace root updated", "ok");
+    } catch (e) {
+      setSettingsStatus(e.message || "workspace update failed", "err");
+    }
+  });
+
   on("settings-save-llm", async () => {
     const $ = (id) => document.getElementById(id);
     const op = { op: "set-llm" };
@@ -1106,6 +1261,11 @@
   }
 
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && workspacePickerOpen()) {
+      e.preventDefault();
+      closeWorkspacePicker();
+      return;
+    }
     if (e.key === "Escape" && (sessionPanelOpen() || settingsOpen())) {
       e.preventDefault();
       closeSessionPanel();

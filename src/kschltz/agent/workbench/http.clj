@@ -68,8 +68,9 @@
   (let [q (second (str/split (str uri) #"\?" 2))]
     (into {}
           (for [pair (when q (str/split q #"&"))
-                :let [[k v] (str/split pair #"=" 2)]]
-            [(keyword k) (or v "")]))))
+                :let [[k v] (str/split pair #"=" 2)
+                      v' (when v (java.net.URLDecoder/decode v "UTF-8"))]]
+            [(keyword k) (or v' "")]))))
 
 (defn- turn-id-from-path
   "Extract turn id from `/turn/<id>` or `/api/turns/<id>[/events]`."
@@ -419,6 +420,13 @@
                        view ((:models-fn settings-ops)
                              {:base-url (:base-url q)
                               :api-key  (:api-key q)})]
+                   (if (seq (:error view))
+                     (json-response 400 view)
+                     (json-response view)))
+
+                 (and (= method :get) (= path "/api/settings/workspace-browse"))
+                 (let [q    (parse-query uri)
+                       view ((:browse-fn settings-ops) {:path (:path q)})]
                    (if (seq (:error view))
                      (json-response 400 view)
                      (json-response view))))))

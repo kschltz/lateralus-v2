@@ -4,6 +4,7 @@
             [kschltz.agent.tools.factory.compile :as compile]
             [kschltz.agent.tools.factory.promote :as promote]
             [kschltz.agent.tools.factory.protocol :as proto]
+            [kschltz.agent.workspace :as workspace]
             [malli.core :as m]
             [malli.instrument :as mi]))
 
@@ -70,7 +71,7 @@
                   interceptor)))
         entries))
 
-(deftype FactorySession [config compiler state]
+(deftype FactorySession [^:volatile-mutable config compiler state]
   proto/RuntimeToolStore
   (-define! [_ spec opts]
     (when-not (dynamic-enabled? config)
@@ -252,7 +253,14 @@
     (dynamic-enabled? config))
 
   (-sandboxed? [_]
-    (true? (get-in config [:sandbox :enabled?]))))
+    (true? (get-in config [:sandbox :enabled?])))
+
+  (-set-workspace-root! [_ root]
+    (let [norm (workspace/normalize-root root)]
+      (when-let [err (workspace/validate-root root)]
+        (raise :workspace-root err {:workspace-root root}))
+      (set! config (assoc config :workspace-root norm))
+      norm)))
 
 (defn- normalize-config
   [config]

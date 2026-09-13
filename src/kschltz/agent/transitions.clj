@@ -27,7 +27,8 @@
         #{:mcp/servers :agent/system-message :agent/loop-opts
           :agent/disabled-tools :agent/memory-policy
           :agent/runtime-reload
-          :agent/runtime-tools :agent/promoted-tools}))
+          :agent/runtime-tools :agent/promoted-tools
+          :agent/workspace-root}))
 
 (def LoopOptsPatch
   "Allowlisted per-session loop policy fields."
@@ -123,6 +124,11 @@
        (some #(contains? op %)
              [:top-y :last-n :recall-enabled :persist-enabled])))]])
 
+(def SetWorkspaceRootOp
+  [:map {:closed true}
+   [:op [:= :set-workspace-root]]
+   [:workspace-root [:string {:min 1}]]])
+
 (def RuntimeNamespace
   [:re #"^kschltz\.(?:agent(?:\..+)?|lateralus)$"])
 
@@ -172,6 +178,7 @@
    [:set-loop-opts SetLoopOptsOp]
    [:set-tool-enabled SetToolEnabledOp]
    [:set-memory-policy SetMemoryPolicyOp]
+   [:set-workspace-root SetWorkspaceRootOp]
    [:reload-runtime ReloadRuntimeOp]
    [:register-runtime-tool RegisterRuntimeToolOp]
    [:forget-runtime-tool ForgetRuntimeToolOp]
@@ -248,6 +255,8 @@
                      (select-keys op
                                   [:top-y :last-n
                                    :recall-enabled :persist-enabled]))))
+    :set-workspace-root
+    (assoc (or state {}) :agent/workspace-root (:workspace-root op))
     :reload-runtime
     (let [nses (or (seq (:namespaces op))
                    (seq (:agent/edited-namespaces (or state {}))))]
@@ -317,6 +326,7 @@
         loop-opts-touched? (some #(= :set-loop-opts (:op %)) applied)
         tools-touched? (some #(= :set-tool-enabled (:op %)) applied)
         memory-touched? (some #(= :set-memory-policy (:op %)) applied)
+        workspace-touched? (some #(= :set-workspace-root (:op %)) applied)
         reload-touched? (some #(= :reload-runtime (:op %)) applied)
         runtime-tools-touched?
         (some #(contains? #{:register-runtime-tool
@@ -335,6 +345,8 @@
       (assoc :agent/disabled-tools (or (:agent/disabled-tools after) []))
       memory-touched?
       (assoc :agent/memory-policy (:agent/memory-policy after))
+      workspace-touched?
+      (assoc :agent/workspace-root (:agent/workspace-root after))
       reload-touched?
       (assoc :agent/runtime-reload (:agent/runtime-reload after))
       runtime-tools-touched?

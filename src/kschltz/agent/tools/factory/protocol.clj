@@ -86,7 +86,10 @@
     "True when agent-driven define/forget/promote is allowed.")
   (-sandboxed? [store]
     "True when runtime-authored code is restricted to the SCI capability
-     sandbox and cannot receive host context."))
+     sandbox and cannot receive host context.")
+  (-set-workspace-root! [store root]
+    "Update the session workspace root used for promote/catalog paths.
+     Returns the normalized root string."))
 
 (defn tool-compiler?
   [x]

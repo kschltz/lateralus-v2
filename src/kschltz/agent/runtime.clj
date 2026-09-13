@@ -86,6 +86,9 @@
                             :agent/state               base-state
                             :agent/agent-map           agent-map
                             :agent/exchange-chain      chain-to-run
+                            :agent/workspace-tool-opts (:agent/workspace-tool-opts agent-map)
+                            :agent/workspace-default-root (:agent/workspace-default-root agent-map)
+                            :agent/factory-session     (:agent/factory-session agent-map)
                             :llm/client               (:agent/llm-client agent-map)
                             :memory/backend           (:memory-backend agent-map)
                             :embedder                 (:embedder agent-map)
