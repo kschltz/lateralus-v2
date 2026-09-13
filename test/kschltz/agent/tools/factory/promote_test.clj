@@ -24,11 +24,13 @@
                                      :target :workspace
                                      :workspace-root root})
             tool-clj (io/file root ".lateralus/promoted/add_two/tool.clj")
+            spec-edn (io/file root ".lateralus/promoted/add_two/spec.edn")
             plugin-clj (io/file root ".lateralus/promoted/add_two/plugin.clj")
             catalog (io/file root ".lateralus/promoted/catalog.edn")
             tool (get (proto/-registry store) "add_two")]
         (is (true? (:ok status)))
         (is (.isFile tool-clj))
+        (is (.isFile spec-edn))
         (is (.isFile plugin-clj))
         (is (.isFile catalog))
         (is (= :workspace (:target status)))
@@ -46,6 +48,37 @@
           (is (tool/tool? restored)
               "catalog embeds the spec so a missing generated source can be recovered")
           (is (= "3" (tool/invoke-tool restored {:a 1 :b 2} {})))))
+      (finally
+        (doseq [f (reverse (file-seq (io/file root)))]
+          (.delete f))))))
+
+(deftest promoted-one-arity-tool-with-require-survives-fresh-session
+  (let [root (.getPath (io/file (System/getProperty "java.io.tmpdir")
+                                (str "lateralus-cold-promote-" (random-uuid))))
+        cold-spec {:name "loud_slug"
+                   :description "Uppercase text"
+                   :input-schema "[:map [:text :string]]"
+                   :require "clojure.string"
+                   :alias "str"
+                   :invoke "(fn [args] (clojure.string/upper-case (:text args)))"}
+        store (session/factory-session {:workspace-root root})]
+    (try
+      (proto/-define! store cold-spec {})
+      (proto/-record-test! store "loud_slug" (proto/spec-id cold-spec))
+      (let [status (proto/-promote! store "loud_slug"
+                                    {:target :workspace
+                                     :workspace-root root})
+            source (slurp (io/file root
+                                   ".lateralus/promoted/loud_slug/tool.clj"))
+            fresh (session/factory-session {:workspace-root root})
+            restored (get (proto/-registry fresh) "loud_slug")]
+        (is (true? (:ok status)))
+        (is (re-find #"\[clojure.string :as str\]" source))
+        (is (re-find #"compile/invoke-tool-fn" source))
+        (is (tool/tool? restored))
+        (is (= "COLD START"
+               (tool/invoke-tool restored {:text "cold start"} {})))
+        (is (= cold-spec (get-in (first (promote/read-catalog root)) [:spec]))))
       (finally
         (doseq [f (reverse (file-seq (io/file root)))]
           (.delete f))))))

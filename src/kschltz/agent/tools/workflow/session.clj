@@ -75,19 +75,66 @@
     (swap! state update :store merge normalized)
     {:ok true :seeded (vec (sort (keys normalized)))}))
 
+(declare status-impl)
+
 (defn run-impl
   [state opts]
   (let [{:keys [actions store]} @state
         result (engine/schedule actions (or store {}) (:ctx opts))]
-    (swap! state assoc :store (:store result))
-    result))
+    (swap! state assoc :store (:store result) :last-run result)
+    (assoc result :checkpoints
+           (:checkpoints (status-impl state)))))
+
+(defn- checkpoints
+  [actions store last-run]
+  (let [errors (into {} (map (juxt :action identity)) (:errors last-run))
+        ran (set (:ran last-run))]
+    (->> (vals actions)
+         (mapv
+          (fn [{:keys [name produces]}]
+            (let [passed? (every? #(contains? store %) produces)
+                  error (get errors name)]
+              (cond-> {:action name
+                       :status (cond
+                                 passed? :passed
+                                 error :failed
+                                 :else :pending)
+                       :produces produces}
+                (contains? ran name) (assoc :ran true)
+                error (assoc :error (:error error))))))
+         (sort-by :action)
+         vec)))
 
 (defn status-impl
   [state]
-  (let [{:keys [actions store]} @state]
+  (let [{:keys [actions store last-run]} @state]
     {:actions (mapv #(select-keys % [:name :needs :produces :run])
                     (vals actions))
      :store (or store {})
+     :checkpoints (checkpoints actions (or store {}) last-run)
+     :last-status (:status last-run)
+     :action-count (count actions)
+     :artifact-count (count store)}))
+
+(defn snapshot-impl
+  [state]
+  (select-keys @state [:actions :store :last-run]))
+
+(defn load-snapshot-impl
+  [state snapshot]
+  (when-not (map? snapshot)
+    (raise :snapshot "workflow snapshot must be a map" {}))
+  (let [actions (or (:actions snapshot) {})
+        store (or (:store snapshot) {})]
+    (when-not (and (map? actions)
+                   (every? proto/valid-action? (vals actions))
+                   (map? store))
+      (raise :snapshot "workflow snapshot contains invalid actions or store"
+             {:snapshot snapshot}))
+    (reset! state {:actions actions
+                   :store store
+                   :last-run (:last-run snapshot)})
+    {:ok true
      :action-count (count actions)
      :artifact-count (count store)}))
 
@@ -98,8 +145,8 @@
            (fn [st]
              (case what
                :actions (assoc st :actions {})
-               :store (assoc st :store {})
-               (assoc st :actions {} :store {}))))
+               :store (assoc st :store {} :last-run nil)
+               (assoc st :actions {} :store {} :last-run nil))))
     {:ok true :cleared what}))
 
 ;; Not instrumented with proto/Action: normalize-action must see raw
@@ -109,6 +156,8 @@
 (m/=> seed-impl [:=> [:cat :any :map] :map])
 (m/=> run-impl [:=> [:cat :any [:maybe :map]] proto/RunResult])
 (m/=> status-impl [:=> [:cat :any] :map])
+(m/=> snapshot-impl [:=> [:cat :any] :map])
+(m/=> load-snapshot-impl [:=> [:cat :any :map] :map])
 (m/=> clear-impl [:=> [:cat :any [:maybe [:or :keyword :string]]] :map])
 
 (deftype WorkflowSession [state]
@@ -125,13 +174,19 @@
   (-status [_]
     (status-impl state))
 
+  (-snapshot [_]
+    (snapshot-impl state))
+
+  (-load-snapshot! [_ snapshot]
+    (load-snapshot-impl state snapshot))
+
   (-clear! [_ what]
     (clear-impl state what)))
 
 (defn workflow-session
   ([] (workflow-session {}))
   ([_opts]
-   (->WorkflowSession (atom {:actions {} :store {}}))))
+   (->WorkflowSession (atom {:actions {} :store {} :last-run nil}))))
 
 (m/=> workflow-session
       [:function

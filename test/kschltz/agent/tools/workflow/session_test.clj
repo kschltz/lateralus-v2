@@ -17,6 +17,8 @@
            (proto/-seed! eng {:pre true})))
     (let [result (proto/-run! eng {})]
       (is (= :done (:status result)))
+      (is (= [{:action "A" :status :passed :produces ["x"] :ran true}]
+             (:checkpoints result)))
       (is (= 1 (get-in result [:store "x"])))
       (is (true? (get-in result [:store "pre"]))))
     (is (= 2 (:artifact-count (proto/-status eng))))
@@ -25,6 +27,24 @@
     (is (= 1 (:action-count (proto/-status eng))))
     (is (= {:ok true :cleared :all} (proto/-clear! eng :all)))
     (is (= 0 (:action-count (proto/-status eng))))))
+
+(deftest checkpoint-failures-and-snapshots-survive-a-new-session
+  (let [eng (session/workflow-session)]
+    (proto/-register-action!
+     eng {:name "explode" :needs [] :produces ["done"]
+          :run {:op :eval :code "(fn [_] (throw (ex-info \"boom\" {})))"}})
+    (let [result (proto/-run! eng {})
+          checkpoint (first (:checkpoints result))
+          snapshot (proto/-snapshot eng)
+          fresh (session/workflow-session)]
+      (is (= :error (:status result)))
+      (is (= :failed (:status checkpoint)))
+      (is (= "boom" (:error checkpoint)))
+      (is (= {:ok true :action-count 1 :artifact-count 0}
+             (proto/-load-snapshot! fresh snapshot)))
+      (is (= (:checkpoints (proto/-status eng))
+             (:checkpoints (proto/-status fresh))))
+      (is (= :error (:last-status (proto/-status fresh)))))))
 
 (deftest upsert-replaces-action
   (let [eng (session/workflow-session)]
