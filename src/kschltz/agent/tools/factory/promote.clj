@@ -63,10 +63,17 @@
 
 (defn- tool-source
   [ns-sym spec]
-  (let [rec (record-name (:name spec))]
+  (let [rec (record-name (:name spec))
+        dependency (when (seq (:require spec))
+                     (str "\n            [" (:require spec)
+                          (when (seq (:alias spec))
+                            (str " :as " (:alias spec)))
+                          "]"))]
     (str "(ns " ns-sym "\n"
          "  \"Promoted runtime tool: " (:name spec) "\"\n"
-         "  (:require [kschltz.agent.tool :as tool]))\n\n"
+         "  (:require [kschltz.agent.tool :as tool]\n"
+         "            [kschltz.agent.tools.factory.compile :as compile]"
+         dependency "))\n\n"
          "(def input-schema\n  " (:input-schema spec) ")\n\n"
          "(def invoke*\n  " (:invoke spec) ")\n\n"
          "(defrecord " rec " []\n"
@@ -76,7 +83,7 @@
          "  (-input-schema [_] input-schema)\n"
          "  (-output-schema [_] :string)\n"
          "  (-invoke [_ args ctx]\n"
-         "    (let [ret (invoke* args ctx)]\n"
+         "    (let [ret (compile/invoke-tool-fn invoke* args ctx)]\n"
          "      (if (string? ret) ret (pr-str ret)))))\n\n"
          "(defn registry\n"
          "  []\n"
@@ -210,6 +217,8 @@
         src-root (if (= :project target)
                    (.getPath (io/file root "src"))
                    (.getPath (io/file root ".lateralus" "promoted" name)))
+        spec-path (.getPath
+                   (io/file root ".lateralus" "promoted" name "spec.edn"))
         tool-path (if (= :project target)
                     (ns->path src-root tool-ns)
                     (.getPath (io/file src-root "tool.clj")))
@@ -220,7 +229,8 @@
         test-path (when (= :project target)
                     (ns->path (.getPath (io/file root "test"))
                               (test-ns tool-ns)))
-        written [(write-file! tool-path (tool-source tool-ns spec))]
+        written [(write-file! spec-path (pr-str spec))
+                 (write-file! tool-path (tool-source tool-ns spec))]
         written (cond-> written
                   plugin-path
                   (conj (write-file! plugin-path
@@ -234,6 +244,7 @@
         entry (cond-> {:name name
                        :ns (str tool-ns)
                        :path tool-path
+                       :spec-path spec-path
                        :target (keyword target)
                        ;; The source artifact is primary; the validated spec
                        ;; is a recovery recipe when paths move or disappear.

@@ -17,7 +17,7 @@
   "Keys whose map values are replaced wholesale on state merge (not
    deep-merged). Needed so removals actually drop MCP servers and
    forgotten/promoted ephemeral runtime tools."
-  #{:mcp/servers :agent/runtime-tools})
+  #{:mcp/servers :agent/runtime-tools :agent/workflow})
 
 (defn- deep-merge [a b]
   (cond

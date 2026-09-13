@@ -13,7 +13,8 @@
   (:require [kschltz.agent.loop.act :as act]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.factory.protocol :as factory.proto]
-            [kschltz.agent.tools.mcp.protocol :as mcp-proto]))
+            [kschltz.agent.tools.mcp.protocol :as mcp-proto]
+            [kschltz.agent.tools.workflow.protocol :as workflow.proto]))
 
 (defn live-registry
   "Merge static tool map with live MCP and factory session registries."
@@ -68,7 +69,7 @@
 (defn- seed-registry-interceptor
   ":guard interceptor that attaches the effective tool registry to
    :agent/tool-registry on the context."
-  [registry mcp-session factory-session]
+  [registry mcp-session factory-session workflow-engine]
   {:name ::seed-registry
    ;; Plain-data handle so UI/tooling can enumerate the static registry
    ;; without replaying an exchange (see workbench settings HTTP).
@@ -78,6 +79,10 @@
             (when (factory.proto/runtime-tool-store? factory-session)
               (factory.proto/-rehydrate! factory-session
                                          (get-in ctx [:agent/state :agent/runtime-tools])))
+            (when (workflow.proto/workflow-engine? workflow-engine)
+              (workflow.proto/-load-snapshot!
+               workflow-engine
+               (or (get-in ctx [:agent/state :agent/workflow]) {})))
             (let [effective (-> (live-registry registry mcp-session factory-session)
                                 (apply-tool-overlay (:agent/state ctx)))]
               (cond-> (assoc ctx
@@ -88,7 +93,14 @@
                 (mcp-proto/mcp-session? mcp-session)
                 (assoc :agent/mcp-session mcp-session)
                 (factory.proto/runtime-tool-store? factory-session)
-                (assoc :agent/factory-session factory-session))))})
+                (assoc :agent/factory-session factory-session))))
+   :leave (fn [ctx]
+            (if (workflow.proto/workflow-engine? workflow-engine)
+              (update ctx :agent/state-delta
+                      (fnil assoc {})
+                      :agent/workflow
+                      (workflow.proto/-snapshot workflow-engine))
+              ctx))})
 
 (defn tools-plugin
   "Build a partial plugin that seeds tools on the context.
@@ -108,9 +120,10 @@
                 (map? opts) opts
                 :else {})
          session (:mcp-session opts)
-         factory (:factory-session opts)]
+         factory (:factory-session opts)
+         workflow-engine (:workflow-engine opts)]
      (with-meta
-       [(seed-registry-interceptor registry session factory)]
+       [(seed-registry-interceptor registry session factory workflow-engine)]
        {:plugin/name :tools
         :plugin/rebuild
         (fn []

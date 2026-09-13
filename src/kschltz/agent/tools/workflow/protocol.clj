@@ -49,6 +49,10 @@
      blocked/cycle/missing — those are `:status :blocked`.")
   (-status [eng]
     "Serializable inventory. MUST NOT raise.")
+  (-snapshot [eng]
+    "Serializable durable workflow state.")
+  (-load-snapshot! [eng snapshot]
+    "Replace the live workflow from a previously exported snapshot.")
   (-clear! [eng what]
     "Reset `:actions`, `:store`, or `:all`. Returns status."))
 

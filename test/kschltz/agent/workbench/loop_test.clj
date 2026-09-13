@@ -200,7 +200,20 @@
     (testing "result map with :error/raised gets the same treatment"
       (is (str/includes? (loop/friendly-exchange-error
                            nil {:error/raised {:exception (http-ex 403 "nope")}})
-                         "403")))))
+                         "403")))
+    (testing "Malli output failures expose the exact contract and value"
+      (let [text (loop/friendly-exchange-error
+                  (ex-info ":malli.core/invalid-output"
+                           {:type :malli.core/invalid-output
+                            :data {:name 'workflow/run-impl
+                                   :schema [:map [:status [:enum :done]]]
+                                   :value {:status :broken}}})
+                  nil)]
+        (is (str/includes? text "Malli output validation"))
+        (is (str/includes? text "workflow/run-impl"))
+        (is (str/includes? text "[:map [:status [:enum :done]]]"))
+        (is (str/includes? text "{:status :broken}"))
+        (is (not (str/includes? text "unknown error")))))))
 
 (defn- silent-wb []
   (reify proto/Workbench

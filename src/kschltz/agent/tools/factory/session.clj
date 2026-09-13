@@ -28,18 +28,22 @@
      (let [name (:name entry)
            ns-sym (some-> entry :ns symbol)
            path (:path entry)
-           spec-only? (or sandboxed? (:sandboxed entry))]
-       (when (and (not spec-only?)
+           spec-only? (or sandboxed? (:sandboxed entry))
+           ;; The complete spec is the restart recipe: compiling it restores
+           ;; add-libs + require before any generated namespace is loaded.
+           compiled (when (proto/valid-tool-spec? (:spec entry))
+                      (proto/-compile-spec compiler (:spec entry)))]
+       (when (and (not (:ok compiled))
+                  (not spec-only?)
                   path
                   (.isFile (java.io.File. (str path))))
          (try (load-file (str path)) (catch Throwable _)))
-       (let [from-ns (when (and (not spec-only?) ns-sym)
+       (let [from-ns (when (and (not (:ok compiled))
+                                (not spec-only?)
+                                ns-sym)
                        (try (get (resolve-registry ns-sym) name)
                             (catch Throwable _ nil)))
-             compiled (when (and (not (tool/tool? from-ns))
-                                 (proto/valid-tool-spec? (:spec entry)))
-                        (proto/-compile-spec compiler (:spec entry)))
-             tool (or from-ns (:tool compiled))]
+             tool (or (:tool compiled) from-ns)]
          (if (tool/tool? tool)
            (assoc acc name {:spec (:spec entry)
                             :tool tool
@@ -125,7 +129,7 @@
              tested-spec-id)
       {:ok true :tool-name tool-name :tested true}))
 
-  (-promote! [_ tool-name opts]
+  (-promote! [this tool-name opts]
     (when-not (dynamic-enabled? config)
       (raise :disabled
              "Dynamic tool factory is disabled; set :dynamic {:enabled? true} on :lateralus/factory-session"
@@ -142,21 +146,31 @@
                (str "runtime tool must pass tool_test before promotion: "
                     tool-name)
                {:tool-name tool-name}))
-      (let [status (promote/promote-spec
+      ;; Recompile the persisted recipe before writing artifacts. This catches
+      ;; promotion-time dependency/require drift and guarantees the same path
+      ;; a restarted session will use is healthy.
+      (let [verified (proto/-compile-spec compiler spec)
+            _verification-check
+            (when-not (:ok verified)
+              (raise :cold-verify
+                     (str "runtime tool failed restart verification: "
+                          (or (:error verified) tool-name))
+                     {:tool-name tool-name
+                      :verification verified}))
+            status (promote/promote-spec
                     spec
                     {:workspace-root (or (:workspace-root opts)
                                          (:workspace-root config)
                                          ".")
                      :target (or (:target opts) :workspace)
                      :as-plugin (boolean (:as-plugin opts))
-                     :sandboxed? (proto/-sandboxed? _)})
-            compiled (proto/-compile-spec compiler spec)
+                     :sandboxed? (proto/-sandboxed? this)})
             live (cond-> {:spec spec
-                          :tool (or (:tool compiled) (:tool entry))
+                          :tool (or (:tool verified) (:tool entry))
                           :promoted? true
                           :entry (:entry status)}
-                   (:interceptor compiled)
-                   (assoc :interceptor (:interceptor compiled))
+                   (:interceptor verified)
+                   (assoc :interceptor (:interceptor verified))
                    (:interceptor entry)
                    (assoc :interceptor (:interceptor entry)))]
         (swap! state (fn [st]

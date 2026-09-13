@@ -24,7 +24,7 @@
             [kschltz.agent.tools.runtime.schemas :as schemas]
             [malli.core :as m]
             [malli.instrument :as mi])
-  (:import [clojure.lang DynamicClassLoader RT]
+  (:import [clojure.lang Compiler DynamicClassLoader RT]
            [java.io PushbackReader StringReader StringWriter]
            [java.util.concurrent TimeoutException]))
 
@@ -176,7 +176,11 @@
           prev (.getContextClassLoader t)]
       (try
         (.setContextClassLoader t cl)
-        (f)
+        ;; Clojure's compiler and `require` consult Compiler/LOADER via
+        ;; RT/baseLoader, not only the thread context loader. Binding both is
+        ;; required for a freshly add-libs-loaded namespace to compile.
+        (with-bindings {Compiler/LOADER cl}
+          (f))
         (finally
           (.setContextClassLoader t prev))))
     (f)))

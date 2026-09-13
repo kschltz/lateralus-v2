@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is]]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.secrets :as secrets]
+            [kschltz.agent.tools.factory.compile :as compile]
             [kschltz.agent.tools.factory.protocol :as proto]
             [kschltz.agent.tools.factory.session :as session])
   (:import [java.nio.file Files]
@@ -48,6 +49,34 @@
     (proto/-define! store (assoc spec :invoke "(fn [_args _ctx] \"changed\")") {})
     (is (empty? (:tested (proto/-status store)))
         "redefining a tool invalidates prior test evidence")))
+
+(deftest promotion-refuses-failed-restart-verification-before-writing
+  (let [delegate (compile/jvm-compiler)
+        calls (atom 0)
+        compiler (reify proto/ToolCompiler
+                   (-compile-spec [_ candidate]
+                     (if (= 1 (swap! calls inc))
+                       (proto/-compile-spec delegate candidate)
+                       {:ok false
+                        :phase "require"
+                        :error "dependency disappeared"}))
+                   (-add-libs [_ coords]
+                     (proto/-add-libs delegate coords)))
+        root (str (Files/createTempDirectory
+                   "factory-cold-verify-test-"
+                   (make-array FileAttribute 0)))
+        store (session/factory-session {:workspace-root root
+                                        :compiler compiler})]
+    (proto/-define! store spec {})
+    (proto/-record-test! store "add_two" (proto/spec-id spec))
+    (let [error (try
+                  (proto/-promote! store "add_two" {:workspace-root root})
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :cold-verify (:phase (ex-data error))))
+      (is (re-find #"restart verification" (ex-message error)))
+      (is (not (.exists
+                (java.io.File. root ".lateralus/promoted/catalog.edn")))))))
 
 (deftest forget-and-rehydrate
   (let [store (empty-session)]

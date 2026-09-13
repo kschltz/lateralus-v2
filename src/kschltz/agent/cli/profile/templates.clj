@@ -239,7 +239,8 @@
                                                     (ig/ref :lateralus/workflow-tools))
               :lateralus/tools-plugin         {:registry (ig/ref :lateralus/tool-registry)
                                     :mcp-session (ig/ref :lateralus/mcp-tools)
-                                    :factory-session (ig/ref :lateralus/factory-session)}
+                                    :factory-session (ig/ref :lateralus/factory-session)
+                                    :workflow-tools (ig/ref :lateralus/workflow-tools)}
               :lateralus/plugins              (plugins wb?)
               :lateralus/agent                (agent-map wb?)})
       wb? (merge

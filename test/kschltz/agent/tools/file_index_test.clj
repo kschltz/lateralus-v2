@@ -55,5 +55,5 @@
       (finally
         (wipe dir)))))
 
-(deftest filesystem-registry-stays-nine-without-index
-  (is (= 9 (count (fs-tools/filesystem-registry)))))
+(deftest filesystem-registry-stays-ten-without-index
+  (is (= 10 (count (fs-tools/filesystem-registry)))))

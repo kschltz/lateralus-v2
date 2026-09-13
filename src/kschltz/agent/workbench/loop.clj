@@ -63,6 +63,13 @@
           Usually transient — retry shortly.")
       (str "The LLM endpoint answered HTTP " status "."))))
 
+(defn- preview-value
+  [value]
+  (let [rendered (pr-str value)]
+    (if (> (count rendered) 300)
+      (str (subs rendered 0 300) "…")
+      rendered)))
+
 (defn friendly-exchange-error
   "User-facing one-liner for a failed exchange. Accepts the exception
    (when the chain rethrew) or a result map with :error/raised."
@@ -74,6 +81,16 @@
                        (when (instance? clojure.lang.ExceptionInfo e) (ex-data e))))))
         status (:status data)
         body (:body data)
+        malli-type (:type data)
+        malli-data (:data data)
+        malli-schema (or (:schema malli-data) (:schema data))
+        malli-value (if (contains? malli-data :value)
+                      (:value malli-data)
+                      (:value data))
+        malli-name (or (:name malli-data)
+                       (:fn-name malli-data)
+                       (:var malli-data)
+                       "instrumented function")
         provider-msg (cond
                        (map? (:error body)) (not-empty (:message (:error body)))
                        (string? (:error body)) (not-empty (:error body))
@@ -93,6 +110,15 @@
       (= :transport (:kind data))
       "Could not reach the LLM endpoint (network error). Check the
       base URL / connectivity."
+
+      (contains? #{:malli.core/invalid-output
+                   :malli.core/invalid-input}
+                 malli-type)
+      (str "Exchange failed Malli "
+           (if (= :malli.core/invalid-output malli-type) "output" "input")
+           " validation in " malli-name
+           ". Expected " (pr-str malli-schema)
+           "; received " (preview-value malli-value) ".")
 
       :else
       (str "Exchange failed: "
