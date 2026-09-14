@@ -416,7 +416,9 @@
                                (json-response 400 result)))))))
 
                  (and (= method :get) (= path "/api/settings/models"))
-                 (let [q    (parse-query uri)
+                 (let [q    (parse-query (if (not-empty qs)
+                                           (str path "?" qs)
+                                           uri))
                        view ((:models-fn settings-ops)
                              {:base-url (:base-url q)
                               :api-key  (:api-key q)})]
@@ -425,7 +427,9 @@
                      (json-response view)))
 
                  (and (= method :get) (= path "/api/settings/workspace-browse"))
-                 (let [q    (parse-query uri)
+                 (let [q    (parse-query (if (not-empty qs)
+                                           (str path "?" qs)
+                                           uri))
                        view ((:browse-fn settings-ops) {:path (:path q)})]
                    (if (seq (:error view))
                      (json-response 400 view)

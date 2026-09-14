@@ -109,8 +109,11 @@
 (deftest settings-workspace-browse-endpoint
   (let [{:keys [handler]} (handler-with-settings)
         root (System/getProperty "user.dir")
-        res  (req handler :get (str "/api/settings/workspace-browse?path="
-                                    (java.net.URLEncoder/encode root "UTF-8")))
+        res  (handler {:request-method :get
+                       :uri "/api/settings/workspace-browse"
+                       :query-string
+                       (str "path="
+                            (java.net.URLEncoder/encode root "UTF-8"))})
         body (json/parse-string (:body res) true)]
     (is (= 200 (:status res)))
     (is (= root (:path body)))
