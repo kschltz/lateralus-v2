@@ -39,11 +39,10 @@
 (defn- candidate-registry
   [agent-map candidate]
   (let [registry (static-registry agent-map)
-        opts (:agent/workspace-tool-opts agent-map)
-        rebound (if opts
-                  (workspace/rebind-registry registry opts
-                                             (:worktree candidate))
-                  registry)]
+        opts (or (:agent/workspace-tool-opts agent-map)
+                 {:file-tools {} :clojure-tools {}})
+        rebound (workspace/rebind-registry registry opts
+                                           (:worktree candidate))]
     (into {}
           (map (fn [[name implementation]]
                  [name (->CandidateTool implementation)]))
