@@ -12,9 +12,6 @@
             [kschltz.agent.store.protocol :as store]
             [malli.core :as m]))
 
-(derive :lateralus/evolution-verifier-runner
-        :lateralus/evolution-command-runner)
-
 (defn- assert-schema!
   [key schema value]
   (when-not (m/validate schema value)
@@ -55,6 +52,13 @@
   (store/-close engine))
 
 (defmethod ig/init-key :lateralus/evolution-command-runner [_ config]
+  (process/local-command-runner config))
+
+(defmethod ig/assert-key :lateralus/evolution-verifier-runner [_ config]
+  (assert-schema! :lateralus/evolution-verifier-runner
+                  process/RunnerOpts config))
+
+(defmethod ig/init-key :lateralus/evolution-verifier-runner [_ config]
   (process/local-command-runner config))
 
 (defmethod ig/init-key :lateralus/evolution-board [_ config]
