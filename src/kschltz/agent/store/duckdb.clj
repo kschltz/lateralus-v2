@@ -13,7 +13,8 @@
    :file_edits "file_edits"
    :sessions   "sessions"
    :turns      "turns"
-   :events     "events"})
+   :events     "events"
+   :evolution_events "evolution_events"})
 
 (def ^:private file-index-cols
   [:path :sha256 :size :mtime :content :indexed-at])
@@ -31,6 +32,9 @@
 (def ^:private events-cols
   [:turn-id :seq :type :payload])
 
+(def ^:private evolution-events-cols
+  [:id :run-id :type :phase :ts :payload])
+
 (def ^:private col-sql
   {:indexed-at "indexed_at"
    :sha256-before "sha256_before"
@@ -45,7 +49,8 @@
    :closed-at "closed_at"
    :user-text "user_text"
    :tool-names "tool_names"
-   :turn-id "turn_id"})
+   :turn-id "turn_id"
+   :run-id "run_id"})
 
 (defn- sql-col
   [k]
@@ -153,17 +158,25 @@
                     "seq INTEGER, "
                     "type VARCHAR, "
                     "payload VARCHAR, "
-                    "PRIMARY KEY (turn_id, seq))")]]
+                    "PRIMARY KEY (turn_id, seq))")
+               (str "CREATE TABLE IF NOT EXISTS evolution_events ("
+                    "id VARCHAR PRIMARY KEY, "
+                    "run_id VARCHAR, "
+                    "type VARCHAR, "
+                    "phase VARCHAR, "
+                    "ts BIGINT, "
+                    "payload VARCHAR)")]]
     (jdbc-execute! {:conn conn :sql sql :params []})))
 
 (defn- where-sql
   [where]
-  (let [{:keys [path path-prefix id session-id turn-id current]} where
+  (let [{:keys [path path-prefix id session-id turn-id run-id current]} where
         parts (cond-> []
                 path (conj ["path = ?" path])
                 id (conj ["id = ?" id])
                 session-id (conj ["session_id = ?" session-id])
                 turn-id (conj ["turn_id = ?" turn-id])
+                run-id (conj ["run_id = ?" run-id])
                 (contains? where :current)
                 (conj ["is_current = ?" (boolean current)])
                 path-prefix (conj ["(path = ? OR path LIKE ?)"
@@ -182,6 +195,7 @@
     :sessions sessions-cols
     :turns turns-cols
     :events events-cols
+    :evolution_events evolution-events-cols
     (throw (ex-info "Unknown store table" {:error :unknown-table :table table}))))
 
 (defrecord DuckDbEngine [^Connection conn]

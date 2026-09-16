@@ -24,6 +24,8 @@ Tables:
 - `file_edits` — path, tool, before/after SHA-256, optional line range, ts
 - `sessions` — catalog row + EDN workspace payload (`turns` / `refs` / `agent-state`)
 - `turns` / `events` — historic stream snapshots (live SSE stays in RAM)
+- `evolution_events` — append-only phase, verification, rejection, and review
+  handoff evidence keyed by evolution run id
 
 DuckDB never auto-`INSTALL`s extensions. Search is regex over stored
 content (same family as `file_search`), not the `fts` extension.

@@ -36,10 +36,13 @@
           ok-turn (if (contains? where :turn-id)
                     (= (:turn-id where) (:turn-id row))
                     true)
+          ok-run (if (contains? where :run-id)
+                   (= (:run-id where) (:run-id row))
+                   true)
           ok-current (if (contains? where :current)
                        (= (boolean (:current where)) (boolean (:current row)))
                        true)]
-      (and ok-path ok-id ok-prefix ok-session ok-turn ok-current))))
+      (and ok-path ok-id ok-prefix ok-session ok-turn ok-run ok-current))))
 
 (defrecord MemoryEngine [tables]
   proto/StoreEngine
@@ -85,7 +88,8 @@
   ([] (memory-store {}))
   ([_opts]
    (->MemoryEngine (atom {:file_index {} :file_edits {}
-                          :sessions {} :turns {} :events {}}))))
+                          :sessions {} :turns {} :events {}
+                          :evolution_events {}}))))
 
 (m/=> memory-store
       [:function

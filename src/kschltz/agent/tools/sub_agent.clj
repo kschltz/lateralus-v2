@@ -63,6 +63,7 @@
                                             :completion_tokens 0
                                             :total_tokens 0}
                         :agent/history []
+                        :agent/loop-opts {:max-loop-depth max-turns}
                         :agent/tool-registry child-tools})
         ;; Rebuild the chain with the filtered registry. Reusing the
         ;; parent's assembled chain would let the child inherit the
@@ -105,7 +106,7 @@
   tool/Tool
   (-name [_] tool-name)
   (-description [_]
-    "Spawn a focused sub-agent to complete a specific task. Provide a concise task description and an optional turn cap (1-10, default 3). The sub-agent runs in its own session with isolated history and returns a JSON summary.")
+    "Spawn a focused sub-agent to complete a specific task. Provide a concise task description and an optional ReAct tool-loop turn cap (1-10, default 3). The sub-agent runs one bounded exchange in its own session with isolated history and returns a JSON summary.")
   (-input-schema [_] SubAgentInput)
   (-output-schema [_] :string)
   (-invoke [_this args ctx]

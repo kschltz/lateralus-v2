@@ -274,6 +274,30 @@ interceptor chain — reading the immutable per-exchange context. API keys and
 live implementation objects are never serialized. `self_status` is the
 lighter self-check sibling (used by the self-update playbook after reloads).
 
+## Bounded self-evolution
+
+The opt-in `:evolve` entry point runs one unattended coding candidate in a
+fresh `evolve/*` worktree. A deterministic supervisor—not the model—owns
+budgets, protected paths, baseline-relative lint/tests, local Git snapshots,
+the append-only DuckDB audit ledger, and kanban handoff. Passing commits are
+copied to the card worktree and advanced to human Review; Lateralus never
+pushes, merges, deploys, or completes the card.
+
+```bash
+clojure -M:evolve \
+  --proposal resources/lateralus/evolution-example.edn \
+  --card 011 \
+  --repo . \
+  --config resources/lateralus/demo-ollama.edn
+```
+
+At least one machine-checkable acceptance gate is required. Commands are
+operator-allowlisted argv vectors rather than a shell, and offline gates must
+have enforceable network isolation when strict policy is enabled. If the spec
+omits `:proposal`, a failing required gate becomes an evidence-backed
+self-diagnosed proposal. See
+[`docs/evolution.md`](docs/evolution.md).
+
 ## MCP client
 
 Attaches **stdio** MCP servers (`command`/`args`/`env`) and **remote
@@ -505,6 +529,9 @@ Recently completed:
   upsert/refresh/remove, SSRF guards
 - Dynamic tool setup (`dynamic-mcp-tool-setup` goal), Clojure structured-edit
   tools, interceptor/runtime/file harness e2e
+- **Bounded self-evolution supervisor** — isolated candidate worktrees,
+  supervisor-enforced budgets, protected holdout paths, baseline-relative
+  verification, append-only audit events, and human-only Review handoff
 
 Deferred:
 - Async worker thread for the runtime

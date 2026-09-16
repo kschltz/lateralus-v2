@@ -34,4 +34,13 @@
       (is (= ["s1"]
              (mapv :id (proto/-select e :sessions {:where {:current true}}))))
       (proto/-insert! e :events {:turn-id "t1" :seq 0 :type "text"})
-      (is (= 1 (count (proto/-select e :events {:where {:turn-id "t1"}})))))))
+      (is (= 1 (count (proto/-select e :events {:where {:turn-id "t1"}})))))
+    (testing "evolution events filter by run"
+      (proto/-insert! e :evolution_events
+                      {:id "ev1" :run-id "r1" :ts 1})
+      (proto/-insert! e :evolution_events
+                      {:id "ev2" :run-id "r2" :ts 2})
+      (is (= ["ev1"]
+             (mapv :id
+                   (proto/-select e :evolution_events
+                                  {:where {:run-id "r1"}})))))))

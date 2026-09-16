@@ -208,6 +208,23 @@ on Integrant-assembled built-in plugins, and swaps the next exchange's chain.
 Core engine/protocol namespace changes remain process-restart boundaries
 because JVM protocol/class identity cannot be replaced safely in place.
 
+## Evolution supervisor
+
+`kschltz.agent.evolution.supervisor` is a deterministic control plane outside
+the exchange chain. It runs a fresh candidate runtime against an isolated Git
+worktree and treats that runtime as untrusted. `Board`, `WorkspaceManager`,
+`CommandRunner`, `CandidateRunner`, `Evaluator`, and `EvolutionLedger`
+protocols separate policy from local process/Git/kb/DuckDB implementations.
+Their leaf functions are Malli-instrumented.
+
+The supervisor captures a baseline, enforces exchange/tool/time/path budgets,
+runs operator-declared argv-only gates, compares regression gates against the
+baseline, and requires a passing acceptance gate. The candidate cannot invoke
+Git, kb, arbitrary processes, workspace/config transitions, MCP, secrets, or
+the evolution kernel. A verified commit is copied onto the card worktree and
+advanced only to human Review. The supervisor has no merge, push, deploy, or
+card-completion operation. See [`evolution.md`](evolution.md).
+
 ## Extension points
 
 - **New LLM provider:** implement `kschltz.agent.llm.client/LlmClient` (and optionally `llm.stream/StreamableLlmClient` for token/thinking SSE). See [`docs/stream.md`](stream.md). Add a case in `kschltz.agent.system/init-key :lateralus/llm-client`.
@@ -378,6 +395,7 @@ session...`) is detected by the loop via that exact phrase, not the looser
 | `src/kschltz/agent/memory/bm25.clj` | BM25 scoring |
 | `src/kschltz/agent/memory/knowledge_graph.clj` | entity knowledge graph |
 | `src/kschltz/agent/store/` | `StoreEngine` + FileIndex (opt-in DuckDB / memory workspace index) |
+| `src/kschltz/agent/evolution/` | bounded candidate supervisor, capability protocols, worktree/process adapters, evaluator, and audit ledger |
 | `src/kschltz/agent/session/` | workbench session catalog (list/switch/create/rename/delete) |
 | `src/kschltz/agent/memory/store/file.clj` | file-backed session store |
 | `src/kschltz/agent/memory/noop_backend.clj` | noop `MemoryBackend` |

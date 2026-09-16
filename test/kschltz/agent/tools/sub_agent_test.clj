@@ -6,7 +6,6 @@
             [kschltz.agent.plugin :as plugin]
             [kschltz.agent.plugins.base :as plugins.base]
             [kschltz.agent.plugins.tools :as plugins.tools]
-            [kschltz.agent.runtime :as runtime]
             [kschltz.agent.tool :as tool]
             [kschltz.agent.tools.sub-agent :as sub-agent]))
 
@@ -89,6 +88,9 @@
           child-map    (@#'sub-agent/child-agent-map parent-ctx 3)
           seed         (some #(when (= ::plugins.tools/seed-registry (:name %)) %)
                             (:exchange-chain child-map))]
+      (is (= 3 (get-in child-map [:initial-state
+                                  :agent/loop-opts
+                                  :max-loop-depth])))
       (is (some? seed) "child chain should contain the tools seed interceptor")
       (let [child-ctx ((:enter seed) {})]
         (is (not (contains? (:agent/tool-registry child-ctx) "spawn_sub_agent"))

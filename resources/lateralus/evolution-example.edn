@@ -1,0 +1,37 @@
+{:proposal
+ {:id "example-parser-fix"
+  :title "Fix one reproducible parser defect"
+  :objective "Make the supplied parser regression pass without regressions"
+  :evidence ["test/kschltz/agent/example_parser_regression_test.clj currently fails"]
+  :acceptance ["The focused parser regression exits successfully"]
+  :paths ["src/kschltz/agent/"]
+  :risk :low
+  :source :board}
+
+ :policy
+ {:max-wall-ms 900000
+  :max-candidates 1
+  :max-agent-turns 6
+  :max-tool-calls 30
+  :max-token-usage 60000
+  :max-changed-files 12
+  :max-output-bytes 1048576
+  :allowed-paths ["src/" "docs/" "README.md" "CHANGELOG.md"]
+  :protected-paths [".git/" ".kanban/" ".lateralus/" "test/"
+                    "deps.edn" "build.clj" "AGENT_INSTRUCTIONS.md"
+                    "src/kschltz/agent/evolution/"]
+  :require-network-isolation? true
+  :require-workspace-isolation? true}
+
+ :gates
+ [{:id "parser-acceptance"
+   :kind :acceptance
+   :argv ["java" "--add-modules=jdk.incubator.vector"
+          "--enable-native-access=ALL-UNNAMED"
+          "-cp" "{{workspace-classpath}}"
+          "clojure.main" "-m" "cognitect.test-runner" "-n"
+          "kschltz.agent.example-parser-regression-test"]
+   :timeout-ms 120000
+   :network :deny
+   :protected-paths ["test/kschltz/agent/example_parser_regression_test.clj"]
+   :required? true}]}

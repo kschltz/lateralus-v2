@@ -35,6 +35,13 @@
              (mapv :id (proto/-select e :file_edits {:where {:path "/a.txt"}
                                                     :order [:ts]
                                                     :desc true}))))
+      (proto/-insert! e :evolution_events
+                      {:id "ev1" :run-id "run1" :type "phase-entered"
+                       :phase "observe" :ts 10 :payload "{}"})
+      (is (= ["ev1"]
+             (mapv :id
+                   (proto/-select e :evolution_events
+                                  {:where {:run-id "run1"}}))))
       (is (= {:rows 1} (proto/-delete! e :file_index {:path "/a.txt"})))
       (is (empty? (proto/-select e :file_index {:where {:path "/a.txt"}})))
       (finally

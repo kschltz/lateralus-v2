@@ -13,11 +13,19 @@ schemas with always-on namespace instrumentation.
 | Web search/fetch | `WebProvider` | `tools.web.mojeek`, `tools.web.ddg` |
 | MCP HTTP/stdio | `McpTransport`, `McpClient`, `McpSession` | `tools.mcp.http`, `transport`, `client`, `session` |
 | Runtime dependency resolution | `ClojureRuntime` | `tools.runtime.jvm` |
+| Evolution candidate LLM | `CandidateRunner` → existing `LlmClient` | `evolution.candidate` |
 
 The CLI model picker and profile wizard use `ModelCatalog`; they do not call
 the HTTP model-list functions directly. Local file I/O, the optional local
 `clj-kondo` subprocess, and the opt-in `StoreEngine` (memory / DuckDB JDBC)
 are not network boundaries. DuckDB never auto-installs extensions.
+
+The evolution supervisor also protocol-isolates local process and repository
+effects (`CommandRunner`, `WorkspaceManager`, `Board`, `Evaluator`, and
+`EvolutionLedger`). Its command implementation accepts allowlisted argv
+vectors only and uses OS network isolation for offline gates; it never exposes
+an unrestricted shell to the model. Candidate LLM traffic remains behind the
+existing `LlmClient` implementation boundary.
 
 When a secret store is active, runtime-authored tools run in SCI and cannot
 open sockets, use Java interop, load dependencies, or receive the host
