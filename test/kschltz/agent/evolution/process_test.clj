@@ -104,6 +104,32 @@
     (is (str/includes? (:error result) "isolation backend is unavailable"))
     (is (not (.exists escaped)))))
 
+(deftest workspace-isolation-supports-tmp-worktrees-when-bwrap-is-available
+  (when-let [_bwrap (some (fn [path]
+                            (let [file (java.io.File. path)]
+                              (when (.canExecute file) path)))
+                          ["/usr/bin/bwrap" "/bin/bwrap"])]
+    (let [root (str (Files/createTempDirectory
+                     "lateralus-evolution-tmp-"
+                     (make-array FileAttribute 0)))
+          marker (java.io.File. root "marker.txt")
+          _ (spit marker "ok")
+          runner (process/local-command-runner
+                  {:allowed-programs #{"/bin/ls"}
+                   :allowed-roots ["/tmp"]})
+          result (proto/-run-command!
+                  runner
+                  {:argv ["/bin/ls"]
+                   :cwd root
+                   :timeout-ms 5000
+                   :max-output-bytes 4096
+                   :network :deny
+                   :isolation :workspace})]
+      (is (= :ok (:status result)) (pr-str result))
+      (is (true? (:workspace-isolated? result)))
+      (is (= :bubblewrap (:isolation-backend result)))
+      (is (str/includes? (:stdout result) "marker.txt")))))
+
 (deftest timeout-kills-process-tree-and-bounds-stream-drain
   (let [root (temp-dir)
         runner (process/local-command-runner
