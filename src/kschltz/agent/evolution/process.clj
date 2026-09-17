@@ -128,9 +128,12 @@
             base (cond-> base
                    (not network?) (conj "--share-net"))
             mounts (if workspace?
+                     ;; tmpfs must precede the workspace bind so /tmp worktrees
+                     ;; remain reachable after the empty /tmp overlay.
                      ["--ro-bind" "/" "/"
+                      "--tmpfs" "/tmp"
                       "--bind" cwd cwd
-                      "--tmpfs" "/tmp" "--dev" "/dev" "--proc" "/proc"
+                      "--dev" "/dev" "--proc" "/proc"
                       "--chdir" cwd "--"]
                      ["--bind" "/" "/" "--dev-bind" "/dev" "/dev"
                       "--proc" "/proc" "--chdir" cwd "--"])]
