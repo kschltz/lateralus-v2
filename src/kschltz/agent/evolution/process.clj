@@ -107,10 +107,77 @@
     (if (and profile available?)
       {:argv (into [(.getPath sandbox) "-p" profile "--"] argv)
        :network-isolated? (or (not= :deny network) network?)
-       :workspace-isolated? workspace?}
+       :workspace-isolated? workspace?
+       :isolation-backend :sandbox-exec}
       {:argv argv
        :network-isolated? (not= :deny network)
-       :workspace-isolated? (not workspace?)})))
+       :workspace-isolated? (not workspace?)
+       :isolation-backend :none})))
+
+(defn- linux-isolation-wrapper
+  [argv network isolation cwd]
+  (let [bwrap (some #(let [file (io/file %)]
+                       (when (.canExecute file) file))
+                    ["/usr/bin/bwrap" "/bin/bwrap"])
+        workspace? (= :workspace isolation)
+        network? (and (= :deny network)
+                      (contains? #{:network-only :workspace} isolation))]
+    (if (and bwrap (or workspace? network?))
+      (let [base [(.getPath ^File bwrap)
+                  "--die-with-parent" "--new-session" "--unshare-all"]
+            base (cond-> base
+                   (not network?) (conj "--share-net"))
+            mounts (if workspace?
+                     ;; tmpfs must precede the workspace bind so /tmp worktrees
+                     ;; remain reachable after the empty /tmp overlay.
+                     ["--ro-bind" "/" "/"
+                      "--tmpfs" "/tmp"
+                      "--bind" cwd cwd
+                      "--dev" "/dev" "--proc" "/proc"
+                      "--chdir" cwd "--"]
+                     ["--bind" "/" "/" "--dev-bind" "/dev" "/dev"
+                      "--proc" "/proc" "--chdir" cwd "--"])]
+        {:argv (into (into base mounts) argv)
+         :network-isolated? (or (not= :deny network) network?)
+         :workspace-isolated? workspace?
+         :isolation-backend :bubblewrap})
+      {:argv argv
+       :network-isolated? (not= :deny network)
+       :workspace-isolated? (not workspace?)
+       :isolation-backend :none})))
+
+(defn- platform-isolation-wrapper
+  [argv network isolation cwd]
+  (let [os (str/lower-case (System/getProperty "os.name" ""))]
+    (cond
+      (= :none isolation)
+      {:argv argv
+       :network-isolated? (not= :deny network)
+       :workspace-isolated? true
+       :isolation-backend :none}
+
+      (str/includes? os "mac")
+      (macos-isolation-wrapper argv network isolation cwd)
+
+      (str/includes? os "linux")
+      (linux-isolation-wrapper argv network isolation cwd)
+
+      :else
+      {:argv argv
+       :network-isolated? (not= :deny network)
+       :workspace-isolated? (not= :workspace isolation)
+       :isolation-backend :none})))
+
+(defn- isolation-error
+  [network isolation network-isolated? workspace-isolated?]
+  (cond
+    (and (= :deny network)
+         (contains? #{:network-only :workspace} isolation)
+         (not network-isolated?))
+    "required network isolation backend is unavailable"
+
+    (and (= :workspace isolation) (not workspace-isolated?))
+    "required workspace isolation backend is unavailable"))
 
 (defn kill-process-tree!
   [^Process process]
@@ -166,46 +233,66 @@
             _ (when (= :workspace isolation) (.mkdirs tmp-dir))
             {wrapped :argv
              network-isolated? :network-isolated?
-             workspace-isolated? :workspace-isolated?}
-            ((or network-wrapper macos-isolation-wrapper)
+             workspace-isolated? :workspace-isolated?
+             isolation-backend :isolation-backend}
+            ((or network-wrapper platform-isolation-wrapper)
              argv network isolation (.getPath workdir))
-            builder (ProcessBuilder. ^java.util.List wrapped)
-            _ (.directory builder workdir)
-            process-env (.environment builder)
-            _ (.clear process-env)
-            command-env (cond-> (merge (or base-env {}) (or env {}))
-                          (= :workspace isolation)
-                          (assoc "HOME" (.getPath tmp-dir)
-                                 "TMPDIR" (.getPath tmp-dir)))
-            _ (.putAll process-env command-env)]
-        (try
-          (let [process (.start builder)
+            unavailable (isolation-error network isolation
+                                         network-isolated?
+                                         workspace-isolated?)]
+        (if unavailable
+          {:status :rejected :exit-code nil :stdout "" :stderr ""
+           :duration-ms (long (/ (- (System/nanoTime) started) 1000000))
+           :truncated? false
+           :network-isolated? (boolean network-isolated?)
+           :workspace-isolated? (boolean workspace-isolated?)
+           :isolation-backend (or isolation-backend :none)
+           :error unavailable}
+          (let [builder (ProcessBuilder. ^java.util.List wrapped)
+                _ (.directory builder workdir)
+                process-env (.environment builder)
+                _ (.clear process-env)
+                command-env (cond-> (merge (or base-env {}) (or env {}))
+                              (= :workspace isolation)
+                              (assoc "HOME" (.getPath tmp-dir)
+                                     "TMPDIR" (.getPath tmp-dir)))
+                _ (.putAll process-env command-env)]
+            (try
+              (let [process (.start builder)
                 stream-cap (max 1 (quot max-output-bytes 2))
                 stdout (bounded-slurp (.getInputStream process) stream-cap)
                 stderr (bounded-slurp (.getErrorStream process) stream-cap)
                 completed? (.waitFor process timeout-ms TimeUnit/MILLISECONDS)
-                _ (when-not completed? (kill-process-tree! process))
-                out @stdout
-                err @stderr
+                _ (when-not completed?
+                    (kill-process-tree! process)
+                    (try (.close (.getInputStream process))
+                         (catch Throwable _))
+                    (try (.close (.getErrorStream process))
+                         (catch Throwable _)))
+                fallback {:text "" :truncated? true}
+                out (deref stdout 2000 fallback)
+                err (deref stderr 2000 fallback)
                 duration (long (/ (- (System/nanoTime) started) 1000000))]
-            {:status (cond
-                       (not completed?) :timeout
-                       (zero? (.exitValue process)) :ok
-                       :else :failed)
-             :exit-code (when completed? (.exitValue process))
-             :stdout (:text out)
-             :stderr (:text err)
-             :duration-ms duration
-             :truncated? (or (:truncated? out) (:truncated? err))
-             :network-isolated? (boolean network-isolated?)
-             :workspace-isolated? (boolean workspace-isolated?)})
-          (catch Throwable t
-            {:status :failed :exit-code nil :stdout "" :stderr ""
-             :duration-ms (long (/ (- (System/nanoTime) started) 1000000))
-             :truncated? false
-             :network-isolated? (boolean network-isolated?)
-             :workspace-isolated? (boolean workspace-isolated?)
-             :error (or (ex-message t) (.getName (class t)))}))))))
+                {:status (cond
+                           (not completed?) :timeout
+                           (zero? (.exitValue process)) :ok
+                           :else :failed)
+                 :exit-code (when completed? (.exitValue process))
+                 :stdout (:text out)
+                 :stderr (:text err)
+                 :duration-ms duration
+                 :truncated? (or (:truncated? out) (:truncated? err))
+                 :network-isolated? (boolean network-isolated?)
+                 :workspace-isolated? (boolean workspace-isolated?)
+                 :isolation-backend (or isolation-backend :none)})
+              (catch Throwable t
+                {:status :failed :exit-code nil :stdout "" :stderr ""
+                 :duration-ms (long (/ (- (System/nanoTime) started) 1000000))
+                 :truncated? false
+                 :network-isolated? (boolean network-isolated?)
+                 :workspace-isolated? (boolean workspace-isolated?)
+                 :isolation-backend (or isolation-backend :none)
+                 :error (or (ex-message t) (.getName (class t)))}))))))))
 
 (defrecord LocalCommandRunner [opts]
   proto/CommandRunner

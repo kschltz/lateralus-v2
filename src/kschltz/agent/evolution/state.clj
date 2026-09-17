@@ -6,7 +6,8 @@
             [malli.error :as me]))
 
 (def default-policy
-  {:max-wall-ms 1800000
+  {:max-run-wall-ms 3600000
+   :max-implement-wall-ms 900000
    :max-candidates 2
    :max-agent-turns 8
    :max-tool-calls 40
@@ -35,7 +36,13 @@
 
 (defn normalize-policy
   [policy]
-  (let [merged (merge default-policy (or policy {}))]
+  (let [policy (or policy {})
+        legacy-wall (:max-wall-ms policy)
+        policy (cond-> (dissoc policy :max-wall-ms)
+                 legacy-wall
+                 (assoc :max-run-wall-ms legacy-wall
+                        :max-implement-wall-ms legacy-wall))
+        merged (merge default-policy policy)]
     (when-not (schemas/valid? schemas/Policy merged)
       (throw (ex-info "Invalid evolution policy"
                       {:policy merged
@@ -91,7 +98,7 @@
 (defn budget-violations
   [started-at now implementation policy]
   (cond-> []
-    (> (- now started-at) (:max-wall-ms policy))
+    (> (- now started-at) (:max-run-wall-ms policy))
     (conj {:error :wall-time-budget})
 
     (> (:turns implementation) (:max-agent-turns policy))
@@ -110,11 +117,18 @@
         (mapv
          (fn [gate]
            (let [before (get baseline-by-id (:id gate))
+                 command (:command gate)
+                 trustworthy-failure?
+                 (and before
+                      (not (:passed? before))
+                      (= :failed (:status command))
+                      (true? (:network-isolated? command))
+                      (true? (:workspace-isolated? command)))
                  accepted?
                  (case (:kind gate)
                    :acceptance (:passed? gate)
                    :regression (or (:passed? gate)
-                                   (and before (not (:passed? before)))))]
+                                   trustworthy-failure?))]
              {:id (:id gate)
               :kind (:kind gate)
               :required? (:required? gate)

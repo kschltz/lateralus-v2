@@ -12,6 +12,8 @@
     "Create an isolated candidate worktree and return its descriptor.")
   (-diff [manager candidate] "Return the candidate diff against its base.")
   (-changed-paths [manager candidate] "Return sorted changed paths.")
+  (-clean-ephemeral! [manager candidate]
+    "Remove only recognized untracked editor artifacts; return removed paths.")
   (-snapshot-candidate! [manager candidate message]
     "Commit an accepted candidate locally. Must not push or merge it.")
   (-promote-candidate! [manager candidate target-worktree]

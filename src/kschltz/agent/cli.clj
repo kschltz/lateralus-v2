@@ -40,9 +40,7 @@
             [kschltz.agent.cli.thinking :as thinking]
             [kschltz.agent.memory.http-embedding]
             [kschltz.agent.runtime :as runtime]
-            [kschltz.agent.system :as system]
-            [kschltz.agent.tool :as tool]))
-
+            [kschltz.agent.system :as system]))
 ;; Re-export model-picker API so existing call sites / tests keep working.
 (def parse-selection model/parse-selection)
 (def default-model-selector model/default-model-selector)

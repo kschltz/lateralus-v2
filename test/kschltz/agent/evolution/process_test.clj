@@ -59,8 +59,17 @@
                        (assoc command
                               :argv ["/bin/sh" "-c"
                                      "cat ../secret.txt"]))]
-      (is (not= :ok (:status read-secret)))
-      (is (not (str/includes? (:stdout read-secret) "operator-secret"))))
+      (if (= :sandbox-exec (:isolation-backend read-secret))
+        (do
+          (is (not= :ok (:status read-secret)))
+          (is (not (str/includes? (:stdout read-secret)
+                                  "operator-secret"))))
+        ;; The approved Linux policy exposes a read-only host root so JVM
+        ;; dependencies remain available, but still permits writes only in
+        ;; the candidate worktree.
+        (do
+          (is (= :bubblewrap (:isolation-backend read-secret)))
+          (is (str/includes? (:stdout read-secret) "operator-secret")))))
     (is (true? (:workspace-isolated? result)))
     (is (true? (:network-isolated? result)))
     (is (not= :ok (:status result)))
@@ -81,3 +90,73 @@
     (is (= :ok (:status result)) (pr-str result))
     (is (str/includes? (:stdout result) ":ok"))
     (is (true? (:workspace-isolated? result)))))
+
+(deftest required-isolation-fails-closed-before-command-start
+  (let [root (temp-dir)
+        escaped (java.io.File. root "should-not-exist.txt")
+        runner (process/local-command-runner
+                {:allowed-programs #{"/bin/sh"}
+                 :allowed-roots [root]
+                 :network-wrapper
+                 (fn [argv network isolation _cwd]
+                   {:argv argv
+                    :network-isolated? (not= :deny network)
+                    :workspace-isolated? (not= :workspace isolation)
+                    :isolation-backend :none})})
+        result (proto/-run-command!
+                runner
+                {:argv ["/bin/sh" "-c"
+                        "printf unsafe > should-not-exist.txt"]
+                 :cwd root :timeout-ms 1000 :max-output-bytes 4096
+                 :network :deny :isolation :workspace})]
+    (is (= :rejected (:status result)))
+    (is (str/includes? (:error result) "isolation backend is unavailable"))
+    (is (not (.exists escaped)))))
+
+(deftest workspace-isolation-supports-tmp-worktrees-when-bwrap-is-available
+  (when-let [_bwrap (some (fn [path]
+                            (let [file (java.io.File. path)]
+                              (when (.canExecute file) path)))
+                          ["/usr/bin/bwrap" "/bin/bwrap"])]
+    (let [root (str (Files/createTempDirectory
+                     "lateralus-evolution-tmp-"
+                     (make-array FileAttribute 0)))
+          marker (java.io.File. root "marker.txt")
+          _ (spit marker "ok")
+          runner (process/local-command-runner
+                  {:allowed-programs #{"/bin/ls"}
+                   :allowed-roots ["/tmp"]})
+          result (proto/-run-command!
+                  runner
+                  {:argv ["/bin/ls"]
+                   :cwd root
+                   :timeout-ms 5000
+                   :max-output-bytes 4096
+                   :network :deny
+                   :isolation :workspace})]
+      (is (= :ok (:status result)) (pr-str result))
+      (is (true? (:workspace-isolated? result)))
+      (is (= :bubblewrap (:isolation-backend result)))
+      (is (str/includes? (:stdout result) "marker.txt")))))
+
+(deftest timeout-kills-process-tree-and-bounds-stream-drain
+  (let [root (temp-dir)
+        runner (process/local-command-runner
+                {:allowed-programs #{"/bin/sh"}
+                 :allowed-roots [root]
+                 :network-wrapper
+                 (fn [argv _network _isolation _cwd]
+                   {:argv argv
+                    :network-isolated? true
+                    :workspace-isolated? true
+                    :isolation-backend :custom})})
+        started (System/nanoTime)
+        result (proto/-run-command!
+                runner
+                {:argv ["/bin/sh" "-c" "sleep 30 & wait"]
+                 :cwd root :timeout-ms 100 :max-output-bytes 4096
+                 :network :deny :isolation :workspace})
+        elapsed-ms (long (/ (- (System/nanoTime) started) 1000000))]
+    (is (= :timeout (:status result)) (pr-str result))
+    (is (< elapsed-ms 5000) (str "elapsed-ms=" elapsed-ms))
+    (is (= :custom (:isolation-backend result)))))

@@ -26,6 +26,10 @@ effects (`CommandRunner`, `WorkspaceManager`, `Board`, `Evaluator`, and
 vectors only and uses OS network isolation for offline gates; it never exposes
 an unrestricted shell to the model. Candidate LLM traffic remains behind the
 existing `LlmClient` implementation boundary.
+Verifier isolation is platform-specific and fail-closed: `sandbox-exec` on
+macOS and Bubblewrap on Linux. A missing or failed backend rejects the command
+before its argv is started. Linux Bubblewrap uses an unshared network
+namespace and exposes only the candidate worktree as writable.
 
 When a secret store is active, runtime-authored tools run in SCI and cannot
 open sockets, use Java interop, load dependencies, or receive the host

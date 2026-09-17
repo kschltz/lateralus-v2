@@ -8,7 +8,8 @@
             [kschltz.agent.evolution.protocol :as proto]
             [kschltz.agent.evolution.schemas :as schemas]
             [malli.core :as m]
-            [malli.instrument :as mi]))
+            [malli.instrument :as mi])
+  (:import [java.io File]))
 
 (def WorkspaceOpts
   [:map
@@ -63,26 +64,54 @@
      :worktree worktree
      :base base-branch}))
 
-(defn changed-paths
+(defn- status-entries
   [opts candidate]
   (let [result (execute! (assoc opts :repository-root (:worktree candidate))
                          ["git" "status" "--porcelain=v1" "-z"
                           "--untracked-files=all"])
-        entries (remove str/blank? (str/split (:stdout result) #"\u0000"))
-        paths
-        (loop [remaining entries
-               acc []]
-          (if-let [entry (first remaining)]
-            (let [status (subs entry 0 (min 2 (count entry)))
-                  path (if (>= (count entry) 4) (subs entry 3) entry)
-                  rename? (boolean (re-find #"[RC]" status))]
-              (if rename?
-                (recur (nnext remaining)
-                       (cond-> (conj acc path)
-                         (second remaining) (conj (second remaining))))
-                (recur (next remaining) (conj acc path))))
-            acc))]
-    (->> paths distinct sort vec)))
+        entries (remove str/blank? (str/split (:stdout result) #"\u0000"))]
+    (loop [remaining entries
+           acc []]
+      (if-let [entry (first remaining)]
+        (let [status (subs entry 0 (min 2 (count entry)))
+              path (if (>= (count entry) 4) (subs entry 3) entry)
+              rename? (boolean (re-find #"[RC]" status))
+              next-path (when rename? (second remaining))]
+          (recur (if rename? (nnext remaining) (next remaining))
+                 (cond-> (conj acc {:status status :path path})
+                   next-path (conj {:status status :path next-path}))))
+        acc))))
+
+(defn changed-paths
+  [opts candidate]
+  (->> (status-entries opts candidate)
+       (map :path)
+       distinct
+       sort
+       vec))
+
+(defn clean-ephemeral!
+  [opts candidate]
+  (let [root (.getCanonicalFile (io/file (:worktree candidate)))
+        removable
+        (->> (status-entries opts candidate)
+             (filter #(= "??" (:status %)))
+             (keep (fn [{:keys [path]}]
+                     (when-let [[_ base]
+                                (re-matches #"(?s)(.+)\.bak\.\d+" path)]
+                       (let [artifact (.getCanonicalFile (io/file root path))
+                             source (.getCanonicalFile (io/file root base))]
+                         (when (and (.startsWith (.toPath artifact)
+                                                (.toPath root))
+                                    (.startsWith (.toPath source)
+                                                 (.toPath root))
+                                    (.isFile source))
+                           [path artifact]))))))]
+    (->> removable
+         (keep (fn [[path ^File artifact]]
+                 (when (.delete artifact) path)))
+         sort
+         vec)))
 
 (defn snapshot-candidate!
   [opts candidate message]
@@ -111,15 +140,33 @@
                             {:status (:stdout status)})))
         commit (str/trim
                 (:stdout (execute! candidate-opts
-                                   ["git" "rev-parse" "HEAD"])))]
-    (execute! target-opts ["git" "cherry-pick" commit])
-    {:ok true :commit commit :target target-worktree}))
+                                   ["git" "rev-parse" "HEAD"])))
+        target-history
+        (:stdout (execute! target-opts
+                           ["git" "log" "--format=%H%n%B%n--END--"]))]
+    (if (str/includes? target-history commit)
+      {:ok true :commit commit :target target-worktree
+       :already-promoted? true}
+      (do
+        (execute! target-opts ["git" "cherry-pick" "-x" commit])
+        {:ok true :commit commit :target target-worktree
+         :already-promoted? false}))))
 
 (defn discard-candidate!
   [opts candidate]
-  (execute! opts ["git" "worktree" "remove" "--force" (:worktree candidate)])
-  (execute! opts ["git" "branch" "-D" (:branch candidate)])
-  {:ok true :discarded (:id candidate)})
+  (let [worktrees (:stdout (execute! opts ["git" "worktree" "list"
+                                           "--porcelain"]))
+        branches (:stdout (execute! opts ["git" "branch" "--list"
+                                         (:branch candidate)]))
+        had-worktree? (str/includes? worktrees (:worktree candidate))
+        had-branch? (not (str/blank? branches))]
+    (when had-worktree?
+      (execute! opts ["git" "worktree" "remove" "--force"
+                      (:worktree candidate)]))
+    (when had-branch?
+      (execute! opts ["git" "branch" "-D" (:branch candidate)]))
+    {:ok true :discarded (:id candidate)
+     :already-discarded? (not (or had-worktree? had-branch?))}))
 
 (defrecord GitWorkspaceManager [opts]
   proto/WorkspaceManager
@@ -127,6 +174,7 @@
     (create-candidate! opts run-id proposal))
   (-diff [_ candidate] (candidate-diff opts candidate))
   (-changed-paths [_ candidate] (changed-paths opts candidate))
+  (-clean-ephemeral! [_ candidate] (clean-ephemeral! opts candidate))
   (-snapshot-candidate! [_ candidate message]
     (snapshot-candidate! opts candidate message))
   (-promote-candidate! [_ candidate target-worktree]
@@ -141,6 +189,8 @@
 (m/=> create-candidate!
       [:=> [:cat WorkspaceOpts :string schemas/Proposal] schemas/Candidate])
 (m/=> changed-paths
+      [:=> [:cat WorkspaceOpts schemas/Candidate] [:vector :string]])
+(m/=> clean-ephemeral!
       [:=> [:cat WorkspaceOpts schemas/Candidate] [:vector :string]])
 (m/=> snapshot-candidate!
       [:=> [:cat WorkspaceOpts schemas/Candidate :string] :map])

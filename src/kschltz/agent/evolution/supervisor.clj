@@ -149,7 +149,12 @@
                     :implementation implementation})
 
           :else
-          (let [paths (proto/-changed-paths workspace-manager candidate)
+          (let [cleaned (proto/-clean-ephemeral! workspace-manager candidate)
+                _ (when (seq cleaned)
+                    (record! ledger id-fn implementing :implement
+                             :ephemeral-artifacts-cleaned (clock)
+                             {:paths cleaned}))
+                paths (proto/-changed-paths workspace-manager candidate)
                 path-errors (state/path-violations paths policy)]
             (if (seq path-errors)
               (reject! components implementing "candidate violated path policy"

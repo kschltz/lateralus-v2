@@ -34,8 +34,10 @@ the actual candidate.
 `CommandRunner` accepts argv vectors only. The operator allowlists programs,
 working roots, environment keys, timeout, and output size. No shell parser is
 involved. On macOS, commands marked `:network :deny` are wrapped with
-`sandbox-exec` and the supervisor rejects them when strict network isolation
-is required but unavailable. The process, board, workspace, evaluator,
+`sandbox-exec`; on Linux they use Bubblewrap (`bwrap`) with a read-only host
+root, writable candidate worktree, private process/device/temp mounts, and an
+unshared network namespace. Isolation fails closed before baseline gates when
+the platform backend is absent or unusable. The process, board, workspace, evaluator,
 candidate, and ledger capabilities are protocols; leaf implementations and
 constructors are Malli-instrumented.
 
@@ -44,12 +46,17 @@ Verification defaults to lint and the fast Clojure test runner inside an OS
 sandbox that denies network access and writes outside the worktree. The
 supervisor supplies a precomputed, worktree-rebased classpath, so candidate
 code cannot make the dependency resolver modify the operator's caches.
+Timed-out process trees are killed and their output streams have a bounded
+drain deadline.
 
 ## Run locally
 
 Create or claim a `kb` card so it has its own worktree, then write an EDN spec
 containing optional `:proposal` / `:policy` and at least one
-machine-checkable `:acceptance` gate. When `:proposal` is omitted, the first
+machine-checkable `:acceptance` gate and one required regression gate after
+default-gate expansion. `:default-gates` explicitly selects the standard lint
+and fast-test gates; focused cloud specs may disable either only when they
+supply their own required regression coverage. When `:proposal` is omitted, the first
 failing required acceptance gate is converted into an evidence-backed
 self-diagnosed proposal. See
 `resources/lateralus/evolution-example.edn` for the complete closed shape.
@@ -62,6 +69,10 @@ clojure -M:evolve \
   --config resources/lateralus/demo-ollama.edn
 ```
 
+Use `--api-key-env NAME` to read provider credentials without putting the
+value in argv, config, logs, or the repository. The deterministic cloud
+acceptance fixture is `resources/lateralus/evolution-cloud-trial.edn`.
+
 The command exits:
 
 - `0` after a passing candidate is committed to the card branch and advanced
@@ -72,6 +83,19 @@ The command exits:
 Audit events are append-only in `.lateralus/evolution.duckdb`. Rejected
 candidate worktrees and branches are removed. Passing temporary candidates are
 also removed after their verified commit is copied to the card worktree.
+Editor-generated, untracked `.bak.<millis>` sidecars are removed before path
+policy is evaluated and the removed paths are recorded in the ledger.
+
+Inspect or explicitly clean recoverable run state:
+
+```bash
+clojure -M:evolve --inspect-run RUN_ID --ledger .lateralus/evolution.duckdb
+clojure -M:evolve --cleanup-run RUN_ID --repo .
+```
+
+Cleanup is idempotent and limited to candidates recorded on rejected or
+blocked runs. Promotion uses a cherry-pick provenance trailer and board
+handoff checks the current lane, making retries safe.
 
 ## Deliberate limits
 

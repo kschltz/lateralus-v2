@@ -216,6 +216,11 @@ worktree and treats that runtime as untrusted. `Board`, `WorkspaceManager`,
 `CommandRunner`, `CandidateRunner`, `Evaluator`, and `EvolutionLedger`
 protocols separate policy from local process/Git/kb/DuckDB implementations.
 Their leaf functions are Malli-instrumented.
+Verifier processes use fail-closed OS backends (`sandbox-exec` on macOS,
+Bubblewrap on Linux), bounded process-tree termination, and a read-only host
+view with only the candidate worktree writable. Promotion and board handoff
+are idempotent, while run inspection and explicit orphan cleanup are driven
+from the append-only ledger.
 
 The supervisor captures a baseline, enforces exchange/tool/time/path budgets,
 runs operator-declared argv-only gates, compares regression gates against the

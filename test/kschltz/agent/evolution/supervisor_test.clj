@@ -23,6 +23,7 @@
     {:id "c1" :branch "evolve/c1" :worktree "/tmp/c1" :base "main"})
   (-diff [_ _] "diff")
   (-changed-paths [_ _] paths)
+  (-clean-ephemeral! [_ _] [])
   (-snapshot-candidate! [_ _ message] (swap! snapshots conj message))
   (-promote-candidate! [_ _ target] (reset! promoted target))
   (-discard-candidate! [_ _] (reset! discarded true)))
