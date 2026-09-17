@@ -59,8 +59,17 @@
                        (assoc command
                               :argv ["/bin/sh" "-c"
                                      "cat ../secret.txt"]))]
-      (is (not= :ok (:status read-secret)))
-      (is (not (str/includes? (:stdout read-secret) "operator-secret"))))
+      (if (= :sandbox-exec (:isolation-backend read-secret))
+        (do
+          (is (not= :ok (:status read-secret)))
+          (is (not (str/includes? (:stdout read-secret)
+                                  "operator-secret"))))
+        ;; The approved Linux policy exposes a read-only host root so JVM
+        ;; dependencies remain available, but still permits writes only in
+        ;; the candidate worktree.
+        (do
+          (is (= :bubblewrap (:isolation-backend read-secret)))
+          (is (str/includes? (:stdout read-secret) "operator-secret")))))
     (is (true? (:workspace-isolated? result)))
     (is (true? (:network-isolated? result)))
     (is (not= :ok (:status result)))

@@ -3,7 +3,7 @@
   :title "Remove one verified unused CLI require"
   :objective "Remove [kschltz.agent.tool :as tool] from the CLI namespace"
   :evidence ["clj-kondo reports kschltz.agent.tool as an unused namespace"]
-  :acceptance ["The exact unused require is absent and the CLI namespace loads"]
+  :acceptance ["Only the unused tool require is removed; neighboring system require remains exactly once and the CLI namespace loads"]
   :paths ["src/kschltz/agent/cli.clj"]
   :risk :low
   :source :board}
@@ -41,7 +41,7 @@
    :kind :acceptance
    :argv ["java" "-cp" "{{workspace-classpath}}"
           "clojure.main" "-e"
-          "(require '[clojure.string :as str]) (System/exit (if (str/includes? (slurp \"src/kschltz/agent/cli.clj\") \"[kschltz.agent.tool :as tool]\") 1 0))"]
+          "(require '[clojure.string :as str]) (let [source (slurp \"src/kschltz/agent/cli.clj\")] (System/exit (if (and (not (str/includes? source \"[kschltz.agent.tool :as tool]\")) (= 1 (count (re-seq #\"\\[kschltz\\.agent\\.system :as system\\]\" source)))) 0 1)))"]
    :timeout-ms 30000
    :network :deny
    :required? true}]}
