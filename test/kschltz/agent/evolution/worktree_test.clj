@@ -46,14 +46,27 @@
                     :objective "Update text" :evidence ["fixture"]
                     :acceptance ["text changes"]})]
     (spit (io/file (:worktree candidate) "README.md") "changed\n")
+    (spit (io/file (:worktree candidate) "README.md.bak.123") "base\n")
+    (spit (io/file (:worktree candidate) "missing.txt.bak.123") "keep\n")
     (.mkdirs (io/file (:worktree candidate) "src"))
     (is (.renameTo (io/file (:worktree candidate) "test" "protected.txt")
                    (io/file (:worktree candidate) "src" "moved.txt")))
-    (is (= ["README.md" "src/moved.txt" "test/protected.txt"]
+    (is (= ["README.md.bak.123"]
+           (proto/-clean-ephemeral! manager candidate)))
+    (is (not (.exists (io/file (:worktree candidate)
+                               "README.md.bak.123"))))
+    (is (= ["README.md" "missing.txt.bak.123"
+            "src/moved.txt" "test/protected.txt"]
            (proto/-changed-paths manager candidate)))
     (proto/-snapshot-candidate! manager candidate "candidate")
     (is (re-find #"changed" (proto/-diff manager candidate)))
-    (proto/-promote-candidate! manager candidate repo)
+    (is (false? (:already-promoted?
+                 (proto/-promote-candidate! manager candidate repo))))
+    (is (true? (:already-promoted?
+                (proto/-promote-candidate! manager candidate repo))))
     (is (= "changed\n" (slurp (io/file repo "README.md"))))
-    (proto/-discard-candidate! manager candidate)
+    (is (false? (:already-discarded?
+                 (proto/-discard-candidate! manager candidate))))
+    (is (true? (:already-discarded?
+                (proto/-discard-candidate! manager candidate))))
     (is (not (.exists (io/file (:worktree candidate)))))))

@@ -28,7 +28,17 @@
                 (state/gate-decision [acceptance]
                                      [(assoc acceptance :passed? false)])))))
     (testing "fixing a baseline failure passes"
-      (is (:accepted? (state/gate-decision [failed] [fixed]))))))
+      (is (:accepted? (state/gate-decision [failed] [fixed]))))
+    (testing "matching isolation failures and timeouts never pass as unchanged"
+      (doseq [status [:rejected :timeout]]
+        (is (not
+             (:accepted?
+              (state/gate-decision
+               [failed]
+               [(assoc failed :command
+                       (assoc command :status status
+                              :network-isolated? false
+                              :workspace-isolated? false))]))))))))
 
 (deftest token-budget-is-a-hard-supervisor-gate
   (let [policy (assoc (state/normalize-policy nil) :max-token-usage 10)

@@ -1,6 +1,7 @@
 (ns kschltz.agent.evolution.candidate
   "Constrained candidate runtime with supervisor-enforced exchange budgets."
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [kschltz.agent.evolution.protocol :as proto]
             [kschltz.agent.evolution.schemas :as schemas]
             [kschltz.agent.plugin :as plugin]
@@ -23,6 +24,9 @@
     "clojure_format_file" "clojure_lint"
     "self_status" "runtime_describe"})
 
+(def ^:private force-disabled-tool-names
+  #{"file_create" "file_write" "file_update"})
+
 (deftype CandidateTool [delegate]
   tool/Tool
   (-name [_] (tool/-name delegate))
@@ -30,7 +34,12 @@
   (-input-schema [_] (tool/-input-schema delegate))
   (-output-schema [_] (tool/-output-schema delegate))
   (-invoke [_ args ctx]
-    (tool/-invoke delegate (assoc args :force false) ctx)))
+    (tool/-invoke delegate
+                  (cond-> args
+                    (contains? force-disabled-tool-names
+                               (tool/-name delegate))
+                    (assoc :force false))
+                  ctx)))
 
 (defn- static-registry
   [agent-map]
@@ -42,11 +51,12 @@
         opts (or (:agent/workspace-tool-opts agent-map)
                  {:file-tools {} :clojure-tools {}})
         rebound (workspace/rebind-registry registry opts
-                                           (:worktree candidate))]
+                                           (:worktree candidate))
+        permitted (set/intersection safe-tool-names (set (keys registry)))]
     (into {}
           (map (fn [[name implementation]]
                  [name (->CandidateTool implementation)]))
-          (select-keys rebound safe-tool-names))))
+          (select-keys rebound permitted))))
 
 (defn- task-prompt
   [proposal]
@@ -117,7 +127,7 @@
              last-response ""]
         (let [elapsed-ms (long (/ (- (System/nanoTime) started) 1000000))]
           (cond
-            (> elapsed-ms (:max-wall-ms policy))
+            (> elapsed-ms (:max-implement-wall-ms policy))
             (let [state (runtime/stop rt)]
               {:status :budget-exhausted
                :turns (dec turn)
@@ -148,7 +158,8 @@
                :error "tool-call budget exhausted"})
 
             :else
-            (let [remaining-ms (max 1 (- (:max-wall-ms policy) elapsed-ms))
+            (let [remaining-ms
+                  (max 1 (- (:max-implement-wall-ms policy) elapsed-ms))
                   remaining-tools (- (:max-tool-calls policy) tool-calls)
                   _ (swap! (:state rt)
                            update :agent/loop-opts

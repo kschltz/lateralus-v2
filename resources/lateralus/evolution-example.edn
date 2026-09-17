@@ -8,8 +8,11 @@
   :risk :low
   :source :board}
 
+ :default-gates {:lint? true :fast-tests? true}
+
  :policy
- {:max-wall-ms 900000
+ {:max-run-wall-ms 1800000
+  :max-implement-wall-ms 900000
   :max-candidates 1
   :max-agent-turns 6
   :max-tool-calls 30

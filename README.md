@@ -291,9 +291,13 @@ clojure -M:evolve \
   --config resources/lateralus/demo-ollama.edn
 ```
 
-At least one machine-checkable acceptance gate is required. Commands are
+At least one machine-checkable acceptance gate and one required regression
+gate are required. Commands are
 operator-allowlisted argv vectors rather than a shell, and offline gates must
-have enforceable network isolation when strict policy is enabled. If the spec
+have enforceable filesystem and network isolation when strict policy is
+enabled (`sandbox-exec` on macOS, Bubblewrap on Linux, fail-closed). Gate
+profiles and separate run/implementation budgets keep cloud runs bounded;
+`--api-key-env` reads provider credentials without persisting them. If the spec
 omits `:proposal`, a failing required gate becomes an evidence-backed
 self-diagnosed proposal. See
 [`docs/evolution.md`](docs/evolution.md).

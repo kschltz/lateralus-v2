@@ -19,7 +19,8 @@
 
 (def Policy
   [:map {:closed true}
-   [:max-wall-ms [:int {:min 1}]]
+   [:max-run-wall-ms [:int {:min 1}]]
+   [:max-implement-wall-ms [:int {:min 1}]]
    [:max-candidates [:int {:min 1 :max 10}]]
    [:max-agent-turns [:int {:min 1 :max 50}]]
    [:max-tool-calls [:int {:min 1}]]
@@ -31,6 +32,11 @@
    [:require-network-isolation? :boolean]
    [:require-workspace-isolation? :boolean]])
 
+(def DefaultGateSelection
+  [:map {:closed true}
+   [:lint? {:optional true} :boolean]
+   [:fast-tests? {:optional true} :boolean]])
+
 (def GateSpec
   [:map {:closed true}
    [:id [:string {:min 1}]]
@@ -41,6 +47,13 @@
    [:candidate-paths {:optional true} [:vector [:string {:min 1}]]]
    [:protected-paths {:optional true} [:vector [:string {:min 1}]]]
    [:required? :boolean]])
+
+(def RunSpec
+  [:map {:closed true}
+   [:proposal {:optional true} Proposal]
+   [:policy {:optional true} :map]
+   [:gates [:vector GateSpec]]
+   [:default-gates {:optional true} DefaultGateSelection]])
 
 (def CommandSpec
   [:map {:closed true}
@@ -62,6 +75,8 @@
    [:truncated? :boolean]
    [:network-isolated? :boolean]
    [:workspace-isolated? :boolean]
+   [:isolation-backend {:optional true}
+    [:enum :sandbox-exec :bubblewrap :custom :none]]
    [:error {:optional true} [:maybe :string]]])
 
 (def GateResult

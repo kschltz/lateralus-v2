@@ -73,6 +73,10 @@ rg 'max-history-entries' src/ test/              # cap is 100 (not the legacy 40
 rg 'history-summarize' src/                      # summarizer is wired into the default chain
 ```
 
+Linux `:evolve` verification requires Bubblewrap (`bwrap`) for filesystem and
+network isolation. macOS uses `/usr/bin/sandbox-exec`. Both backends are
+fail-closed; never disable strict isolation to make an evolution gate pass.
+
 When editing `build.clj`, `deps.edn`, or `resources/lateralus/config.edn`, run
 `~/.local/bin/clj-paren-repair PATH` after paren-sensitive changes.
 

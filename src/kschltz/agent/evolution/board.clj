@@ -45,14 +45,20 @@
 
 (defn handoff!
   [{:keys [agent] :as opts} card-id summary]
-  (let [paths (str/join ", " (:changed-paths summary))
+  (let [current (card-context opts card-id)
+        lane (some-> (:lane current) name str/lower-case)
+        paths (str/join ", " (:changed-paths summary))
         message (str "Verified candidate " (get-in summary [:candidate :branch])
                      " is ready for human review. Changed paths: " paths
                      ". Run: " (:run-id summary))]
-    (record-decision! opts card-id message)
-    (execute! opts ["kb" "diff" card-id])
-    (execute! opts ["kb" "advance" card-id "--agent" agent])
-    {:ok true :card-id card-id :lane :review}))
+    (if (= "review" lane)
+      {:ok true :card-id card-id :lane :review :already-handed-off? true}
+      (do
+        (record-decision! opts card-id message)
+        (execute! opts ["kb" "diff" card-id])
+        (execute! opts ["kb" "advance" card-id "--agent" agent])
+        {:ok true :card-id card-id :lane :review
+         :already-handed-off? false}))))
 
 (defrecord KbBoard [opts]
   proto/Board
